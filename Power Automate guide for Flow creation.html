@@ -1,0 +1,616 @@
+<title>PA CRUD Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #F2F5F9;
+  --surface: #FFFFFF;
+  --surface2: #EDF1F7;
+  --border: #D5DCE8;
+  --text: #111827;
+  --text2: #4B5563;
+  --text3: #9CA3AF;
+  --accent: #0F6CBD;
+  --accent-dim: #EFF6FF;
+  --green: #0D7A4E;
+  --green-dim: #ECFDF5;
+  --amber: #B45309;
+  --amber-dim: #FFFBEB;
+  --red: #B91C1C;
+  --red-dim: #FEF2F2;
+  --pa-blue: #0F6CBD;
+  --pa-green: #107C10;
+  --pa-teal: #038387;
+  --shadow: 0 1px 4px rgba(0,0,0,.08);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.10);
+}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0F1923;--surface:#1A2535;--surface2:#243044;--border:#2E3F58;
+  --text:#E5EAF2;--text2:#8FA3BF;--text3:#4E6280;
+  --accent:#4FA8E8;--accent-dim:#102030;
+  --green:#34D399;--green-dim:#052E1C;
+  --amber:#FCD34D;--amber-dim:#3D2200;
+  --red:#F87171;--red-dim:#3B0A0A;
+  --shadow:0 1px 4px rgba(0,0,0,.4);--shadow-md:0 4px 16px rgba(0,0,0,.5);
+}}
+:root[data-theme="dark"]{
+  --bg:#0F1923;--surface:#1A2535;--surface2:#243044;--border:#2E3F58;
+  --text:#E5EAF2;--text2:#8FA3BF;--text3:#4E6280;
+  --accent:#4FA8E8;--accent-dim:#102030;
+  --green:#34D399;--green-dim:#052E1C;
+  --amber:#FCD34D;--amber-dim:#3D2200;
+  --red:#F87171;--red-dim:#3B0A0A;
+  --shadow:0 1px 4px rgba(0,0,0,.4);--shadow-md:0 4px 16px rgba(0,0,0,.5);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+
+/* ── Top nav ── */
+.topnav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;gap:0;position:sticky;top:0;z-index:50;box-shadow:var(--shadow)}
+.topnav-brand{font-size:13px;font-weight:700;color:var(--accent);letter-spacing:.04em;padding:14px 0;margin-right:28px;white-space:nowrap}
+.tab-row{display:flex;gap:2px;overflow-x:auto}
+.tab-btn{padding:14px 16px;font-size:13px;font-weight:500;color:var(--text2);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:color .15s,border-color .15s}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+
+/* ── Layout ── */
+.page{max-width:820px;margin:0 auto;padding:32px 24px}
+.section{display:none}.section.active{display:block}
+
+/* ── Page header ── */
+.ph{margin-bottom:28px}
+.ph-label{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.ph-title{font-size:22px;font-weight:700;line-height:1.2;text-wrap:balance}
+.ph-sub{font-size:13px;color:var(--text2);margin-top:6px;max-width:600px}
+
+/* ── Flow diagram mockup ── */
+.flow-diagram{display:flex;flex-direction:column;align-items:flex-start;gap:0;margin-bottom:28px}
+.flow-node{
+  display:flex;align-items:center;gap:12px;
+  background:var(--surface);border:2px solid var(--border);
+  border-radius:6px;padding:10px 16px;min-width:260px;max-width:320px;
+  box-shadow:var(--shadow);cursor:default;
+}
+.flow-node.active-node{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+.flow-node-icon{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.icon-trigger{background:#0F6CBD22;color:var(--pa-blue)}
+.icon-excel{background:#10780022;color:var(--pa-green)}
+.icon-response{background:#03838722;color:var(--pa-teal)}
+.flow-node-text{font-size:13px;font-weight:600;color:var(--text)}
+.flow-connector{display:flex;flex-direction:column;align-items:flex-start;padding-left:23px;gap:0}
+.flow-line{width:1px;height:16px;background:var(--border);margin-left:15px}
+.flow-plus{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text3);margin:0}
+
+/* ── Steps ── */
+.steps{display:flex;flex-direction:column;gap:0}
+.step{display:flex;gap:16px;padding-bottom:24px;position:relative}
+.step:last-child{padding-bottom:0}
+.step-left{display:flex;flex-direction:column;align-items:center;flex-shrink:0}
+.step-num{width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.step-line{width:1px;flex:1;background:var(--border);margin-top:6px;min-height:20px}
+.step:last-child .step-line{display:none}
+.step-content{flex:1;padding-top:3px}
+.step-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px}
+.step-desc{font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.6}
+
+/* ── Field mockup ── */
+.pa-field{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-bottom:8px;font-size:13px}
+.pa-field-label{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);margin-bottom:4px}
+.pa-field-value{color:var(--accent);font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600}
+.pa-field-note{font-size:11.5px;color:var(--text2);margin-top:2px}
+.pa-pill{display:inline-block;background:var(--accent-dim);color:var(--accent);font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;font-family:'JetBrains Mono',monospace;border:1px solid #bfdbfe}
+.pa-fields-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+@media(max-width:500px){.pa-fields-grid{grid-template-columns:1fr}}
+
+/* ── Code block ── */
+.code{background:#0B1622;border-radius:7px;padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.7;overflow-x:auto;margin-top:8px;color:#CBD5E1}
+.code .k{color:#93C5FD}.code .s{color:#86EFAC}.code .c{color:#4B6480;font-style:italic}.code .p{color:#64748B}
+
+/* ── Callouts ── */
+.callout{display:flex;gap:10px;padding:10px 14px;border-radius:7px;font-size:12.5px;margin-top:10px;line-height:1.5}
+.callout-info{background:var(--accent-dim);color:var(--accent)}
+.callout-warn{background:var(--amber-dim);color:var(--amber)}
+.callout-ok{background:var(--green-dim);color:var(--green)}
+.callout-icon{flex-shrink:0;font-size:14px;margin-top:1px}
+.callout strong{font-weight:700}
+
+/* ── Badges ── */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:4px;margin-right:6px}
+.badge-get{background:var(--accent-dim);color:var(--accent)}
+.badge-add{background:var(--green-dim);color:var(--green)}
+.badge-upd{background:var(--amber-dim);color:var(--amber)}
+.badge-del{background:var(--red-dim);color:var(--red)}
+
+/* ── Mapping table ── */
+.map-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px;border-radius:7px;overflow:hidden;border:1px solid var(--border)}
+.map-table th{background:var(--surface2);padding:7px 12px;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--text3);text-align:left;border-bottom:1px solid var(--border)}
+.map-table td{padding:7px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+.map-table tr:last-child td{border-bottom:none}
+.map-table .col-a{font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--accent)}
+.map-table .col-b{color:var(--text2)}
+.map-table .col-c{color:var(--green);font-family:'JetBrains Mono',monospace;font-size:11px}
+
+/* ── Divider ── */
+.divider{border:none;border-top:1px solid var(--border);margin:28px 0}
+
+/* ── Responsive ── */
+@media(max-width:600px){
+  .page{padding:20px 14px}
+  .topnav{padding:0 14px}
+  .flow-node{min-width:220px}
+}
+</style>
+
+<nav class="topnav">
+  <div class="topnav-brand">EuRadicle CRM · PA Guide</div>
+  <div class="tab-row">
+    <button class="tab-btn active" onclick="show('get',this)">GET Flow</button>
+    <button class="tab-btn" onclick="show('add',this)">ADD Flow</button>
+    <button class="tab-btn" onclick="show('update',this)">UPDATE Flow</button>
+    <button class="tab-btn" onclick="show('delete',this)">DELETE Flow</button>
+  </div>
+</nav>
+
+<div class="page">
+
+<!-- ══════════════════════════════════ GET ══════════════════════════════════ -->
+<div class="section active" id="s-get">
+  <div class="ph">
+    <div class="ph-label">Step-by-step · Power Automate</div>
+    <h1 class="ph-title"><span class="badge badge-get">GET</span> Fetch all rows from Excel</h1>
+    <p class="ph-sub">Use this pattern for: <code>GET_SOLUTIONING</code>. Your BD, Engagement, and Ops GET flows already exist and follow this exact same pattern.</p>
+  </div>
+
+  <!-- Diagram -->
+  <div class="flow-diagram">
+    <div class="flow-node active-node">
+      <div class="flow-node-icon icon-trigger">⚡</div>
+      <div class="flow-node-text">When a HTTP request is received</div>
+    </div>
+    <div class="flow-connector"><div class="flow-line"></div><div class="flow-plus">+</div><div class="flow-line"></div></div>
+    <div class="flow-node">
+      <div class="flow-node-icon icon-excel">📊</div>
+      <div class="flow-node-text">List rows present in a table</div>
+    </div>
+    <div class="flow-connector"><div class="flow-line"></div><div class="flow-plus">+</div><div class="flow-line"></div></div>
+    <div class="flow-node">
+      <div class="flow-node-icon icon-response">↩</div>
+      <div class="flow-node-text">Response</div>
+    </div>
+  </div>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">1</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Create the flow</div>
+        <div class="step-desc">Go to <strong>make.powerautomate.com → Create → Instant cloud flow</strong>.<br>
+        Name: <code>CRM – Get Solutioning</code><br>
+        Trigger: choose <strong>"When a HTTP request is received"</strong> → click Create.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">2</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Configure the trigger block</div>
+        <div class="step-desc">Click the trigger block. In the <strong>Request Body JSON Schema</strong> field, paste:</div>
+        <div class="code"><span class="p">{</span><span class="k">"type"</span><span class="p">:</span><span class="s">"object"</span><span class="p">,</span><span class="k">"properties"</span><span class="p">:{}}</span></div>
+        <div class="callout callout-info"><span class="callout-icon">ℹ</span><span>GET flows send an empty body <code>{}</code>, so no schema fields are needed.</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">3</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Add "List rows present in a table"</div>
+        <div class="step-desc">Click <strong>+ New step</strong> → search <strong>Excel Online (Business)</strong> → choose <strong>"List rows present in a table"</strong>. Fill in:</div>
+        <div class="pa-field"><div class="pa-field-label">Location</div><div class="pa-field-value">OneDrive for Business</div><div class="pa-field-note">Or SharePoint — wherever your workbook is saved</div></div>
+        <div class="pa-field"><div class="pa-field-label">Document Library</div><div class="pa-field-value">Documents</div></div>
+        <div class="pa-field"><div class="pa-field-label">File</div><div class="pa-field-value">📁 Browse and select your CRM .xlsx file</div></div>
+        <div class="pa-field"><div class="pa-field-label">Table</div><div class="pa-field-value">Select the Solutioning table from dropdown</div></div>
+        <div class="callout callout-info"><span class="callout-icon">ℹ</span><span>Leave Filter Query, Sort By, Top Count — all blank. Return all rows.</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">4</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Add the Response block</div>
+        <div class="step-desc">Click <strong>+ New step</strong> → search <strong>"Response"</strong> → select it. Fill in:</div>
+        <div class="pa-field"><div class="pa-field-label">Status Code</div><div class="pa-field-value">200</div></div>
+        <div class="pa-field"><div class="pa-field-label">Body</div><div class="pa-field-value">⚡ Dynamic content → value (from "List rows" step)</div><div class="pa-field-note">Click the Body field → click the ⚡ icon → find "value" under List rows</div></div>
+        <div class="pa-field"><div class="pa-field-label">Headers → + Add new item</div><div class="pa-field-value">Key: Content-Type &nbsp;·&nbsp; Value: application/json</div></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">5</div></div>
+      <div class="step-content">
+        <div class="step-title">Save → copy the HTTP POST URL</div>
+        <div class="step-desc">Click <strong>Save</strong> (top right). Go back and click the trigger block — the <strong>HTTP POST URL</strong> is now generated. Copy it and paste into <code>powerAutomate.js</code>:</div>
+        <div class="code"><span class="k">GET_SOLUTIONING</span><span class="p">: </span><span class="s">'https://prod-xx.westus.logic.azure.com...'</span><span class="p">,</span></div>
+        <div class="callout callout-ok"><span class="callout-icon">✓</span><span>Done. 3 blocks total. This same structure is your existing BD, Engagement, and Ops GET flows.</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ ADD ══════════════════════════════════ -->
+<div class="section" id="s-add">
+  <div class="ph">
+    <div class="ph-label">Step-by-step · Power Automate</div>
+    <h1 class="ph-title"><span class="badge badge-add">ADD</span> Insert a new row into Excel</h1>
+    <p class="ph-sub">Use this pattern for: <code>ADD_BD_ROW</code>, <code>ADD_ENGAGEMENT_ROW</code>, <code>ADD_OPS_ROW</code>, <code>ADD_SOLUTIONING_ROW</code>. The steps are identical — only the schema and field mappings change per tracker.</p>
+  </div>
+
+  <div class="flow-diagram">
+    <div class="flow-node active-node">
+      <div class="flow-node-icon icon-trigger">⚡</div>
+      <div class="flow-node-text">When a HTTP request is received</div>
+    </div>
+    <div class="flow-connector"><div class="flow-line"></div><div class="flow-plus">+</div><div class="flow-line"></div></div>
+    <div class="flow-node">
+      <div class="flow-node-icon icon-excel">📊</div>
+      <div class="flow-node-text">Add a row into a table</div>
+    </div>
+    <div class="flow-connector"><div class="flow-line"></div><div class="flow-plus">+</div><div class="flow-line"></div></div>
+    <div class="flow-node">
+      <div class="flow-node-icon icon-response">↩</div>
+      <div class="flow-node-text">Response</div>
+    </div>
+  </div>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">1</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Create the flow</div>
+        <div class="step-desc"><strong>Create → Instant cloud flow</strong>.<br>
+        Name: e.g. <code>CRM – Add BD Row</code><br>
+        Trigger: <strong>"When a HTTP request is received"</strong> → Create.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">2</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Configure the trigger — paste the JSON schema</div>
+        <div class="step-desc">Click the trigger block → paste the schema for the tracker you're building. The schema lists every field the CRM will send. Pick the tab for your tracker:</div>
+
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+          <button onclick="showSchema('bd')" id="sb-bd" class="schema-tab-btn active-schema" style="padding:5px 12px;font-size:12px;font-weight:600;border-radius:5px;border:1.5px solid var(--accent);background:var(--accent-dim);color:var(--accent);cursor:pointer">BD Pipeline</button>
+          <button onclick="showSchema('eng')" id="sb-eng" class="schema-tab-btn" style="padding:5px 12px;font-size:12px;font-weight:600;border-radius:5px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer">Engagement</button>
+          <button onclick="showSchema('ops')" id="sb-ops" class="schema-tab-btn" style="padding:5px 12px;font-size:12px;font-weight:600;border-radius:5px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer">Ops</button>
+          <button onclick="showSchema('sol')" id="sb-sol" class="schema-tab-btn" style="padding:5px 12px;font-size:12px;font-weight:600;border-radius:5px;border:1.5px solid var(--border);background:var(--surface2);color:var(--text2);cursor:pointer">Solutioning</button>
+        </div>
+
+        <div id="schema-bd" class="schema-block">
+          <div class="code"><span class="p">{</span>
+  <span class="k">"type"</span><span class="p">: </span><span class="s">"object"</span><span class="p">,</span>
+  <span class="k">"properties"</span><span class="p">: {</span>
+    <span class="k">"Client"</span><span class="p">:           {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Concern Person"</span><span class="p">:    {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Contact Number"</span><span class="p">:    {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Topic"</span><span class="p">:             {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Status"</span><span class="p">:            {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Duration / Dates"</span><span class="p">:  {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Commercials"</span><span class="p">:       {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Comments"</span><span class="p">:          {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Service Type"</span><span class="p">:      {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">}</span>
+  <span class="p">}</span>
+<span class="p">}</span></div>
+        </div>
+
+        <div id="schema-eng" class="schema-block" style="display:none">
+          <div class="code"><span class="p">{</span>
+  <span class="k">"type"</span><span class="p">: </span><span class="s">"object"</span><span class="p">,</span>
+  <span class="k">"properties"</span><span class="p">: {</span>
+    <span class="k">"EG.ID"</span><span class="p">:            {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Company"</span><span class="p">:          {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">" Start Date"</span><span class="p">:      {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>  <span class="c">// ← leading space</span>
+    <span class="k">"End Date"</span><span class="p">:         {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Topic "</span><span class="p">:           {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>  <span class="c">// ← trailing space</span>
+    <span class="k">"Sector"</span><span class="p">:           {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Service Type"</span><span class="p">:     {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Day"</span><span class="p">:              {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"integer"</span><span class="p">},</span>
+    <span class="k">"Location"</span><span class="p">:         {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Consultant - 1"</span><span class="p">:   {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Status"</span><span class="p">:           {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Price (INR)"</span><span class="p">:      {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"number"</span><span class="p">}</span>
+  <span class="p">}</span>
+<span class="p">}</span></div>
+          <div class="callout callout-warn"><span class="callout-icon">⚠</span><span><code>" Start Date"</code> has a <strong>leading space</strong> and <code>"Topic "</code> has a <strong>trailing space</strong> — preserve them exactly.</span></div>
+        </div>
+
+        <div id="schema-ops" class="schema-block" style="display:none">
+          <div class="code"><span class="p">{</span>
+  <span class="k">"type"</span><span class="p">: </span><span class="s">"object"</span><span class="p">,</span>
+  <span class="k">"properties"</span><span class="p">: {</span>
+    <span class="k">"EG.ID"</span><span class="p">:                             {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Company"</span><span class="p">:                           {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Client SPOC"</span><span class="p">:                       {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Engagement Start Date (MM/DD/YY)"</span><span class="p">:  {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Topic"</span><span class="p">:                             {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Participant List Received"</span><span class="p">:         {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"No of Paticipants"</span><span class="p">:                {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"integer"</span><span class="p">},</span>
+    <span class="k">"Day"</span><span class="p">:                               {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"integer"</span><span class="p">},</span>
+    <span class="k">"Venue"</span><span class="p">:                             {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Location"</span><span class="p">:                          {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Consultant - 1"</span><span class="p">:                    {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Consultant - 2"</span><span class="p">:                    {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Status"</span><span class="p">:                            {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Contract"</span><span class="p">:                          {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"PO Status"</span><span class="p">:                         {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">}</span>
+  <span class="p">}</span>
+<span class="p">}</span></div>
+          <div class="callout callout-warn"><span class="callout-icon">⚠</span><span>The column is <code>No of Paticipants</code> — one 'r' (typo in the original Excel). Copy exactly.</span></div>
+        </div>
+
+        <div id="schema-sol" class="schema-block" style="display:none">
+          <div class="code"><span class="p">{</span>
+  <span class="k">"type"</span><span class="p">: </span><span class="s">"object"</span><span class="p">,</span>
+  <span class="k">"properties"</span><span class="p">: {</span>
+    <span class="k">"Client"</span><span class="p">:             {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Program Start Date"</span><span class="p">: {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"End Date "</span><span class="p">:          {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>  <span class="c">// ← trailing space</span>
+    <span class="k">"Program Type"</span><span class="p">:       {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"EV Required"</span><span class="p">:        {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"POC"</span><span class="p">:                 {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Due Date"</span><span class="p">:            {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Completion Date"</span><span class="p">:     {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"PM Required"</span><span class="p">:        {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">}</span>
+  <span class="p">}</span>
+<span class="p">}</span></div>
+          <div class="callout callout-warn"><span class="callout-icon">⚠</span><span><code>"End Date "</code> has a <strong>trailing space</strong> — must match your Excel column header exactly.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">3</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Add "Add a row into a table"</div>
+        <div class="step-desc">Click <strong>+ New step</strong> → search <strong>Excel Online (Business)</strong> → choose <strong>"Add a row into a table"</strong>.</div>
+        <div class="pa-field"><div class="pa-field-label">Location / Library / File / Table</div><div class="pa-field-value">Same as GET — select your workbook and the correct table</div></div>
+        <div class="step-desc" style="margin-top:10px">After selecting the table, <strong>all your Excel column names appear as input fields</strong>. For each field, click inside it → click the ⚡ Dynamic content icon → select the matching property from the trigger body.</div>
+        <table class="map-table">
+          <thead><tr><th>Excel column</th><th>Dynamic content to pick</th></tr></thead>
+          <tbody>
+            <tr><td class="col-a">Client</td><td class="col-b">Client <span style="color:var(--text3)">(from trigger body)</span></td></tr>
+            <tr><td class="col-a">Concern Person</td><td class="col-b">Concern Person</td></tr>
+            <tr><td class="col-a">... (all other columns)</td><td class="col-b">Match each column name to the same-named trigger body field</td></tr>
+          </tbody>
+        </table>
+        <div class="callout callout-info"><span class="callout-icon">ℹ</span><span>Leave S.No blank — Excel auto-fills it. Leave checklist columns (Ops only) blank too.</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">4</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Add Response block</div>
+        <div class="pa-field"><div class="pa-field-label">Status Code</div><div class="pa-field-value">200</div></div>
+        <div class="pa-field"><div class="pa-field-label">Body</div><div class="pa-field-value">{"success":true}</div><div class="pa-field-note">Type this literally — no dynamic content needed</div></div>
+        <div class="pa-field"><div class="pa-field-label">Headers</div><div class="pa-field-value">Content-Type → application/json</div></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">5</div></div>
+      <div class="step-content">
+        <div class="step-title">Save → copy URL → paste into powerAutomate.js</div>
+        <div class="code"><span class="k">ADD_BD_ROW</span><span class="p">:          </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">ADD_ENGAGEMENT_ROW</span><span class="p">: </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">ADD_OPS_ROW</span><span class="p">:        </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">ADD_SOLUTIONING_ROW</span><span class="p">:</span><span class="s">'paste-url-here'</span><span class="p">,</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ════════════════════════════════ UPDATE ═════════════════════════════════ -->
+<div class="section" id="s-update">
+  <div class="ph">
+    <div class="ph-label">Step-by-step · Power Automate</div>
+    <h1 class="ph-title"><span class="badge badge-upd">UPDATE</span> Overwrite a row by S.No</h1>
+    <p class="ph-sub">Use for: <code>UPDATE_BD_ROW</code>, <code>UPDATE_ENGAGEMENT_ROW</code>, <code>UPDATE_OPS_SESSION</code>, <code>UPDATE_SOLUTIONING_ROW</code>. The UPDATE_OPS_ROW (single checkbox) has a special note at the bottom.</p>
+  </div>
+
+  <div class="flow-diagram">
+    <div class="flow-node active-node">
+      <div class="flow-node-icon icon-trigger">⚡</div>
+      <div class="flow-node-text">When a HTTP request is received</div>
+    </div>
+    <div class="flow-connector"><div class="flow-line"></div><div class="flow-plus">+</div><div class="flow-line"></div></div>
+    <div class="flow-node">
+      <div class="flow-node-icon icon-excel">📊</div>
+      <div class="flow-node-text">Update a row</div>
+    </div>
+    <div class="flow-connector"><div class="flow-line"></div><div class="flow-plus">+</div><div class="flow-line"></div></div>
+    <div class="flow-node">
+      <div class="flow-node-icon icon-response">↩</div>
+      <div class="flow-node-text">Response</div>
+    </div>
+  </div>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">1</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Create the flow</div>
+        <div class="step-desc">Name: e.g. <code>CRM – Update BD Row</code>. Trigger: <strong>"When a HTTP request is received"</strong>.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">2</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Trigger schema — same as ADD but add "sno" at the top</div>
+        <div class="step-desc">Take the ADD schema for the same tracker and add one extra property <code>"sno"</code> before all other fields. Example for BD:</div>
+        <div class="code"><span class="p">{</span>
+  <span class="k">"type"</span><span class="p">: </span><span class="s">"object"</span><span class="p">,</span>
+  <span class="k">"properties"</span><span class="p">: {</span>
+    <span class="k">"sno"</span><span class="p">:             {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>  <span class="c">// ← ADD this line</span>
+    <span class="k">"Client"</span><span class="p">:          {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"Concern Person"</span><span class="p">:   {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="c">// ... all other fields same as ADD ...</span>
+  <span class="p">}</span>
+<span class="p">}</span></div>
+        <div class="callout callout-info"><span class="callout-icon">ℹ</span><span>For Engagement UPDATE, also add <code>"egId": {"type":"string"}</code> alongside <code>sno</code>.</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">3</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Add "Update a row"</div>
+        <div class="step-desc"><strong>+ New step → Excel Online (Business) → "Update a row"</strong>. Select same Location / Library / File / Table as before. Then set the key lookup:</div>
+        <div class="pa-field"><div class="pa-field-label">Key Column</div><div class="pa-field-value">S.No</div><div class="pa-field-note">Type or select the column that holds the row number. For Solutioning it may be "SNo" — check your actual Excel header.</div></div>
+        <div class="pa-field"><div class="pa-field-label">Key Value</div><div class="pa-field-value">⚡ Dynamic content → sno (from trigger body)</div><div class="pa-field-note">PA will find the row where S.No = sno and update it</div></div>
+        <div class="step-desc" style="margin-top:10px">After setting the key, the rest of the Excel column fields appear. Map them to the dynamic content the same way as ADD — every field except sno itself.</div>
+        <div class="callout callout-warn"><span class="callout-icon">⚠</span><span>For <strong>Ops UPDATE_OPS_SESSION</strong>: map only the session fields (EG.ID, Company, dates, consultants etc.). Do <strong>not</strong> overwrite the checklist checkbox columns — leave those fields empty so PA skips them.</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">4</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Add Response → Save → copy URL</div>
+        <div class="pa-field"><div class="pa-field-label">Status Code</div><div class="pa-field-value">200</div></div>
+        <div class="pa-field"><div class="pa-field-label">Body</div><div class="pa-field-value">{"success":true}</div></div>
+        <div class="code" style="margin-top:12px"><span class="k">UPDATE_BD_ROW</span><span class="p">:          </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">UPDATE_ENGAGEMENT_ROW</span><span class="p">: </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">UPDATE_OPS_SESSION</span><span class="p">:    </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">UPDATE_SOLUTIONING_ROW</span><span class="p">:</span><span class="s">'paste-url-here'</span><span class="p">,</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <hr class="divider">
+
+  <div style="margin-bottom:8px"><strong style="font-size:14px">⚠ Special case: UPDATE_OPS_ROW (single checkbox)</strong></div>
+  <div class="step-desc">This flow updates <strong>one checklist field at a time</strong> when you tick a checkbox. It receives <code>sno</code>, the column name as <code>field</code>, and the new <code>value</code>. Because PA's Update a row UI doesn't support dynamic column selection, use this approach:</div>
+  <div class="callout callout-info" style="margin-top:10px"><span class="callout-icon">💡</span><span><strong>In the Update a row step</strong>, click <strong>Show advanced options</strong> — all checklist column fields appear. For each checklist column, click inside the field and type the expression:<br><br>
+  <code style="font-family:'JetBrains Mono',monospace;font-size:11px">if(equals(triggerBody()?['field'], 'Feedback Report'), triggerBody()?['value'], null)</code><br><br>
+  Change <code>'Feedback Report'</code> to that column's exact name for each field. PA skips null fields and only writes the targeted column.</span></div>
+  <div class="code" style="margin-top:10px"><span class="c">// Trigger schema for UPDATE_OPS_ROW</span>
+<span class="p">{</span>
+  <span class="k">"type"</span><span class="p">:</span><span class="s">"object"</span><span class="p">,</span>
+  <span class="k">"properties"</span><span class="p">: {</span>
+    <span class="k">"sno"</span><span class="p">:   {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>
+    <span class="k">"field"</span><span class="p">: {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">},</span>  <span class="c">// e.g. "Feedback Report"</span>
+    <span class="k">"value"</span><span class="p">: {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">}   </span><span class="c">// e.g. "Done" or ""</span>
+  <span class="p">}</span>
+<span class="p">}</span></div>
+</div>
+
+<!-- ════════════════════════════════ DELETE ═════════════════════════════════ -->
+<div class="section" id="s-delete">
+  <div class="ph">
+    <div class="ph-label">Step-by-step · Power Automate</div>
+    <h1 class="ph-title"><span class="badge badge-del">DELETE</span> Remove a row by S.No</h1>
+    <p class="ph-sub">Use for: <code>DELETE_BD_ROW</code>, <code>DELETE_ENGAGEMENT_ROW</code>, <code>DELETE_OPS_ROW</code>, <code>DELETE_SOLUTIONING_ROW</code>. The simplest of the four patterns — only 3 steps, smallest schema.</p>
+  </div>
+
+  <div class="flow-diagram">
+    <div class="flow-node active-node">
+      <div class="flow-node-icon icon-trigger">⚡</div>
+      <div class="flow-node-text">When a HTTP request is received</div>
+    </div>
+    <div class="flow-connector"><div class="flow-line"></div><div class="flow-plus">+</div><div class="flow-line"></div></div>
+    <div class="flow-node">
+      <div class="flow-node-icon icon-excel">📊</div>
+      <div class="flow-node-text">Delete a row</div>
+    </div>
+    <div class="flow-connector"><div class="flow-line"></div><div class="flow-plus">+</div><div class="flow-line"></div></div>
+    <div class="flow-node">
+      <div class="flow-node-icon icon-response">↩</div>
+      <div class="flow-node-text">Response</div>
+    </div>
+  </div>
+
+  <div class="steps">
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">1</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Create the flow</div>
+        <div class="step-desc">Name: e.g. <code>CRM – Delete BD Row</code>. Trigger: <strong>"When a HTTP request is received"</strong>.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">2</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Trigger schema — only sno is needed</div>
+        <div class="step-desc">All 4 delete flows use this exact same schema — only the table changes per tracker:</div>
+        <div class="code"><span class="p">{</span>
+  <span class="k">"type"</span><span class="p">: </span><span class="s">"object"</span><span class="p">,</span>
+  <span class="k">"properties"</span><span class="p">: {</span>
+    <span class="k">"sno"</span><span class="p">: {</span><span class="k">"type"</span><span class="p">:</span><span class="s">"string"</span><span class="p">}</span>
+  <span class="p">}</span>
+<span class="p">}</span></div>
+        <div class="callout callout-info"><span class="callout-icon">ℹ</span><span>For <strong>DELETE_ENGAGEMENT_ROW</strong>, also add <code>"egId": {"type":"string"}</code> — the CRM sends both, though the Excel action only needs sno.</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">3</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Add "Delete a row"</div>
+        <div class="step-desc"><strong>+ New step → Excel Online (Business) → "Delete a row"</strong>. Select your workbook and the correct table. Then:</div>
+        <div class="pa-field"><div class="pa-field-label">Key Column</div><div class="pa-field-value">S.No</div><div class="pa-field-note">For BD, Engagement, Ops. For Solutioning check if it's "SNo" or "S.No" in your table.</div></div>
+        <div class="pa-field"><div class="pa-field-label">Key Value</div><div class="pa-field-value">⚡ Dynamic content → sno (from trigger body)</div></div>
+        <div class="callout callout-warn"><span class="callout-icon">⚠</span><span>The Key Column value must <strong>exactly match</strong> the column header in your Excel table. If it says "S.No" in Excel, type "S.No" here. A mismatch causes a 400 error.</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-left"><div class="step-num">4</div><div class="step-line"></div></div>
+      <div class="step-content">
+        <div class="step-title">Add Response → Save → copy URL</div>
+        <div class="pa-field"><div class="pa-field-label">Status Code</div><div class="pa-field-value">200</div></div>
+        <div class="pa-field"><div class="pa-field-label">Body</div><div class="pa-field-value">{"success":true}</div></div>
+        <div class="code" style="margin-top:12px"><span class="k">DELETE_BD_ROW</span><span class="p">:          </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">DELETE_ENGAGEMENT_ROW</span><span class="p">: </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">DELETE_OPS_ROW</span><span class="p">:        </span><span class="s">'paste-url-here'</span><span class="p">,</span>
+<span class="k">DELETE_SOLUTIONING_ROW</span><span class="p">:</span><span class="s">'paste-url-here'</span><span class="p">,</span></div>
+        <div class="callout callout-ok"><span class="callout-icon">✓</span><span>Done. Build one delete flow first, verify it works, then duplicate it and just change the table name for the other 3.</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</div><!-- .page -->
+
+<script>
+function show(id, btn) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById('s-' + id).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  window.scrollTo(0, 0);
+}
+
+function showSchema(id) {
+  document.querySelectorAll('.schema-block').forEach(b => b.style.display = 'none');
+  document.getElementById('schema-' + id).style.display = 'block';
+  document.querySelectorAll('.schema-tab-btn').forEach(b => {
+    b.style.borderColor = 'var(--border)';
+    b.style.background = 'var(--surface2)';
+    b.style.color = 'var(--text2)';
+  });
+  const active = document.getElementById('sb-' + id);
+  active.style.borderColor = 'var(--accent)';
+  active.style.background = 'var(--accent-dim)';
+  active.style.color = 'var(--accent)';
+}
+</script>
