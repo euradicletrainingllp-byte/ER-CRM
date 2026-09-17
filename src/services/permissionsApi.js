@@ -1,15 +1,16 @@
 /**
  * permissionsApi.js — Read and write user permissions via Power Automate flows.
  *
- * EXCEL TABLE SETUP (one-time, if not already done):
- *  Add a Table named "PermissionsTable" with these columns:
- *    Email | Name | Dashboard | BD | Engagement | Ops | ContentDev | Solution |
- *    DashEdit | BDEdit | EngEdit | OpsEdit | ContentDevEdit | SolutionEdit
- *  Values are the strings "true" or "false".
+ * EXCEL TABLE SETUP (PermissionsTable columns):
+ *   Email | Name |
+ *   DashCreate | DashRead | DashUpdate | DashDelete |
+ *   BDCreate   | BDRead   | BDUpdate   | BDDelete   |
+ *   EngCreate  | EngRead  | EngUpdate  | EngDelete  |
+ *   OpsCreate  | OpsRead  | OpsUpdate  | OpsDelete  |
+ *   ContentDevCreate | ContentDevRead | ContentDevUpdate | ContentDevDelete |
+ *   SolCreate  | SolRead  | SolUpdate  | SolDelete
  *
- *  Note: If your table still has the old "Solutioning" / "SolEdit" columns,
- *  rename them to "ContentDev" / "ContentDevEdit" — the app will still fall
- *  back to the old names so no data is lost during the transition.
+ *  Values are the strings "true" or "false".
  *
  * Flow setup:
  *  1. Create a GET flow  → paste its HTTP trigger URL as GET_PERMISSIONS_URL.
@@ -23,9 +24,25 @@ const SAVE_PERMISSIONS_URL = 'https://default018223f9187e4f9091b8a53275307c.d9.e
 
 const BOOL = v => String(v).toLowerCase() === 'true';
 
+// Page key → Excel column prefix
+const PAGE_PREFIX = {
+  'dashboard':   'Dash',
+  'bd':          'BD',
+  'engagement':  'Eng',
+  'ops':         'Ops',
+  'content-dev': 'ContentDev',
+  'solution':    'Sol',
+};
+const PAGES = Object.keys(PAGE_PREFIX);
+const OPS   = ['Create', 'Read', 'Update', 'Delete'];
+
+function emptyPageCrud() {
+  return { create: false, read: false, update: false, delete: false };
+}
+
 /**
  * Fetch all permissions from Excel.
- * Returns: { [email]: { name, pages: {...}, edit: {...} } }
+ * Returns: { [email]: { name, crud: { [page]: { create, read, update, delete } } } }
  */
 export async function fetchPermissions() {
   if (!GET_PERMISSIONS_URL.startsWith('http')) {
@@ -46,26 +63,20 @@ export async function fetchPermissions() {
     const email = (row.Email || row.email || '').toLowerCase().trim();
     if (!email) continue;
 
+    const crud = {};
+    for (const page of PAGES) {
+      const prefix = PAGE_PREFIX[page];
+      crud[page] = {
+        create: BOOL(row[`${prefix}Create`] ?? false),
+        read:   BOOL(row[`${prefix}Read`]   ?? false),
+        update: BOOL(row[`${prefix}Update`] ?? false),
+        delete: BOOL(row[`${prefix}Delete`] ?? false),
+      };
+    }
+
     perms[email] = {
       name: row.Name || row.name || email.split('@')[0],
-      pages: {
-        dashboard:    BOOL(row.Dashboard   ?? row.dashboard   ?? false),
-        bd:           BOOL(row.BD          ?? row.bd          ?? false),
-        engagement:   BOOL(row.Engagement  ?? row.engagement  ?? false),
-        ops:          BOOL(row.Ops         ?? row.ops         ?? false),
-        // 'ContentDev' is the current column name; falls back to old 'Solutioning' column
-        'content-dev': BOOL(row.ContentDev  ?? row.contentDev  ?? row.Solutioning ?? row.solutioning ?? false),
-        solution:     BOOL(row.Solution    ?? row.solution    ?? false),
-      },
-      edit: {
-        dashboard:    BOOL(row.DashEdit        ?? row.dashEdit        ?? false),
-        bd:           BOOL(row.BDEdit          ?? row.bdEdit          ?? false),
-        engagement:   BOOL(row.EngEdit         ?? row.engEdit         ?? false),
-        ops:          BOOL(row.OpsEdit         ?? row.opsEdit         ?? false),
-        // 'ContentDevEdit' is the current column name; falls back to old 'SolEdit'
-        'content-dev': BOOL(row.ContentDevEdit ?? row.contentDevEdit  ?? row.SolEdit ?? row.solEdit ?? false),
-        solution:     BOOL(row.SolutionEdit    ?? row.solutionEdit    ?? false),
-      },
+      crud,
     };
   }
   return perms;
@@ -73,29 +84,25 @@ export async function fetchPermissions() {
 
 /**
  * Save ALL permissions back to Excel (overwrites existing data).
- * permsObj: { [email]: { name, pages: {...}, edit: {...} } }
+ * permsObj: { [email]: { name, crud: { [page]: { create, read, update, delete } } } }
  */
 export async function savePermissions(permsObj) {
   if (!SAVE_PERMISSIONS_URL.startsWith('http')) {
     throw new Error('SAVE_PERMISSIONS_URL not configured in permissionsApi.js');
   }
 
-  const rows = Object.entries(permsObj).map(([email, cfg]) => ({
-    Email:          email,
-    Name:           cfg.name || email.split('@')[0],
-    Dashboard:      String(!!cfg.pages?.dashboard),
-    BD:             String(!!cfg.pages?.bd),
-    Engagement:     String(!!cfg.pages?.engagement),
-    Ops:            String(!!cfg.pages?.ops),
-    ContentDev:     String(!!cfg.pages?.['content-dev']),
-    Solution:       String(!!cfg.pages?.solution),
-    DashEdit:       String(!!cfg.edit?.dashboard),
-    BDEdit:         String(!!cfg.edit?.bd),
-    EngEdit:        String(!!cfg.edit?.engagement),
-    OpsEdit:        String(!!cfg.edit?.ops),
-    ContentDevEdit: String(!!cfg.edit?.['content-dev']),
-    SolutionEdit:   String(!!cfg.edit?.solution),
-  }));
+  const rows = Object.entries(permsObj).map(([email, cfg]) => {
+    const row = { Email: email, Name: cfg.name || email.split('@')[0] };
+    for (const page of PAGES) {
+      const prefix = PAGE_PREFIX[page];
+      const c = cfg.crud?.[page] || emptyPageCrud();
+      row[`${prefix}Create`] = String(!!c.create);
+      row[`${prefix}Read`]   = String(!!c.read);
+      row[`${prefix}Update`] = String(!!c.update);
+      row[`${prefix}Delete`] = String(!!c.delete);
+    }
+    return row;
+  });
 
   const res = await fetch(SAVE_PERMISSIONS_URL, {
     method:  'POST',

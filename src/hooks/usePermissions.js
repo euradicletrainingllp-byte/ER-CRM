@@ -1,17 +1,29 @@
 /**
  * usePermissions — returns live access rights for the currently signed-in user.
- * Reads from PermissionsContext (updated by AdminPage in real-time).
  *
  * Usage:
- *   const { isAdmin, canAccess, canEdit, email } = usePermissions();
+ *   const { isAdmin, canAccess, canEdit, canCreate, canRead, canUpdate, canDelete, crud, email } = usePermissions();
+ *
+ * canAccess(page)  → alias for canRead(page)  — controls sidebar visibility / route guard
+ * canEdit(page)    → true if user has Create OR Update OR Delete on that page
+ * canCreate(page)  → can add new records
+ * canRead(page)    → can view the page
+ * canUpdate(page)  → can edit existing records
+ * canDelete(page)  → can delete records
+ * crud             → raw { [page]: { create, read, update, delete } } map
  */
 import { useMsal } from '@azure/msal-react';
 import { ADMIN_EMAIL, DEFAULT_ACCESS } from '../config/permissions.js';
 import { usePermissionsContext } from '../context/PermissionsContext.jsx';
 
-const PAGES      = ['dashboard', 'bd', 'engagement', 'ops', 'content-dev', 'solution'];
-const ALL_TRUE   = Object.fromEntries(PAGES.map(p => [p, true]));
-const ALL_FALSE  = Object.fromEntries(PAGES.map(p => [p, false]));
+const PAGES = ['dashboard', 'bd', 'engagement', 'ops', 'content-dev', 'solution'];
+
+const ALL_CRUD_TRUE  = Object.fromEntries(PAGES.map(p => [p, { create: true,  read: true,  update: true,  delete: true  }]));
+const ALL_CRUD_FALSE = Object.fromEntries(PAGES.map(p => [p, { create: false, read: false, update: false, delete: false }]));
+
+function emptyCrud(readValue = false) {
+  return Object.fromEntries(PAGES.map(p => [p, { create: false, read: readValue, update: false, delete: false }]));
+}
 
 export function usePermissions() {
   const { accounts } = useMsal();
@@ -32,8 +44,11 @@ export function usePermissions() {
       isAdmin:   true,
       canAccess: () => true,
       canEdit:   () => true,
-      pages:     ALL_TRUE,
-      edit:      ALL_TRUE,
+      canCreate: () => true,
+      canRead:   () => true,
+      canUpdate: () => true,
+      canDelete: () => true,
+      crud:      ALL_CRUD_TRUE,
     };
   }
 
@@ -45,17 +60,25 @@ export function usePermissions() {
       isAdmin:   false,
       canAccess: () => DEFAULT_ACCESS,
       canEdit:   () => false,
-      pages:     Object.fromEntries(PAGES.map(p => [p, DEFAULT_ACCESS])),
-      edit:      ALL_FALSE,
+      canCreate: () => false,
+      canRead:   () => DEFAULT_ACCESS,
+      canUpdate: () => false,
+      canDelete: () => false,
+      crud:      emptyCrud(DEFAULT_ACCESS),
     };
   }
+
+  const c = (page, op) => !!userPerms.crud?.[page]?.[op];
 
   return {
     email,
     isAdmin:   false,
-    canAccess: (page) => !!userPerms.pages?.[page],
-    canEdit:   (page) => !!userPerms.edit?.[page],
-    pages:     userPerms.pages || ALL_FALSE,
-    edit:      userPerms.edit  || ALL_FALSE,
+    canAccess: (page) => c(page, 'read'),
+    canEdit:   (page) => c(page, 'create') || c(page, 'update') || c(page, 'delete'),
+    canCreate: (page) => c(page, 'create'),
+    canRead:   (page) => c(page, 'read'),
+    canUpdate: (page) => c(page, 'update'),
+    canDelete: (page) => c(page, 'delete'),
+    crud:      userPerms.crud || ALL_CRUD_FALSE,
   };
 }
