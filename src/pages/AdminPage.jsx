@@ -189,10 +189,10 @@ export default function AdminPage() {
   const totalAccess   = nonAdminUsers.filter(u => PAGES.some(p => u.crud[p.key]?.read)).length;
 
   // grid: user-col + 6 page-cols + action-col
-  const GRID = `220px repeat(${PAGES.length}, minmax(108px, 1fr)) 50px`;
+  const GRID = `200px repeat(${PAGES.length}, 100px) 44px`;
 
   return (
-    <div style={{ padding: '28px 24px', maxWidth: 1300, margin: '0 auto' }}>
+    <div style={{ padding: '28px 24px', maxWidth: 960, margin: '0 auto' }}>
 
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
@@ -261,7 +261,7 @@ export default function AdminPage() {
           <div style={{
             display: 'grid', gridTemplateColumns: GRID,
             background: '#f8fafc', borderBottom: '2px solid #e2e8f0',
-            padding: '10px 16px', gap: 8, minWidth: 900,
+            padding: '10px 16px', gap: 6,
           }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>User</div>
             {PAGES.map(p => (

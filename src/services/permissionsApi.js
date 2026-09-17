@@ -11,10 +11,6 @@
  *   SolCreate  | SolRead  | SolUpdate  | SolDelete
  *
  *  Values are the strings "true" or "false".
- *
- * Flow setup:
- *  1. Create a GET flow  → paste its HTTP trigger URL as GET_PERMISSIONS_URL.
- *  2. Create a SAVE flow → paste its HTTP trigger URL as SAVE_PERMISSIONS_URL.
  */
 
 // ── Paste your Power Automate flow URLs here ────────────────────────────────
@@ -40,6 +36,32 @@ function emptyPageCrud() {
   return { create: false, read: false, update: false, delete: false };
 }
 
+// ── Fetch with timeout + retry ───────────────────────────────────────────────
+async function fetchWithRetry(url, options, timeoutMs = 90_000, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      // 502 = PA gateway timeout — retry once silently
+      if (res.status === 502 && attempt < retries) {
+        await new Promise(r => setTimeout(r, 3000)); // wait 3s then retry
+        continue;
+      }
+      return res;
+    } catch (err) {
+      clearTimeout(timer);
+      if (attempt < retries && (err.name === 'AbortError' || err.message?.includes('network'))) {
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+      if (err.name === 'AbortError') throw new Error('Request timed out — PA flow is taking too long');
+      throw err;
+    }
+  }
+}
+
 /**
  * Fetch all permissions from Excel.
  * Returns: { [email]: { name, crud: { [page]: { create, read, update, delete } } } }
@@ -49,7 +71,7 @@ export async function fetchPermissions() {
     throw new Error('GET_PERMISSIONS_URL not configured in permissionsApi.js');
   }
 
-  const res = await fetch(GET_PERMISSIONS_URL, {
+  const res = await fetchWithRetry(GET_PERMISSIONS_URL, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({}),
@@ -104,11 +126,14 @@ export async function savePermissions(permsObj) {
     return row;
   });
 
-  const res = await fetch(SAVE_PERMISSIONS_URL, {
+  const res = await fetchWithRetry(SAVE_PERMISSIONS_URL, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ rows }),
   });
 
-  if (!res.ok) throw new Error(`SAVE permissions failed: ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 502) throw new Error('SAVE permissions failed: 502 — PA flow timed out. Open PA and check the flow run history for errors.');
+    throw new Error(`SAVE permissions failed: ${res.status}`);
+  }
 }
