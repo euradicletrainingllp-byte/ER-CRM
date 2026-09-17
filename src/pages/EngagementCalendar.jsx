@@ -165,33 +165,64 @@ function ExcelFilter({ label, allValues, selected, onChange }) {
   );
 }
 
+/* ─── EG ID auto-generator ───────────────────────────────────────────────────
+   Finds the largest numeric suffix across all existing EG IDs and increments.
+   e.g. ["EG.ID 423", "EG.ID 425"] → "EG.ID 426"                            */
+function generateNextEgId(existingIds) {
+  if (!existingIds || existingIds.length === 0) return 'EG.ID 001';
+  const pairs = existingIds
+    .map(id => { const m = String(id).match(/^(.*?)(\d+)$/); return m ? [m[1], m[2]] : null; })
+    .filter(Boolean);
+  if (pairs.length === 0) return 'EG.ID 001';
+  pairs.sort((a, b) => parseInt(a[1], 10) - parseInt(b[1], 10));
+  const [prefix, digits] = pairs[pairs.length - 1];
+  const next = String(parseInt(digits, 10) + 1).padStart(digits.length, '0');
+  return prefix + next;
+}
+
 /* ─── Add / Edit Engagement Modal ──────────────────────────────────────── */
-function AddEditEngagementModal({ initial, onSave, onClose, saving }) {
+function AddEditEngagementModal({ initial, onSave, onClose, saving, engagements }) {
   const isEdit = !!initial;
-  const [form, setForm] = useState(isEdit ? {
-    egId:        initial.egId        || '',
-    company:     initial.company     || '',
-    startDate:   initial.startDate   || '',
-    endDate:     initial.endDate     || '',
-    topic:       initial.topic       || '',
-    sector:      initial.sector      || '',
-    serviceType: initial.serviceType || '',
-    offering:    initial.offering    || '',
-    day:         String(initial.day  || 1),
-    location:    initial.location    || 'VILT',
-    consultant1: initial.consultant1 || '',
-    consultant2: initial.consultant2 || '',
-    consultant3: initial.consultant3 || '',
-    status:      initial.status      || 'Scheduled',
-    price:       initial.price       || '',
-    contract:    initial.contract    || '',
-    poStatus:    initial.poStatus    || '',
-  } : {
-    egId: '', company: '', startDate: '', endDate: '', topic: '',
-    sector: '', serviceType: '', offering: '', day: '1', location: 'VILT',
-    consultant1: '', consultant2: '', consultant3: '', status: 'Scheduled',
-    price: '', contract: '', poStatus: '',
+
+  // ── EG ID logic (add mode only) ──────────────────────────────────────────
+  const existingEgIds = isEdit
+    ? []
+    : [...new Set((engagements || []).map(e => e.egId).filter(Boolean))];
+  const nextEgId = isEdit ? '' : generateNextEgId(existingEgIds);
+
+  const [form, setForm] = useState(() => {
+    if (isEdit) {
+      return {
+        egId:        initial.egId        || '',
+        company:     initial.company     || '',
+        startDate:   initial.startDate   || '',
+        endDate:     initial.endDate     || '',
+        topic:       initial.topic       || '',
+        sector:      initial.sector      || '',
+        serviceType: initial.serviceType || '',
+        offering:    initial.offering    || '',
+        day:         String(initial.day  || 1),
+        location:    initial.location    || 'VILT',
+        consultant1: initial.consultant1 || '',
+        consultant2: initial.consultant2 || '',
+        consultant3: initial.consultant3 || '',
+        status:      initial.status      || 'Scheduled',
+        price:       initial.price       || '',
+        contract:    initial.contract    || '',
+        poStatus:    initial.poStatus    || '',
+      };
+    }
+    return {
+      egId: nextEgId, company: '', startDate: '', endDate: '', topic: '',
+      sector: '', serviceType: '', offering: '', day: '1', location: 'VILT',
+      consultant1: '', consultant2: '', consultant3: '', status: 'Scheduled',
+      price: '', contract: '', poStatus: '',
+    };
   });
+
+  // Tracks which option is selected in the EG ID dropdown (add mode only)
+  const [egSelect, setEgSelect] = useState('__new__');
+
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   return (
@@ -199,8 +230,74 @@ function AddEditEngagementModal({ initial, onSave, onClose, saving }) {
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-title">{isEdit ? '✏️ Edit Engagement' : '📅 Add Engagement'}</div>
         <div className="form-grid">
+
+          {/* ── EG ID — smart dropdown in add mode, plain text in edit ── */}
+          {isEdit ? (
+            <div className="form-field">
+              <label className="form-label">EG ID</label>
+              <input className="form-input" value={form.egId} onChange={e => set('egId', e.target.value)} />
+            </div>
+          ) : (
+            <div className="form-field">
+              <label className="form-label">EG ID *</label>
+              <select
+                className="form-input"
+                value={egSelect}
+                onChange={e => {
+                  const val = e.target.value;
+                  setEgSelect(val);
+                  if (val === '__new__') {
+                    // Reset to a blank form with the new auto-generated EG ID
+                    setForm({
+                      egId: nextEgId, company: '', startDate: '', endDate: '', topic: '',
+                      sector: '', serviceType: '', offering: '', day: '1', location: 'VILT',
+                      consultant1: '', consultant2: '', consultant3: '', status: 'Scheduled',
+                      price: '', contract: '', poStatus: '',
+                    });
+                  } else {
+                    // Find the most-recent row with this EG ID and pre-fill all fields
+                    const match = (engagements || []).find(e => e.egId === val);
+                    if (match) {
+                      setForm({
+                        egId:        val,
+                        company:     match.company     || '',
+                        startDate:   '',                        // dates differ per session — user fills in
+                        endDate:     '',
+                        topic:       match.topic       || '',
+                        sector:      match.sector      || '',
+                        serviceType: match.serviceType || '',
+                        offering:    match.offering    || '',
+                        day:         String(match.day  || 1),
+                        location:    match.location    || 'VILT',
+                        consultant1: match.consultant1 || '',
+                        consultant2: match.consultant2 || '',
+                        consultant3: match.consultant3 || '',
+                        status:      'Scheduled',
+                        price:       match.price       || '',
+                        contract:    match.contract    || '',
+                        poStatus:    match.poStatus    || '',
+                      });
+                    } else {
+                      set('egId', val);
+                    }
+                  }
+                }}
+              >
+                <option value="__new__">➕ New EG ID — {nextEgId}</option>
+                {existingEgIds.map(id => (
+                  <option key={id} value={id}>{id}</option>
+                ))}
+              </select>
+              {egSelect !== '__new__' && (
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: '#e8760a' }}>
+                  Adding another entry to existing engagement <strong>{form.egId}</strong>
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* ── All other fields ── */}
           {[
-            ['EG.ID (e.g. EG.ID 425)', 'egId'],
             ['Client / Company',        'company'],
             ['Start Date',              'startDate', '', 'date'],
             ['End Date',                'endDate',   '', 'date'],
@@ -222,6 +319,7 @@ function AddEditEngagementModal({ initial, onSave, onClose, saving }) {
               <input type={type || 'text'} className="form-input" value={form[key]} onChange={e => set(key, e.target.value)} />
             </div>
           ))}
+
           <div className="form-field">
             <label className="form-label">Status</label>
             <select className="form-input" value={form.status} onChange={e => set('status', e.target.value)}>
@@ -230,11 +328,16 @@ function AddEditEngagementModal({ initial, onSave, onClose, saving }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-          <button className="btn btn-primary" onClick={() => onSave(form)} disabled={!form.company || !form.topic || saving}>
+          <button className="btn btn-primary" onClick={() => onSave(form)} disabled={!form.egId || !form.company || !form.topic || saving}>
             {saving ? '⏳ Saving…' : isEdit ? '✓ Update Engagement' : '✓ Save Engagement'}
           </button>
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
         </div>
+        {(!form.egId || !form.company || !form.topic) && (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>
+            * EG ID, Company and Topic are required
+          </p>
+        )}
       </div>
     </div>
   );
@@ -660,7 +763,7 @@ export default function EngagementCalendar({ onRefreshed }) {
         )}
       </div>
 
-      {showAdd   && <AddEditEngagementModal initial={null}    onSave={handleAdd}  onClose={() => setShowAdd(false)}   saving={saving} />}
+      {showAdd   && <AddEditEngagementModal initial={null}    onSave={handleAdd}  onClose={() => setShowAdd(false)}   saving={saving} engagements={data} />}
       {editRow   && <AddEditEngagementModal initial={editRow} onSave={handleEdit} onClose={() => setEditRow(null)}    saving={saving} />}
       {deleteRow && <DeleteEngagementModal  eng={deleteRow}   onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
     </div>

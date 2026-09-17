@@ -125,7 +125,26 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
                 onChange={e => {
                   const val = e.target.value;
                   setPidSelect(val);
-                  set('proposalId', val === '__new__' ? nextPid : val);
+                  if (val === '__new__') {
+                    // Reset to a blank form with the new auto-generated PID
+                    setForm({ ...EMPTY_BD, proposalId: nextPid });
+                  } else {
+                    // Find the most-recent row with this PID and pre-fill all fields
+                    const match = (bdRows || []).find(r => r.proposalId === val);
+                    if (match) {
+                      setForm({
+                        ...EMPTY_BD,
+                        ...match,
+                        proposalId: val,
+                        sno: '',                   // clear row key → treated as new row
+                        dateOfDiscussion: '',       // dates are typically different each session
+                        clientExpectedDate: '',
+                        bdMonth: '',
+                      });
+                    } else {
+                      set('proposalId', val);
+                    }
+                  }
                 }}
               >
                 <option value="__new__">➕ New Proposal ID — {nextPid}</option>
