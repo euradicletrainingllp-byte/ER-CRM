@@ -467,7 +467,7 @@ export async function getSolutionTracker() {
     remarks:             getField(r, 'Remarks', 'remarks') ?? '',
     proposalV1Link:      getField(r, 'Proposal V1 Link2', 'Proposal_V1_Link', 'proposalV1Link') ?? '',
     submissionBySolTeam: formatDate(getField(r, 'Date of Submission by Sol team', 'Date_of_Submission_by_Sol_team', 'submissionBySolTeam')),
-    submissionToErTeam:  formatDate(getField(r, 'Date of submission ER Team4', 'Date_of_submission_ER_Team4', 'submissionToErTeam')),
+    submissionToClient:  formatDate(getField(r, 'Date of Submission to Client', 'Date of submission ER Team4', 'Date_of_submission_ER_Team4', 'submissionToClient')),
   })).filter(r => r.proposalId);
 }
 
@@ -497,7 +497,7 @@ export async function addSolutionRow(rowData) {
     'Status':                           rowData.status              || '',
     'Remarks':                          rowData.remarks             || '',
     'Proposal V1 Link2':                rowData.proposalV1Link      || '',
-    'Date of submission ER Team4':      rowData.submissionToErTeam  || '',
+    'Date of Submission to Client':      rowData.submissionToClient  || '',
   });
 }
 
@@ -529,7 +529,7 @@ export async function updateSolutionRow(sno, rowData) {
     'Status':                           rowData.status              || '',
     'Remarks':                          rowData.remarks             || '',
     'Proposal V1 Link2':                rowData.proposalV1Link      || '',
-    'Date of submission ER Team4':      rowData.submissionToErTeam  || '',
+    'Date of Submission to Client':      rowData.submissionToClient  || '',
   });
 }
 

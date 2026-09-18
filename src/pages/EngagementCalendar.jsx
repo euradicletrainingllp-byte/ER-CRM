@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { getEngagements, addEngagementRow, updateEngagementRow, deleteEngagementRow } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
@@ -181,7 +182,7 @@ function generateNextEgId(existingIds) {
 }
 
 /* ─── Add / Edit Engagement Modal ──────────────────────────────────────── */
-function AddEditEngagementModal({ initial, onSave, onClose, saving, engagements }) {
+function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, engagements }) {
   const isEdit = !!initial;
 
   // ── EG ID logic (add mode only) ──────────────────────────────────────────
@@ -212,11 +213,22 @@ function AddEditEngagementModal({ initial, onSave, onClose, saving, engagements 
         poStatus:    initial.poStatus    || '',
       };
     }
+    // Add mode — use prefill values from Solution Tracker if provided
     return {
-      egId: nextEgId, company: '', startDate: '', endDate: '', topic: '',
-      sector: '', serviceType: '', offering: '', day: '1', location: 'VILT',
-      consultant1: '', consultant2: '', consultant3: '', status: 'Scheduled',
-      price: '', contract: '', poStatus: '',
+      egId:        nextEgId,
+      company:     prefill?.company     || '',
+      startDate:   '',
+      endDate:     '',
+      topic:       prefill?.topic       || '',
+      sector:      prefill?.sector      || '',
+      serviceType: prefill?.serviceType || '',
+      offering:    '',
+      day:         '1',
+      location:    'VILT',
+      consultant1: '', consultant2: '', consultant3: '',
+      status:      'Scheduled',
+      price:       prefill?.price       || '',
+      contract:    '', poStatus:        '',
     };
   });
 
@@ -522,16 +534,29 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
 
 /* ─── Main Page ─────────────────────────────────────────────────────────── */
 export default function EngagementCalendar({ onRefreshed }) {
-  const [data,      setData]      = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState(null);
-  const [showAdd,   setShowAdd]   = useState(false);
-  const [editRow,   setEditRow]   = useState(null);
-  const [deleteRow, setDeleteRow] = useState(null);
-  const [saving,    setSaving]    = useState(false);
-  const [toast,     setToast]     = useState('');
+  const location = useLocation();
+
+  const [data,        setData]        = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
+  const [showAdd,     setShowAdd]     = useState(false);
+  const [addPrefill,  setAddPrefill]  = useState(null);
+  const [editRow,     setEditRow]     = useState(null);
+  const [deleteRow,   setDeleteRow]   = useState(null);
+  const [saving,      setSaving]      = useState(false);
+  const [toast,       setToast]       = useState('');
 
   const { canEdit } = usePermissions();
+
+  // Open the Add modal pre-filled when navigated from Solution Tracker
+  useEffect(() => {
+    if (location.state?.prefill) {
+      setAddPrefill(location.state.prefill);
+      setShowAdd(true);
+      // Clear the navigation state so a browser refresh doesn't re-open the modal
+      window.history.replaceState({}, '', location.pathname);
+    }
+  }, []);
 
   // Excel-style multi-select filters — Set() of selected values; empty Set = "All"
   const [fStatus,   setFStatus]   = useState(new Set());
@@ -763,7 +788,7 @@ export default function EngagementCalendar({ onRefreshed }) {
         )}
       </div>
 
-      {showAdd   && <AddEditEngagementModal initial={null}    onSave={handleAdd}  onClose={() => setShowAdd(false)}   saving={saving} engagements={data} />}
+      {showAdd   && <AddEditEngagementModal initial={null} prefill={addPrefill} onSave={handleAdd}  onClose={() => { setShowAdd(false); setAddPrefill(null); }} saving={saving} engagements={data} />}
       {editRow   && <AddEditEngagementModal initial={editRow} onSave={handleEdit} onClose={() => setEditRow(null)}    saving={saving} />}
       {deleteRow && <DeleteEngagementModal  eng={deleteRow}   onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
     </div>

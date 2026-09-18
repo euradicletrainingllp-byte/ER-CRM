@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   getSolutionTracker,
   addSolutionRow,
   updateSolutionRow,
   deleteSolutionRow,
 } from '../services/api.js';
+import { usePermissions } from '../hooks/usePermissions.js';
 
 // ── Status colours ────────────────────────────────────────────────────────────
 const STATUS_COLORS = {
@@ -33,12 +35,12 @@ const EMPTY_BD = {
   proposalId: '', clientName: '', clientPoc: '', contactNumber: '',
   dateOfDiscussion: '', clientExpectedDate: '', bdMonth: '',
   programTopic: '', proposalVersion: 'V1', bdStatus: 'In Process', bdProposalValue: '',
+  submissionToClient: '',
 };
 const EMPTY_SOL = {
   proposalId: '', solutionTopic: '', solutionMonth: '', programType: '',
   engagementType: '', lineOfService: '', typeOfService: '', developmentCategory: '',
   solutionValue: '', status: 'Pending', remarks: '', proposalV1Link: '',
-  submissionToErTeam: '',
 };
 
 // ── Shared Input Component ────────────────────────────────────────────────────
@@ -55,6 +57,71 @@ const inp = {
   background: 'var(--surface)', color: 'var(--text)', fontSize: 13, width: '100%',
   boxSizing: 'border-box',
 };
+
+// ── Fixed dropdown option lists ────────────────────────────────────────────────
+const PROGRAM_TYPE_OPTS     = ['Standard', 'Customized'];
+const ENGAGEMENT_TYPE_OPTS  = ['Standalone', 'Journey'];
+const LINE_OF_SERVICE_OPTS  = ['Training', 'Talent Management', 'HR Services', 'Coaching', 'Other'];
+const TYPE_OF_SERVICE_OPTS  = ['Facilitation', 'Coaching', 'Assessment & Development Centres', 'Success Presentation'];
+const DEV_CATEGORY_OPTS     = [
+  'Power Skills Enablement',
+  'Leadership Development',
+  'DEI & Culture Building',
+  'Consulting & Talent Management',
+  'Digital & Business Transformation',
+  'Commercial & Sales Enablement (CSE)',
+  'Creative Solutions (CS)',
+  'Assessment & Development Centers',
+];
+
+/**
+ * ComboSelect — dropdown with fixed options + "Other (type your own)" fallback.
+ * Syncs with external `value` so it stays correct when the form is reset or
+ * pre-filled from an existing record.
+ */
+function ComboSelect({ options, value, onChange, placeholder }) {
+  const isPreset    = options.includes(value);
+  const [showCustom, setShowCustom] = useState(!isPreset && !!value);
+  const [customText, setCustomText] = useState(!isPreset ? (value || '') : '');
+
+  // Sync when value changes externally (e.g., pre-fill from existing record)
+  useEffect(() => {
+    const preset = options.includes(value);
+    setShowCustom(!preset && !!value);
+    if (!preset) setCustomText(value || '');
+    else setCustomText('');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const selectVal = showCustom ? '__custom__' : (value || '');
+
+  return (
+    <>
+      <select style={inp} value={selectVal} onChange={e => {
+        if (e.target.value === '__custom__') {
+          setShowCustom(true);
+          onChange(customText);
+        } else {
+          setShowCustom(false);
+          setCustomText('');
+          onChange(e.target.value);
+        }
+      }}>
+        <option value="">— Select —</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+        <option value="__custom__">Other (type your own…)</option>
+      </select>
+      {showCustom && (
+        <input
+          style={{ ...inp, marginTop: 6 }}
+          placeholder={placeholder || 'Type custom value…'}
+          value={customText}
+          onChange={e => { setCustomText(e.target.value); onChange(e.target.value); }}
+        />
+      )}
+    </>
+  );
+}
 
 // ── Proposal ID auto-generator ────────────────────────────────────────────────
 // Finds the largest numeric suffix across all existing Proposal IDs and increments it.
@@ -194,6 +261,7 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
             </select>
           </Field>
           <Field label="BD Proposal Value"><input style={inp} value={form.bdProposalValue} onChange={e => set('bdProposalValue', e.target.value)} placeholder="₹ Amount" /></Field>
+          <Field label="Date of Submission to Client" half><input type="date" style={inp} value={form.submissionToClient} onChange={e => set('submissionToClient', e.target.value)} /></Field>
         </div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
           <button onClick={onClose} disabled={saving} style={{ padding: '8px 18px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}>Cancel</button>
@@ -238,15 +306,24 @@ function SolModal({ initial, proposalId, onSave, onClose, saving }) {
         )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <Field label="Solution Topic *"><input style={inp} value={form.solutionTopic} onChange={e => set('solutionTopic', e.target.value)} /></Field>
-          <Field label="Program Type" half><input style={inp} value={form.programType} onChange={e => set('programType', e.target.value)} /></Field>
-          <Field label="Engagement Type" half><input style={inp} value={form.engagementType} onChange={e => set('engagementType', e.target.value)} /></Field>
-          <Field label="Line of Service" half><input style={inp} value={form.lineOfService} onChange={e => set('lineOfService', e.target.value)} /></Field>
-          <Field label="Type of Service" half><input style={inp} value={form.typeOfService} onChange={e => set('typeOfService', e.target.value)} /></Field>
-          <Field label="Development Category" half><input style={inp} value={form.developmentCategory} onChange={e => set('developmentCategory', e.target.value)} /></Field>
+          <Field label="Program Type" half>
+            <ComboSelect options={PROGRAM_TYPE_OPTS} value={form.programType} onChange={v => set('programType', v)} />
+          </Field>
+          <Field label="Engagement Type" half>
+            <ComboSelect options={ENGAGEMENT_TYPE_OPTS} value={form.engagementType} onChange={v => set('engagementType', v)} />
+          </Field>
+          <Field label="Line of Service" half>
+            <ComboSelect options={LINE_OF_SERVICE_OPTS} value={form.lineOfService} onChange={v => set('lineOfService', v)} />
+          </Field>
+          <Field label="Type of Service" half>
+            <ComboSelect options={TYPE_OF_SERVICE_OPTS} value={form.typeOfService} onChange={v => set('typeOfService', v)} />
+          </Field>
+          <Field label="Development Category" half>
+            <ComboSelect options={DEV_CATEGORY_OPTS} value={form.developmentCategory} onChange={v => set('developmentCategory', v)} />
+          </Field>
           <Field label="Solution Value" half><input style={inp} value={form.solutionValue} onChange={e => set('solutionValue', e.target.value)} placeholder="₹ Amount" /></Field>
           <Field label="Remarks"><textarea style={{ ...inp, resize: 'vertical', minHeight: 56 }} value={form.remarks} onChange={e => set('remarks', e.target.value)} /></Field>
           <Field label="Proposal V1 Link2"><input style={inp} value={form.proposalV1Link} onChange={e => set('proposalV1Link', e.target.value)} placeholder="https://..." /></Field>
-          <Field label="Date of Submission — ER Team" half><input type="date" style={inp} value={form.submissionToErTeam} onChange={e => set('submissionToErTeam', e.target.value)} /></Field>
           <Field label="Status" half>
             <select style={inp} value={form.status} onChange={e => set('status', e.target.value)}>
               {SOL_STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
@@ -315,6 +392,9 @@ function DeleteDialog({ label, onConfirm, onCancel, saving, type, linkedCount })
 
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function SolutionTracker({ onRefreshed, view }) {
+  const navigate = useNavigate();
+  const { canCreate } = usePermissions();
+
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
@@ -380,12 +460,37 @@ export default function SolutionTracker({ onRefreshed, view }) {
   async function handleSaveBD(form) {
     setSaving(true);
     try {
-      if (form.sno) {
+      // Use != null so sno=0 is treated as a valid row key (truthy check would fail for 0)
+      if (form.sno != null && form.sno !== '') {
+        // ── Edit existing BD anchor row ──────────────────────────────────────
         await updateSolutionRow(form.sno, form);
+
+        // Propagate submissionToClient to every other sol row under this P ID
+        // so all Excel rows reflect the same BD-level date.
+        if (form.submissionToClient) {
+          const otherRows = rows.filter(
+            r => r.proposalId === form.proposalId &&
+                 String(r.sno) !== String(form.sno)
+          );
+          await Promise.all(
+            otherRows.map(r => updateSolutionRow(r.sno, { ...r, submissionToClient: form.submissionToClient }))
+          );
+        }
       } else {
+        // ── New BD entry ─────────────────────────────────────────────────────
         const existingAnchor = rows.find(r => r.proposalId === form.proposalId && r.bdSNo);
         if (existingAnchor) {
           await updateSolutionRow(existingAnchor.sno, form);
+          // Propagate submissionToClient to other rows too
+          if (form.submissionToClient) {
+            const otherRows = rows.filter(
+              r => r.proposalId === form.proposalId &&
+                   String(r.sno) !== String(existingAnchor.sno)
+            );
+            await Promise.all(
+              otherRows.map(r => updateSolutionRow(r.sno, { ...r, submissionToClient: form.submissionToClient }))
+            );
+          }
         } else {
           await addSolutionRow(form);
         }
@@ -419,6 +524,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
             proposalVersion:    anchor.proposalVersion    || payload.proposalVersion,
             bdStatus:           anchor.bdStatus           || payload.bdStatus,
             bdProposalValue:    anchor.bdProposalValue    || payload.bdProposalValue,
+            submissionToClient: anchor.submissionToClient || payload.submissionToClient,
           };
 
           const hasSolRows = rows.some(r => r.proposalId === form.proposalId && r.solutionTopic);
@@ -499,9 +605,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
             style={{ ...inp, width: 220 }}
           />
           <button onClick={load} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>🔄 Refresh</button>
-          {view !== 'sol' && (
-            <button onClick={() => setBdModal('add')} style={{ padding: '8px 18px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>+ Add BD Entry</button>
-          )}
+
         </div>
       </div>
 
@@ -584,17 +688,8 @@ export default function SolutionTracker({ onRefreshed, view }) {
                             )}
                           </td>
                         )}
-                        <td style={tdStyle} onClick={e => e.stopPropagation()}>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              onClick={() => setBdModal(r)}
-                              style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', fontSize: 12 }}
-                            >✏️ Edit</button>
-                            <button
-                              onClick={() => setDelTarget({ sno: r.sno, bdSNo: r.bdSNo, label: `BD S No ${r.bdSNo || r.sno} — ${r.proposalId} / ${r.clientName}`, type: 'bd', proposalId: r.proposalId })}
-                              style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid #fca5a5', background: '#fee2e2', color: '#991b1b', cursor: 'pointer', fontSize: 12 }}
-                            >🗑️</button>
-                          </div>
+                        <td style={tdStyle}>
+                          <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>Manage in BD Tracker</span>
                         </td>
                       </tr>
 
@@ -643,7 +738,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
                                       <thead>
                                         <tr>
-                                          {['Sol S No', 'Sol Month', 'Solution Topic', 'Line of Service', 'Type of Service', 'Dev Category', 'Sol Value', 'Status', 'Sol To ER', 'Actions'].map(h => (
+                                          {['Sol S No', 'Sol Month', 'Solution Topic', 'Line of Service', 'Type of Service', 'Dev Category', 'Sol Value', 'Status', 'Submitted to Client', 'Actions'].map(h => (
                                             <th key={h} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'left', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                                           ))}
                                         </tr>
@@ -663,7 +758,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                             <td style={{ padding: '8px 10px' }}>{s.developmentCategory || '—'}</td>
                                             <td style={{ padding: '8px 10px' }}>{s.solutionValue ? `₹${s.solutionValue}` : '—'}</td>
                                             <td style={{ padding: '8px 10px' }}>{pill(s.status)}</td>
-                                            <td style={{ padding: '8px 10px' }}>{s.submissionToErTeam || '—'}</td>
+                                            <td style={{ padding: '8px 10px' }}>{r.submissionToClient || '—'}</td>
                                             <td style={{ padding: '8px 10px' }}>
                                               <div style={{ display: 'flex', gap: 5 }}>
                                                 <button
@@ -674,6 +769,22 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                                   onClick={() => setDelTarget({ sno: s.sno, label: `SNo ${s.sno} — ${s.proposalId} / ${s.solutionTopic}`, type: 'sol' })}
                                                   style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #fca5a5', background: '#fee2e2', color: '#991b1b', cursor: 'pointer', fontSize: 11 }}
                                                 >🗑️</button>
+                                                {canCreate('engagement') && (
+                                                  <button
+                                                    title="Add to Engagement Calendar"
+                                                    onClick={() => navigate('/engagement', {
+                                                      state: {
+                                                        prefill: {
+                                                          company:     r.clientName       || '',
+                                                          topic:       s.solutionTopic    || '',
+                                                          serviceType: s.typeOfService    || '',
+                                                          sector:      s.developmentCategory || '',
+                                                        },
+                                                      },
+                                                    })}
+                                                    style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #a5b4fc', background: '#ede9fe', color: '#5b21b6', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}
+                                                  >📅</button>
+                                                )}
                                               </div>
                                             </td>
                                           </tr>
