@@ -393,7 +393,7 @@ function DeleteDialog({ label, onConfirm, onCancel, saving, type, linkedCount })
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function SolutionTracker({ onRefreshed, view }) {
   const navigate = useNavigate();
-  const { canCreate } = usePermissions();
+  const { canCreate, canUpdate, canDelete, canEdit } = usePermissions();
 
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(true);
@@ -551,8 +551,13 @@ export default function SolutionTracker({ onRefreshed, view }) {
     }
   }
 
+  // Count solution items linked to a BD entry by P ID + Version (user-defined index)
   const linkedSolCount = delTarget?.type === 'bd'
-    ? rows.filter(r => r.proposalId === delTarget.proposalId && r.solutionTopic).length
+    ? rows.filter(r =>
+        r.proposalId === delTarget.proposalId &&
+        (r.proposalVersion || '') === (delTarget.proposalVersion || '') &&
+        r.solutionTopic
+      ).length
     : 0;
 
   async function handleDelete() {
@@ -560,7 +565,11 @@ export default function SolutionTracker({ onRefreshed, view }) {
     setSaving(true);
     try {
       if (delTarget.type === 'bd') {
-        const allRows = rows.filter(r => r.proposalId === delTarget.proposalId);
+        // Cascade delete: remove BD anchor + all Solution items indexed by P ID + Version
+        const allRows = rows.filter(r =>
+          r.proposalId === delTarget.proposalId &&
+          (r.proposalVersion || '') === (delTarget.proposalVersion || '')
+        );
         for (const r of allRows) {
           await deleteSolutionRow(r.sno);
         }
@@ -605,7 +614,12 @@ export default function SolutionTracker({ onRefreshed, view }) {
             style={{ ...inp, width: 220 }}
           />
           <button onClick={load} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>🔄 Refresh</button>
-
+          {view === 'bd' && canCreate('bd') && (
+            <button
+              onClick={() => setBdModal('add')}
+              style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}
+            >+ Add BD Lead</button>
+          )}
         </div>
       </div>
 
@@ -688,8 +702,33 @@ export default function SolutionTracker({ onRefreshed, view }) {
                             )}
                           </td>
                         )}
-                        <td style={tdStyle}>
-                          <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>Manage in BD Tracker</span>
+                        <td style={tdStyle} onClick={e => e.stopPropagation()}>
+                          {view === 'bd' && canEdit('bd') ? (
+                            <div style={{ display: 'flex', gap: 5 }}>
+                              {canUpdate('bd') && (
+                                <button
+                                  onClick={() => setBdModal(r)}
+                                  title="Edit BD Lead"
+                                  style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--card)', cursor: 'pointer', fontSize: 11 }}
+                                >✏️ Edit</button>
+                              )}
+                              {canDelete('bd') && (
+                                <button
+                                  onClick={() => setDelTarget({
+                                    type: 'bd',
+                                    sno: r.sno,
+                                    proposalId: r.proposalId,
+                                    proposalVersion: r.proposalVersion || '',
+                                    label: `${r.proposalId}${r.proposalVersion ? ' / ' + r.proposalVersion : ''} — ${r.clientName}`,
+                                  })}
+                                  title="Delete BD Lead (cascades to linked Solution items)"
+                                  style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #fca5a5', background: '#fee2e2', color: '#991b1b', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}
+                                >🗑️ Delete</button>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic' }}>—</span>
+                          )}
                         </td>
                       </tr>
 
