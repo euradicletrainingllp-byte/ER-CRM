@@ -194,41 +194,60 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
   const [form, setForm] = useState(() => {
     if (isEdit) {
       return {
-        egId:        initial.egId        || '',
-        company:     initial.company     || '',
-        startDate:   initial.startDate   || '',
-        endDate:     initial.endDate     || '',
-        topic:       initial.topic       || '',
-        sector:      initial.sector      || '',
-        serviceType: initial.serviceType || '',
-        offering:    initial.offering    || '',
-        day:         String(initial.day  || 1),
-        location:    initial.location    || 'VILT',
-        consultant1: initial.consultant1 || '',
-        consultant2: initial.consultant2 || '',
-        consultant3: initial.consultant3 || '',
-        status:      initial.status      || 'Scheduled',
-        price:       initial.price       || '',
-        contract:    initial.contract    || '',
-        poStatus:    initial.poStatus    || '',
+        egId:           initial.egId           || '',
+        company:        initial.company        || '',
+        startDate:      initial.startDate      || '',
+        endDate:        initial.endDate        || '',
+        topic:          initial.topic          || '',
+        sector:         initial.sector         || '',
+        serviceType:    initial.serviceType    || '',
+        offering:       initial.offering       || '',
+        day:            String(initial.day     || 1),
+        location:       initial.location       || 'VILT',
+        consultant1:    initial.consultant1    || '',
+        consultant2:    initial.consultant2    || '',
+        status:         initial.status         || 'Scheduled',
+        contract:       initial.contract       || '',
+        poStatus:       initial.poStatus       || '',
+        invoice:        initial.invoice        || '',
+        price:          initial.price          || '',
+        travelExpenses: initial.travelExpenses || '',
+        gst:            initial.gst            || '',
+        payment:        initial.payment        || '',
+        amountReceived: initial.amountReceived || '',
+        receivedDate:   initial.receivedDate   || '',
+        comments:       initial.comments       || '',
+        feedback:       initial.feedback       || '',
+        nps:            initial.nps            || '',
       };
     }
     // Add mode — use prefill values from Solution Tracker if provided
     return {
-      egId:        nextEgId,
-      company:     prefill?.company     || '',
-      startDate:   '',
-      endDate:     '',
-      topic:       prefill?.topic       || '',
-      sector:      prefill?.sector      || '',
-      serviceType: prefill?.serviceType || '',
-      offering:    '',
-      day:         '1',
-      location:    'VILT',
-      consultant1: '', consultant2: '', consultant3: '',
-      status:      'Scheduled',
-      price:       prefill?.price       || '',
-      contract:    '', poStatus:        '',
+      egId:           nextEgId,
+      company:        prefill?.company     || '',
+      startDate:      '',
+      endDate:        '',
+      topic:          prefill?.topic       || '',
+      sector:         prefill?.sector      || '',
+      serviceType:    prefill?.serviceType || '',
+      offering:       '',
+      day:            '1',
+      location:       'VILT',
+      consultant1:    '',
+      consultant2:    '',
+      status:         'Scheduled',
+      contract:       '',
+      poStatus:       '',
+      invoice:        '',
+      price:          prefill?.price || '',
+      travelExpenses: '',
+      gst:            '',
+      payment:        '',
+      amountReceived: '',
+      receivedDate:   '',
+      comments:       '',
+      feedback:       '',
+      nps:            '',
     };
   });
 
@@ -263,31 +282,41 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
                     setForm({
                       egId: nextEgId, company: '', startDate: '', endDate: '', topic: '',
                       sector: '', serviceType: '', offering: '', day: '1', location: 'VILT',
-                      consultant1: '', consultant2: '', consultant3: '', status: 'Scheduled',
-                      price: '', contract: '', poStatus: '',
+                      consultant1: '', consultant2: '', status: 'Scheduled',
+                      contract: '', poStatus: '', invoice: '', price: '',
+                      travelExpenses: '', gst: '', payment: '', amountReceived: '',
+                      receivedDate: '', comments: '', feedback: '', nps: '',
                     });
                   } else {
                     // Find the most-recent row with this EG ID and pre-fill all fields
                     const match = (engagements || []).find(e => e.egId === val);
                     if (match) {
                       setForm({
-                        egId:        val,
-                        company:     match.company     || '',
-                        startDate:   '',                        // dates differ per session — user fills in
-                        endDate:     '',
-                        topic:       match.topic       || '',
-                        sector:      match.sector      || '',
-                        serviceType: match.serviceType || '',
-                        offering:    match.offering    || '',
-                        day:         String(match.day  || 1),
-                        location:    match.location    || 'VILT',
-                        consultant1: match.consultant1 || '',
-                        consultant2: match.consultant2 || '',
-                        consultant3: match.consultant3 || '',
-                        status:      'Scheduled',
-                        price:       match.price       || '',
-                        contract:    match.contract    || '',
-                        poStatus:    match.poStatus    || '',
+                        egId:           val,
+                        company:        match.company        || '',
+                        startDate:      '',                        // dates differ per session — user fills in
+                        endDate:        '',
+                        topic:          match.topic          || '',
+                        sector:         match.sector         || '',
+                        serviceType:    match.serviceType    || '',
+                        offering:       match.offering       || '',
+                        day:            String(match.day     || 1),
+                        location:       match.location       || 'VILT',
+                        consultant1:    match.consultant1    || '',
+                        consultant2:    match.consultant2    || '',
+                        status:         'Scheduled',
+                        contract:       match.contract       || '',
+                        poStatus:       match.poStatus       || '',
+                        invoice:        '',
+                        price:          match.price          || '',
+                        travelExpenses: '',
+                        gst:            '',
+                        payment:        match.payment        || '',
+                        amountReceived: '',
+                        receivedDate:   '',
+                        comments:       match.comments       || '',
+                        feedback:       match.feedback       || '',
+                        nps:            match.nps            || '',
                       });
                     } else {
                       set('egId', val);
@@ -310,21 +339,29 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
 
           {/* ── All other fields ── */}
           {[
-            ['Client / Company',        'company'],
-            ['Start Date',              'startDate', '', 'date'],
-            ['End Date',                'endDate',   '', 'date'],
-            ['Topic / Program',         'topic',     'full'],
-            ['Sector',                  'sector'],
-            ['Service Type',            'serviceType'],
-            ['Offering',                'offering'],
-            ['No. of Days',             'day',       '', 'number'],
-            ['Location (VILT / City)',  'location'],
-            ['Lead Consultant',         'consultant1'],
-            ['Co-Consultant',           'consultant2'],
-            ['Consultant 3',            'consultant3'],
-            ['Price (₹)',               'price',     '', 'number'],
-            ['Contract',                'contract'],
-            ['PO Status',               'poStatus'],
+            ['Client / Company',                'company'],
+            ['Start Date',                      'startDate',       '', 'date'],
+            ['End Date',                        'endDate',         '', 'date'],
+            ['Topic / Program',                 'topic',           'full'],
+            ['Sector',                          'sector'],
+            ['Service Type',                    'serviceType'],
+            ['Offering',                        'offering'],
+            ['No. of Days',                     'day',             '', 'number'],
+            ['Location (VILT / City)',          'location'],
+            ['Lead Consultant',                 'consultant1'],
+            ['Co-Consultant',                   'consultant2'],
+            ['Contract',                        'contract'],
+            ['PO Status',                       'poStatus'],
+            ['Invoice Date',                    'invoice',         '', 'date'],
+            ['Price (₹)',                       'price',           '', 'number'],
+            ['Travel, Stay & Misc. Exp. (₹)',  'travelExpenses',  '', 'number'],
+            ['GST (₹)',                         'gst',             '', 'number'],
+            ['Payment',                         'payment'],
+            ['Amount Received',                 'amountReceived'],
+            ['Received Date',                   'receivedDate',    '', 'date'],
+            ['Comments',                        'comments',        'full'],
+            ['Feedback',                        'feedback',        'full'],
+            ['NPS',                             'nps'],
           ].map(([label, key, span, type]) => (
             <div className={`form-field ${span || ''}`} key={key}>
               <label className="form-label">{label}</label>
@@ -398,12 +435,18 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
     ['Location / Mode',  eng.location    || '—'],
     ['Consultant 1',     eng.consultant1 || '—'],
     ['Consultant 2',     eng.consultant2 || '—'],
-    ['Consultant 3',     eng.consultant3 || '—'],
     ['Contract',         eng.contract    || '—'],
     ['PO Status',        eng.poStatus    || '—'],
-    ['Invoice',          eng.invoice     || '—'],
-    ['Price',            eng.price > 0 ? fmtINR(eng.price) : '—'],
-    ['Travel & Misc.',   eng.travelExpenses > 0 ? fmtINR(eng.travelExpenses) : '—'],
+    ['Invoice Date',     eng.invoice ? fmtDt(eng.invoice) : '—'],
+    ['Price (₹)',        eng.price > 0 ? fmtINR(eng.price) : '—'],
+    ['Travel & Misc. (₹)', eng.travelExpenses > 0 ? fmtINR(eng.travelExpenses) : (eng.travelExpenses === 0 && eng.price > 0 ? '₹0' : '—')],
+    ['GST (₹)',          eng.gst > 0 ? fmtINR(eng.gst) : (eng.gst === 0 && eng.price > 0 ? '₹0' : '—')],
+    ['Payment',          eng.payment        || '—'],
+    ['Amt Received',     eng.amountReceived || '—'],
+    ['Received Date',    eng.receivedDate   || '—'],
+    ['Comments',         eng.comments       || '—'],
+    ['Feedback',         eng.feedback       || '—'],
+    ['NPS',              eng.nps            || '—'],
   ];
 
   return (
@@ -621,7 +664,13 @@ export default function EngagementCalendar({ onRefreshed }) {
   const handleAdd = async (form) => {
     setSaving(true);
     try {
-      await addEngagementRow({ ...form, day: Number(form.day) || 1, price: Number(form.price) || 0 });
+      await addEngagementRow({
+        ...form,
+        day:            Number(form.day)            || 1,
+        price:          Number(form.price)          || 0,
+        travelExpenses: Number(form.travelExpenses) || 0,
+        gst:            Number(form.gst)            || 0,
+      });
       setShowAdd(false);
       showToast('✓ Engagement added to Excel!');
       await load();
@@ -633,27 +682,40 @@ export default function EngagementCalendar({ onRefreshed }) {
     if (!editRow) return;
     setSaving(true);
     try {
+      // Use exact Excel column names for fields with spaces/special chars
       await updateEngagementRow(editRow.egId, editRow.sno, {
-        'EG.ID':          form.egId,
-        'Company':        form.company,
-        ' Start Date':    form.startDate,
-        'End Date':       form.endDate,
-        'Topic ':         form.topic,
-        'Sector':         form.sector,
-        'Service Type':   form.serviceType,
-        'Offering':       form.offering,
-        'Day':            Number(form.day) || 1,
-        'Location':       form.location,
-        'Consultant - 1': form.consultant1,
-        'Consultant - 2': form.consultant2,
-        'Consultant - 3': form.consultant3,
-        'Status':         form.status,
-        'Price (INR)':    Number(form.price) || 0,
-        'Contract':       form.contract,
-        'PO Status':      form.poStatus,
+        'EG ID':                           form.egId           || '',
+        company:                           form.company        || '',
+        'Start Date':                      form.startDate      || '',
+        'End Date':                        form.endDate        || '',
+        topic:                             form.topic          || '',
+        sector:                            form.sector         || '',
+        'Service Type':                    form.serviceType    || '',
+        offering:                          form.offering       || '',
+        day:                               Number(form.day)    || 1,
+        location:                          form.location       || '',
+        'Consultant - 1':                  form.consultant1    || '',
+        'Consultant - 2':                  form.consultant2    || '',
+        status:                            form.status         || '',
+        contract:                          form.contract       || '',
+        'PO Status':                       form.poStatus       || '',
+        invoice:                           form.invoice        || '',
+        'Price (INR)':                     Number(form.price)  || 0,
+        'Travel, Stay and Misc Expenses':  Number(form.travelExpenses) || 0,
+        gst:                               Number(form.gst)    || 0,
+        payment:                           form.payment        || '',
+        'Amount Received':                 form.amountReceived || '',
+        'Received Date':                   form.receivedDate   || '',
+        comments:                          form.comments       || '',
+        feedback:                          form.feedback       || '',
+        nps:                               form.nps            || '',
       });
       setEditRow(null);
       showToast('✓ Engagement updated!');
+      // Small delay before reload — Excel Online has ~1-2s lag between a PA write
+      // and the change being visible on the next read. Without this, load() fetches
+      // stale data and the update appears to not have reflected.
+      await new Promise(res => setTimeout(res, 1500));
       await load();
     } catch (e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
@@ -789,7 +851,7 @@ export default function EngagementCalendar({ onRefreshed }) {
       </div>
 
       {showAdd   && <AddEditEngagementModal initial={null} prefill={addPrefill} onSave={handleAdd}  onClose={() => { setShowAdd(false); setAddPrefill(null); }} saving={saving} engagements={data} />}
-      {editRow   && <AddEditEngagementModal initial={editRow} onSave={handleEdit} onClose={() => setEditRow(null)}    saving={saving} />}
+      {editRow   && <AddEditEngagementModal initial={editRow} onSave={handleEdit} onClose={() => setEditRow(null)}    saving={saving} engagements={data} />}
       {deleteRow && <DeleteEngagementModal  eng={deleteRow}   onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
     </div>
   );

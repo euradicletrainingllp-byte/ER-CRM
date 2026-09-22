@@ -142,9 +142,9 @@ export async function getEngagements(filters = {}) {
              : [];
 
   return rows.map((r, i) => {
-    // PA renames 'EG.ID' — try every known variant
+    // PA renames columns — try every known variant (column is now 'EG ID' with a space)
     const egId = getField(r,
-      'EG.ID', 'EG_ID', 'EGID', 'EG__ID', 'egId', 'eg_id', 'EgId'
+      'EG ID', 'EG.ID', 'EG_ID', 'EGID', 'EG__ID', 'EG_x002e_ID', 'egId', 'eg_id', 'EgId'
     ) ?? `EG.ID ${i + 1}`;
 
     return {
@@ -168,32 +168,57 @@ export async function getEngagements(filters = {}) {
       status:      getField(r, 'Status', 'status') ?? '',
       contract:    getField(r, 'Contract', 'contract') ?? '',
       poStatus:    getField(r, 'PO Status', 'PO_Status', 'POStatus', 'poStatus') ?? '',
-      invoice:     getField(r, 'Invoice ', 'Invoice', 'invoice') ?? '',
-      price:       Number(getField(r, 'Price (INR)', 'Price__INR_', 'Price_INR_', 'price') ?? 0) || 0,
-      travelExpenses: Number(getField(r, 'Travel, Stay and Misc. Expenses', 'travelExpenses') ?? 0) || 0,
+      invoice:        formatDate(getField(r, 'Invoice ', 'Invoice', 'invoice')),
+      price:          Number(getField(r, 'Price (INR)', 'Price__INR_', 'Price_INR_', 'price') ?? 0) || 0,
+      travelExpenses: Number(getField(r, 'Travel, Stay and Misc Expenses', 'Travel, Stay and Misc. Expenses', 'travelExpenses') ?? 0) || 0,
+      gst:            Number(getField(r, 'GST', 'gst') ?? 0) || 0,
+      payment:        getField(r, 'Payment', 'payment') ?? '',
+      amountReceived: getField(r, 'Amount Received', 'Amount_Received', 'amountReceived') ?? '',
+      receivedDate:   formatDate(getField(r, 'Received Date', 'ReceivedDate', 'Received_Date', 'receivedDate')),
+      comments:       getField(r, 'Comments ', 'Comments', 'comments') ?? '',
+      feedback:       getField(r, 'Feedback ', 'Feedback', 'feedback') ?? '',
+      nps:            getField(r, 'NPS', 'nps') ?? '',
     };
   }).filter(r => r.company); // only require company — egId always has a fallback
 }
 
 export async function addEngagementRow(rowData) {
+  // Use exact Excel column names for fields with spaces/special chars so PA
+  // triggerBody()?['Service Type'] matches without needing camelCase mapping.
+  // Single-word columns (sector, offering, etc.) still work as-is (CI match).
   return callEngagementFlow('create', {
-    'EG.ID': rowData.egId,
-    'Company': rowData.company,
-    ' Start Date': rowData.startDate,
-    'End Date': rowData.endDate,
-    'Topic ': rowData.topic,
-    'Sector': rowData.sector,
-    'Service Type': rowData.serviceType,
-    'Day': rowData.day,
-    'Location': rowData.location,
-    'Consultant - 1': rowData.consultant1,
-    'Status': rowData.status,
-    'Price (INR)': rowData.price,
+    'EG ID':                           rowData.egId           || '',
+    company:                           rowData.company        || '',
+    'Start Date':                      rowData.startDate      || '',
+    'End Date':                        rowData.endDate        || '',
+    topic:                             rowData.topic          || '',
+    sector:                            rowData.sector         || '',
+    'Service Type':                    rowData.serviceType    || '',
+    offering:                          rowData.offering       || '',
+    day:                               rowData.day            ?? 1,
+    location:                          rowData.location       || '',
+    'Consultant - 1':                  rowData.consultant1    || '',
+    'Consultant - 2':                  rowData.consultant2    || '',
+    status:                            rowData.status         || '',
+    contract:                          rowData.contract       || '',
+    'PO Status':                       rowData.poStatus       || '',
+    invoice:                           rowData.invoice        || '',
+    'Price (INR)':                     rowData.price          || 0,
+    'Travel, Stay and Misc Expenses':  rowData.travelExpenses || 0,
+    gst:                               rowData.gst            || 0,
+    payment:                           rowData.payment        || '',
+    'Amount Received':                 rowData.amountReceived || '',
+    'Received Date':                   rowData.receivedDate   || '',
+    comments:                          rowData.comments       || '',
+    feedback:                          rowData.feedback       || '',
+    nps:                               rowData.nps            || '',
   });
 }
 
 export async function updateEngagementRow(egId, sno, updates) {
-  return callEngagementFlow('update', { egId, sno, ...updates });
+  // Key column in PA is "S No" — send as a STRING so PA's triggerBody()?['S No']
+  // resolves to a valid row identifier (number type causes PA to return id=null).
+  return callEngagementFlow('update', { 'S No': String(sno), ...updates });
 }
 
 export async function deleteEngagementRow(egId, sno) {
@@ -221,7 +246,7 @@ export async function getOpsChecklist() {
   const rows = Array.isArray(data?.value) ? data.value : Array.isArray(data) ? data : [];
   return rows.map((r, i) => ({
     sno:             getField(r,'S No','S.No','S_No','sno') ?? i + 1,
-    egId:            getField(r,'EG.ID','EG_ID') ?? '',
+    egId:            getField(r,'EG.ID','EG_ID','EG_x002e_ID') ?? '',
     company:         getField(r,'Company') ?? '',
     clientSpoc:      getField(r,'Client SPOC','Client_SPOC') ?? '',
     startDate:       fmtDtField(getField(r,'Engagement\nStart Date','Engagement_x000a_Start_Date','Engagement Start Date')),
