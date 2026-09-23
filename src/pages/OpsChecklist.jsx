@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { getOpsChecklist, addOpsRow, updateOpsRow, deleteOpsRow } from '../services/api.js';
+import { syncOpsWithEC } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -554,6 +555,8 @@ export default function OpsChecklist({ onRefreshed }) {
   const [editRow,   setEditRow]   = useState(null);
   const [deleteRow, setDeleteRow] = useState(null);
   const [saving,    setSaving]    = useState(false);
+  const [syncing,   setSyncing]   = useState(false);
+  const [syncProg,  setSyncProg]  = useState(null); // { done, total }
   const [toast,     setToast]     = useState('');
 
   const { canEdit } = usePermissions();
@@ -627,6 +630,24 @@ export default function OpsChecklist({ onRefreshed }) {
     finally { setSaving(false); }
   };
 
+  const handleSyncWithEC = async () => {
+    setSyncing(true);
+    setSyncProg({ done: 0, total: 0 });
+    try {
+      const { updated, added, errors } = await syncOpsWithEC(p => setSyncProg(p));
+      const errPart = errors.length ? ` · ${errors.length} error${errors.length > 1 ? 's' : ''}` : '';
+      showToast(`✓ Synced: ${updated} updated, ${added} added${errPart}`);
+      // Wait briefly for Excel Online to settle, then reload
+      await new Promise(r => setTimeout(r, 1500));
+      await load();
+    } catch(e) {
+      showToast('❌ Sync failed: ' + e.message);
+    } finally {
+      setSyncing(false);
+      setSyncProg(null);
+    }
+  };
+
   if (loading) return <LoadingState message="Loading Ops Checklist from OneDrive…" />;
   if (error)   return <ErrorState error={error} onRetry={load} />;
 
@@ -660,8 +681,21 @@ export default function OpsChecklist({ onRefreshed }) {
             <select className="form-input" value={statusF} onChange={e => setStatusF(e.target.value)}>
               {['All','Scheduled','Delivered','Tentative','Cancelled'].map(s => <option key={s}>{s}</option>)}
             </select>
-            <button className="btn btn-outline btn-sm" onClick={load}>↺</button>
-            {canEdit('ops') && <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add</button>}
+            <button className="btn btn-outline btn-sm" onClick={load} disabled={syncing}>↺</button>
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={handleSyncWithEC}
+              disabled={syncing || saving}
+              title="Pull matching rows from Engagement Calendar and update / add them here"
+              style={{ color: syncing ? 'var(--muted)' : 'var(--accent)', borderColor: 'var(--accent)' }}
+            >
+              {syncing
+                ? syncProg?.total > 0
+                  ? `⏳ ${syncProg.done}/${syncProg.total}`
+                  : '⏳ Syncing…'
+                : '🔄 Sync with EC'}
+            </button>
+            {canEdit('ops') && <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)} disabled={syncing}>+ Add</button>}
           </div>
 
           <div className="card" style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
