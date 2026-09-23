@@ -152,8 +152,9 @@ export async function getEngagements(filters = {}) {
       egId: String(egId),
       sno:  getField(r, 'S No', 'S.No', 'S_No', 'sno') ?? i + 1,
       company:     getField(r, 'Company', 'company') ?? '',
-      // PA may trim leading space from ' Start Date'
-      startDate:   formatDate(getField(r, ' Start Date', 'Start Date', 'StartDate', 'Start_Date', 'startDate')),
+      // EC column is ' Start Date' (leading space). PA converts spaces→underscores,
+      // so the leading space becomes a leading underscore: '_Start_Date'.
+      startDate:   formatDate(getField(r, '_Start_Date', ' Start Date', 'Start Date', 'StartDate', 'Start_Date', 'startDate')),
       endDate:     formatDate(getField(r, 'End Date', 'EndDate', 'End_Date', 'endDate')),
       // PA may trim trailing space from 'Topic '
       topic:       String(getField(r, 'Topic ', 'Topic', 'topic') ?? '').replace(/\s+/g, ' ').trim(),
@@ -216,9 +217,9 @@ export async function addEngagementRow(rowData) {
 }
 
 export async function updateEngagementRow(egId, sno, updates) {
-  // Key column in PA is "S No" — send as a STRING so PA's triggerBody()?['S No']
-  // resolves to a valid row identifier (number type causes PA to return id=null).
-  return callEngagementFlow('update', { 'S No': String(sno), ...updates });
+  // Use 'rowId' (no spaces) as the key so PA's expression editor can resolve it
+  // cleanly — 'S No' with a space causes the PA token to stay pink/invalid.
+  return callEngagementFlow('update', { rowId: String(sno), ...updates });
 }
 
 export async function deleteEngagementRow(egId, sno) {
@@ -341,8 +342,9 @@ export async function getOpsChecklist() {
 }
 
 const OPS_FIELD_MAP = {
-  egId:'EG.ID', company:'Company', clientSpoc:'Client SPOC',
-  startDate:'Engagement\nStart Date', endDate:'Engagement\nEnd Date',
+  sno:'S No',
+  egId:'EG ID', company:'company', clientSpoc:'Client SPOC',
+  startDate:'Engagement Start Date', endDate:'Engagement End Date',
   topic:'Topic', sector:'Sector', serviceType:'Service Type', offering:'Offering',
   internalPoc:'Internal POC', contractType:'Contract Type', contractStatus:'Contract Status',
   paxListReceived:'Pax List\nReceived', noOfParticipants:'No of\nParticipants',
@@ -374,6 +376,15 @@ export async function updateOpsRow(sno, changes) {
   for (const [k, v] of Object.entries(changes)) {
     excelFields[OPS_FIELD_MAP[k] || k] = v;
   }
+  // Belt-and-suspenders: send ambiguous fields under every possible key name so
+  // PA picks up whichever spelling its expression references (dot vs space for
+  // EG ID, newline vs space for date columns — PA can't type newlines in formulas).
+  const egVal = excelFields['EG ID'] ?? excelFields['EG.ID'];
+  if (egVal !== undefined) { excelFields['EG ID'] = egVal; excelFields['EG.ID'] = egVal; }
+  const sdVal = excelFields['Engagement Start Date'];
+  if (sdVal !== undefined) excelFields['Engagement\nStart Date'] = sdVal;
+  const edVal = excelFields['Engagement End Date'];
+  if (edVal !== undefined) excelFields['Engagement\nEnd Date'] = edVal;
   return callOpsFlow('update', { rowId: sno, ...excelFields });
 }
 
@@ -382,6 +393,14 @@ export async function addOpsRow(form) {
   for (const [k, v] of Object.entries(form)) {
     if (v !== undefined && v !== '') excelFields[OPS_FIELD_MAP[k] || k] = v;
   }
+  // Belt-and-suspenders: same alias logic as updateOpsRow — covers both create
+  // and update paths so EG ID and dates land regardless of PA expression spelling.
+  const egVal = excelFields['EG ID'] ?? excelFields['EG.ID'];
+  if (egVal !== undefined) { excelFields['EG ID'] = egVal; excelFields['EG.ID'] = egVal; }
+  const sdVal = excelFields['Engagement Start Date'];
+  if (sdVal !== undefined) excelFields['Engagement\nStart Date'] = sdVal;
+  const edVal = excelFields['Engagement End Date'];
+  if (edVal !== undefined) excelFields['Engagement\nEnd Date'] = edVal;
   return callOpsFlow('create', excelFields);
 }
 
@@ -404,14 +423,17 @@ export async function getContentDevTracker() {
     id:             i + 1,
     sno:            getField(r, 'SNo', 'sno') ?? i + 1,
     client:         getField(r, 'Client', 'client') ?? '',
-    startDate:      formatDate(getField(r, 'Program Start Date', 'Program_Start_Date', 'startDate')),
-    endDate:        formatDate(getField(r, 'End Date ', 'End Date', 'End_Date', 'endDate')),
+    // Excel column is 'Start Date ' (trailing space); PA may trim or convert it
+    startDate:      formatDate(getField(r, 'Start Date ', 'Start Date', 'Start_Date_', 'Start_Date', 'startDate')),
+    // CDT has no End Date column — field will always be empty
     programType:    getField(r, 'Program Type', 'Program_Type', 'programType') ?? '',
     evRequired:     getField(r, 'EV Required', 'EV_Required', 'evRequired') ?? '',
     poc:            getField(r, 'POC', 'poc') ?? '',
     dueDate:        formatDate(getField(r, 'Due Date', 'Due_Date', 'dueDate')),
     completionDate: formatDate(getField(r, 'Completion Date', 'Completion_Date', 'completionDate')),
     pmRequired:     getField(r, 'PM Required', 'PM_Required', 'pmRequired') ?? '',
+    // Excel column is 'Topic' (not 'Program Topic')
+    topic:          getField(r, 'Topic', 'topic') ?? '',
   })).filter(r => r.client);
 }
 
@@ -427,25 +449,40 @@ export async function addContentDevRow(rowData) {
     'POC':          rowData.poc         || '',
     'PM Required':  rowData.pmRequired  || '',
   };
-  if (rowData.startDate)      body['Program Start Date'] = rowData.startDate;
-  if (rowData.endDate)        body['End Date ']          = rowData.endDate;
-  if (rowData.dueDate)        body['Due Date']           = rowData.dueDate;
-  if (rowData.completionDate) body['Completion Date']    = rowData.completionDate;
+  // sno is optional — passed by syncCDTWithEC so the Excel row gets the correct
+  // S No from the Engagement Calendar instead of auto-incrementing.
+  if (rowData.sno != null && rowData.sno !== '') body['SNo'] = rowData.sno;
+  // Send Start Date under both spellings: PA flow may have been built with or
+  // without the trailing space that the Excel column header has.
+  if (rowData.startDate) {
+    body['Start Date']  = rowData.startDate;   // without trailing space
+    body['Start Date '] = rowData.startDate;   // with trailing space (Excel column)
+  }
+  // No 'End Date' column in CDT Excel — omitted intentionally.
+  // Due Date is a formula in Excel — never send it; let Excel calculate it.
+  if (rowData.completionDate) body['Completion Date'] = rowData.completionDate;
+  // 'Topic' is the actual Excel column name (NOT 'Program Topic')
+  if (rowData.topic)          body['Topic']            = rowData.topic;
   return callContentDevFlow('create', body);
 }
 
 export async function updateContentDevRow(sno, rowData) {
   return callContentDevFlow('update', {
     sno,
-    'Client':               rowData.client         || '',
-    'Program Start Date':   rowData.startDate      || '',
-    'End Date ':            rowData.endDate        || '',
-    'Program Type':         rowData.programType    || '',
-    'EV Required':          rowData.evRequired     || '',
-    'POC':                  rowData.poc            || '',
-    'Due Date':             rowData.dueDate        || '',
-    'Completion Date':      rowData.completionDate || '',
-    'PM Required':          rowData.pmRequired     || '',
+    'SNo':             sno,                         // keep SNo cell in sync with the key
+    'Client':          rowData.client         || '',
+    // Send Start Date under both spellings — PA flow parameter name may or may
+    // not have the trailing space that the Excel column header carries.
+    'Start Date':      rowData.startDate      || '',  // without trailing space
+    'Start Date ':     rowData.startDate      || '',  // with trailing space (Excel column)
+    // No 'End Date' column in CDT Excel — omitted intentionally.
+    'Program Type':    rowData.programType    || '',
+    'EV Required':     rowData.evRequired     || '',
+    'POC':             rowData.poc            || '',
+    // Due Date is a formula in Excel — never overwrite it; let Excel calculate it.
+    'Completion Date': rowData.completionDate || '',
+    'PM Required':     rowData.pmRequired     || '',
+    'Topic':           rowData.topic          || '',  // actual Excel column name (NOT 'Program Topic')
   });
 }
 
