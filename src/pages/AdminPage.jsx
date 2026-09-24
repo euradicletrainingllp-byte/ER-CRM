@@ -7,6 +7,7 @@
  */
 import { useState, useEffect } from 'react';
 import { usePermissions } from '../hooks/usePermissions.js';
+import { DeleteButton } from '../components/ActionButtons.jsx';
 import { ADMIN_EMAIL } from '../config/permissions.js';
 import { usePermissionsContext } from '../context/PermissionsContext.jsx';
 
@@ -350,14 +351,7 @@ export default function AdminPage() {
                 {/* Remove */}
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
                   {!isAdminRow && (
-                    <button
-                      onClick={() => removeUser(i)}
-                      title="Remove user"
-                      style={{
-                        background: 'none', border: '1px solid #fecaca', borderRadius: 6,
-                        padding: '4px 8px', cursor: 'pointer', color: '#dc2626', fontSize: 13,
-                      }}
-                    >✕</button>
+                    <DeleteButton iconOnly title="Remove user" onClick={() => removeUser(i)} />
                   )}
                 </div>
               </div>

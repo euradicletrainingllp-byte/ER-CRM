@@ -1,6 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getEngagements } from '../services/api.js';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
+import { useExcelFilters, ExcelFilterButtons, FILTER_COLUMNS } from '../components/ExcelFilter.jsx';
+
+// Year / Month are handled by the calendar's own month navigation
+const ER_FILTER_COLUMNS = FILTER_COLUMNS.filter(c => c.key !== 'year' && c.key !== 'month');
 
 /* ─── Color system ───────────────────────────────────────────────────────── */
 // Light pastel bg + dark text = readable bars + visible status border
@@ -170,7 +174,7 @@ function SessionModal({ eng, onClose }) {
               ['Duration',    eng.day ? `${eng.day} day${eng.day != 1 ? 's' : ''}` : '—'],
               ['Location',    eng.location || '—'],
               ['Sector',      eng.sector || '—'],
-              ['PO Status',   eng.poStatus || '—'],
+              ['Contract Status', eng.poStatus || '—'],
             ].map(([lbl, val]) => (
               <div key={lbl}>
                 <div style={{ fontSize:10, fontWeight:700, color:'#94a3b8',
@@ -344,6 +348,10 @@ export default function ERCalendar({ onRefreshed }) {
 
   useEffect(() => { load(); }, []);
 
+  // Excel-style filters — calendar only shows engagements that pass them
+  const filterState = useExcelFilters(data, ER_FILTER_COLUMNS);
+  const shown = filterState.filtered;
+
   const days  = useMemo(() => buildMonthGrid(year, month), [year, month]);
   const today = toYMD(now);
 
@@ -361,7 +369,7 @@ export default function ERCalendar({ onRefreshed }) {
     const map = {};
     days.forEach(({ date }) => {
       const ymd = toYMD(date);
-      map[ymd] = data.filter(eng => {
+      map[ymd] = shown.filter(eng => {
         const start = parseDate(eng.startDate);
         const end   = parseDate(eng.endDate) || start;
         if (!start) return false;
@@ -369,10 +377,10 @@ export default function ERCalendar({ onRefreshed }) {
       });
     });
     return map;
-  }, [days, data]);
+  }, [days, shown]);
 
   const thisMonthEngs = useMemo(() => {
-    return data.filter(eng => {
+    return shown.filter(eng => {
       const start = parseDate(eng.startDate);
       const end   = parseDate(eng.endDate) || start;
       if (!start) return false;
@@ -380,7 +388,7 @@ export default function ERCalendar({ onRefreshed }) {
       const monthEnd   = toYMD(new Date(Date.UTC(year, month + 1, 0)));
       return toYMD(start) <= monthEnd && toYMD(end) >= monthStart;
     });
-  }, [data, year, month]);
+  }, [shown, year, month]);
 
   // Dynamic client legend for this month only
   const clientsThisMonth = useMemo(() => {
@@ -436,6 +444,21 @@ export default function ERCalendar({ onRefreshed }) {
           background:'#eff6ff', color:'#2563eb', fontWeight:700, fontSize:12, cursor:'pointer',
         }}>Today</button>
         <button className="btn btn-outline btn-sm" onClick={load}>↺ Refresh</button>
+      </div>
+
+      {/* Excel-style Filter Bar */}
+      <div style={{
+        background:'#fff', border:'1px solid #e2e8f0', borderRadius:10,
+        padding:'12px 16px', marginBottom:14,
+        display:'flex', flexWrap:'wrap', gap:8, alignItems:'center',
+      }}>
+        <span style={{ fontSize:12, fontWeight:700, color:'#64748b', marginRight:4 }}>🔽 Filter by:</span>
+        <ExcelFilterButtons state={filterState} sortable={false} />
+        {filterState.activeFilters > 0 && (
+          <span style={{ marginLeft:'auto', fontSize:12, color:'#64748b' }}>
+            Showing <strong>{shown.length}</strong> of {data.length} engagements
+          </span>
+        )}
       </div>
 
       {/* Legends */}

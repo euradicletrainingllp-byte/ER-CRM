@@ -2,8 +2,9 @@ import { useState, useEffect, useMemo } from 'react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { getOpsChecklist, addOpsRow, updateOpsRow, deleteOpsRow } from '../services/api.js';
-import { syncOpsWithEC } from '../services/syncWithEC.js';
+import { syncOpsWithEC, syncOpsFinanceToEC, OPS_FINANCE_TO_EC } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const addDays = (dateStr, n) => {
@@ -256,6 +257,8 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
   const [tab, setTab] = useState('checklist');
   const [editingPoc, setEditingPoc]   = useState(null);
   const [editingDone, setEditingDone] = useState(null);
+  // Item waiting for a completion date before 'Yes' is saved
+  const [pendingYes, setPendingYes]   = useState(null);
   const [invForm, setInvForm] = useState({
     invoiceGenerated:  row.invoiceGenerated  || '',
     invoicePoc:        row.invoicePoc        || '',
@@ -376,8 +379,18 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
                     <td style={{ padding:'8px 6px 6px 0', verticalAlign:'top' }}>
                       {canEdit ? (
                         <select
-                          value={status}
-                          onChange={e => onUpdate(row, { [item.key]: e.target.value })}
+                          value={pendingYes === item.key ? 'Yes' : status}
+                          onChange={e => {
+                            const v = e.target.value;
+                            // 'Yes' is only stored together with a completion date
+                            if (v === 'Yes' && !toInputDate(done)) {
+                              setPendingYes(item.key);
+                              setEditingDone(null);
+                              return;
+                            }
+                            setPendingYes(p => (p === item.key ? null : p));
+                            onUpdate(row, { [item.key]: v });
+                          }}
                           disabled={saving}
                           style={{
                             fontSize:11, padding:'2px 4px', borderRadius:4, border:'1px solid var(--border)',
@@ -427,11 +440,32 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
 
                     {/* Done Date */}
                     <td style={{ padding:'8px 6px 6px 0', verticalAlign:'top' }}>
-                      {editingDone?.key === item.key ? (
+                      {pendingYes === item.key ? (
+                        <div>
+                          <input
+                            autoFocus type="date" required
+                            onChange={e => {
+                              const d = e.target.value;
+                              if (!d) return;
+                              onUpdate(row, { [item.key]: 'Yes', [item.doneKey]: d });
+                              setPendingYes(null);
+                            }}
+                            onBlur={e => { if (!e.target.value) setPendingYes(null); }}
+                            style={{ width:110, fontSize:11, padding:'2px 4px', border:'1.5px solid var(--red)', borderRadius:4 }}
+                          />
+                          <div style={{ fontSize:10, color:'var(--red)', fontWeight:600, marginTop:2 }}>Date required for Yes</div>
+                        </div>
+                      ) : editingDone?.key === item.key ? (
                         <input
                           autoFocus type="date"
                           defaultValue={toInputDate(done)}
-                          onBlur={e => { onUpdate(row, { [item.doneKey]: e.target.value }); setEditingDone(null); }}
+                          onBlur={e => {
+                            const d = e.target.value;
+                            // Clearing the date of a 'Yes' item → status goes back to Pending
+                            if (!d && status === 'Yes') onUpdate(row, { [item.doneKey]: '', [item.key]: '' });
+                            else if (d !== toInputDate(done)) onUpdate(row, { [item.doneKey]: d });
+                            setEditingDone(null);
+                          }}
                           style={{ width:110, fontSize:11, padding:'2px 4px', border:'1px solid var(--accent)', borderRadius:4 }}
                         />
                       ) : (
@@ -480,7 +514,11 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
               {canEdit ? (
                 <select className="form-input" style={{ fontSize:12 }} value={invForm.invoiceGenerated}
                   onChange={e => { const v=e.target.value; setInvForm(f=>({...f,invoiceGenerated:v})); onUpdate(row,{invoiceGenerated:v}); }}>
-                  {['','Yes','No','NA'].map(v => <option key={v} value={v}>{v||'— select —'}</option>)}
+                  {['','Raised','Not Raised'].map(v => <option key={v} value={v}>{v||'— select —'}</option>)}
+                  {/* keep an older value (e.g. Yes/No/NA) visible until it is changed */}
+                  {invForm.invoiceGenerated && !['Raised','Not Raised'].includes(invForm.invoiceGenerated) && (
+                    <option value={invForm.invoiceGenerated}>{invForm.invoiceGenerated} (old value)</option>
+                  )}
                 </select>
               ) : <div style={{ fontWeight:500 }}>{row.invoiceGenerated||'—'}</div>}
             </div>
@@ -591,7 +629,21 @@ export default function OpsChecklist({ onRefreshed }) {
     try {
       await updateOpsRow(row.sno, changes);
       setData(prev => prev.map(r => r.sno === row.sno ? { ...r, ...changes } : r));
-      showToast('✓ Saved');
+
+      // Finance fields → keep Engagement Calendar in sync (only when a value actually changed)
+      const financeChanged = Object.keys(changes).some(k =>
+        k in OPS_FINANCE_TO_EC && String(changes[k] ?? '') !== String(row[k] ?? '')
+      );
+      if (financeChanged) {
+        try {
+          const res = await syncOpsFinanceToEC(row.sno, changes, row);
+          showToast(res.synced ? '✓ Saved · Engagement Calendar updated' : `✓ Saved · ⚠ EC not updated: ${res.reason}`);
+        } catch (err) {
+          showToast('✓ Saved · ⚠ Engagement Calendar sync failed: ' + err.message);
+        }
+      } else {
+        showToast('✓ Saved');
+      }
     } catch(e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
   };
@@ -728,8 +780,8 @@ export default function OpsChecklist({ onRefreshed }) {
                             </div>
                             {canEdit('ops') && (
                               <div style={{ display:'flex', flexDirection:'column', gap:3 }} onClick={ev => ev.stopPropagation()}>
-                                <button className="btn btn-outline btn-sm" style={{ padding:'2px 7px', fontSize:11 }} onClick={() => setEditRow(r)}>✏</button>
-                                <button className="btn btn-sm" style={{ padding:'2px 7px', fontSize:11, background:'#fee2e2', color:'var(--red)', border:'1px solid #fca5a5' }} onClick={() => setDeleteRow(r)}>🗑</button>
+                                <EditButton iconOnly title="Edit Session" onClick={() => setEditRow(r)} />
+                                <DeleteButton iconOnly title="Delete Session" onClick={() => setDeleteRow(r)} />
                               </div>
                             )}
                           </div>

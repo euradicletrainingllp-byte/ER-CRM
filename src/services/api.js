@@ -150,7 +150,8 @@ export async function getEngagements(filters = {}) {
     return {
       id: i + 1,
       egId: String(egId),
-      sno:  getField(r, 'S No', 'S.No', 'S_No', 'sno') ?? i + 1,
+      // Excel column is 'SNo' — read it first so the real S No is used (not the list index)
+      sno:  getField(r, 'SNo', 'S No', 'S.No', 'S_No', 'sno') ?? i + 1,
       company:     getField(r, 'Company', 'company') ?? '',
       // EC column is ' Start Date' (leading space). PA converts spaces→underscores,
       // so the leading space becomes a leading underscore: '_Start_Date'.
@@ -217,9 +218,16 @@ export async function addEngagementRow(rowData) {
 }
 
 export async function updateEngagementRow(egId, sno, updates) {
-  // Use 'rowId' (no spaces) as the key so PA's expression editor can resolve it
-  // cleanly — 'S No' with a space causes the PA token to stay pink/invalid.
-  return callEngagementFlow('update', { rowId: String(sno), ...updates });
+  // The flow's "Update a row" Key Value must never be empty — PA fails with
+  // "parameters are invalid, they may not be null or empty: 'id'" (HTTP 502).
+  const key = sno == null ? '' : String(sno).trim();
+  if (!key) {
+    throw new Error(`Cannot update engagement ${egId || ''}: its S No is blank in Excel. Fill in the S No cell for this row and refresh.`);
+  }
+  // The flow's Key Column is 'SNo' and its Key Value reads triggerBody()?['SNo']
+  // (case-sensitive). 'SNo' also feeds the item/SNo cell, so it must carry the
+  // real value or the S No cell would be blanked. rowId / sno kept as fallbacks.
+  return callEngagementFlow('update', { ...updates, SNo: key, rowId: key, sno: key });
 }
 
 export async function deleteEngagementRow(egId, sno) {

@@ -7,6 +7,8 @@ import {
   deleteSolutionRow,
 } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
+import { Trash2 } from 'lucide-react';
 
 // ── Status colours ────────────────────────────────────────────────────────────
 const STATUS_COLORS = {
@@ -62,7 +64,7 @@ const inp = {
 const PROGRAM_TYPE_OPTS     = ['Standard', 'Customized'];
 const ENGAGEMENT_TYPE_OPTS  = ['Standalone', 'Journey'];
 const LINE_OF_SERVICE_OPTS  = ['Training', 'Talent Management', 'HR Services', 'Coaching', 'Other'];
-const TYPE_OF_SERVICE_OPTS  = ['Facilitation', 'Coaching', 'Assessment & Development Centres', 'Success Presentation'];
+const TYPE_OF_SERVICE_OPTS  = ['Facilitation', 'Coaching', 'One-O-One Coaching', 'Mini Group Coaching', 'Assessment & Development Centres', 'Success Presentation'];
 const DEV_CATEGORY_OPTS     = [
   'Power Skills Enablement',
   'Leadership Development',
@@ -229,7 +231,22 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
 
           <Field label="Client Name *" half><input style={inp} value={form.clientName} onChange={e => set('clientName', e.target.value)} /></Field>
           <Field label="Client POC" half><input style={inp} value={form.clientPoc} onChange={e => set('clientPoc', e.target.value)} /></Field>
-          <Field label="Contact Number" half><input style={inp} value={form.contactNumber} onChange={e => set('contactNumber', e.target.value)} /></Field>
+          <Field label="Contact Number" half>
+            <input
+              type="tel"
+              inputMode="numeric"
+              maxLength={10}
+              style={inp}
+              value={form.contactNumber || ''}
+              onChange={e => set('contactNumber', e.target.value.replace(/\D/g, '').slice(0, 10))}
+              placeholder="10-digit mobile number"
+            />
+            {!!form.contactNumber && String(form.contactNumber).replace(/\D/g, '').length !== 10 && (
+              <span style={{ fontSize: 11, color: '#b45309' }}>
+                {String(form.contactNumber).replace(/\D/g, '').length}/10 digits
+              </span>
+            )}
+          </Field>
 
           {/* ── Date of Discussion — auto-fills BD Month on change ── */}
           <Field label="Date of Discussion" half>
@@ -279,8 +296,14 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
 
 // ── Solution Modal ─────────────────────────────────────────────────────────────
 // proposalId is always known from the BD row context — no picker shown
-function SolModal({ initial, proposalId, onSave, onClose, saving }) {
-  const [form, setForm] = useState({ ...(initial || EMPTY_SOL), proposalId });
+function SolModal({ initial, proposalId, programTopic, bdStatus, onSave, onClose, saving }) {
+  // New items: Solution Topic defaults to the proposal's Program Topic (editable).
+  // Status always mirrors the BD Status of the parent proposal.
+  const [form, setForm] = useState(() => ({
+    ...(initial || { ...EMPTY_SOL, solutionTopic: programTopic || '' }),
+    proposalId,
+    status: bdStatus || (initial?.status) || 'In Process',
+  }));
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const isEdit = !!initial?.sno;
 
@@ -305,7 +328,12 @@ function SolModal({ initial, proposalId, onSave, onClose, saving }) {
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-          <Field label="Solution Topic *"><input style={inp} value={form.solutionTopic} onChange={e => set('solutionTopic', e.target.value)} /></Field>
+          <Field label="Solution Topic *">
+            <input style={inp} value={form.solutionTopic || ''} onChange={e => set('solutionTopic', e.target.value)} placeholder={programTopic || ''} />
+            {!initial && programTopic && (
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>Pre-filled from Proposal Topic — edit if needed</span>
+            )}
+          </Field>
           <Field label="Program Type" half>
             <ComboSelect options={PROGRAM_TYPE_OPTS} value={form.programType} onChange={v => set('programType', v)} />
           </Field>
@@ -324,19 +352,20 @@ function SolModal({ initial, proposalId, onSave, onClose, saving }) {
           <Field label="Solution Value" half><input style={inp} value={form.solutionValue} onChange={e => set('solutionValue', e.target.value)} placeholder="₹ Amount" /></Field>
           <Field label="Remarks"><textarea style={{ ...inp, resize: 'vertical', minHeight: 56 }} value={form.remarks} onChange={e => set('remarks', e.target.value)} /></Field>
           <Field label="Proposal V1 Link2"><input style={inp} value={form.proposalV1Link} onChange={e => set('proposalV1Link', e.target.value)} placeholder="https://..." /></Field>
-          <Field label="Status" half>
-            <select style={inp} value={form.status} onChange={e => set('status', e.target.value)}>
-              {SOL_STATUS_OPTIONS.map(s => <option key={s}>{s}</option>)}
-            </select>
+          <Field label="Status (from BD Status)" half>
+            <div style={{ ...inp, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', cursor: 'default' }}>
+              {pill(form.status)}
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>Change it in BD Tracker</span>
+            </div>
           </Field>
         </div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
           <button onClick={onClose} disabled={saving} style={{ padding: '8px 18px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}>Cancel</button>
-          <button onClick={() => onSave(form)} disabled={saving || !form.proposalId || !form.solutionTopic.trim()} style={{ padding: '8px 22px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, cursor: (saving || !form.proposalId || !form.solutionTopic.trim()) ? 'not-allowed' : 'pointer', opacity: (saving || !form.proposalId || !form.solutionTopic.trim()) ? 0.5 : 1 }}>
+          <button onClick={() => onSave(form)} disabled={saving || !form.proposalId || !(form.solutionTopic || '').trim()} style={{ padding: '8px 22px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, cursor: (saving || !form.proposalId || !(form.solutionTopic || '').trim()) ? 'not-allowed' : 'pointer', opacity: (saving || !form.proposalId || !(form.solutionTopic || '').trim()) ? 0.5 : 1 }}>
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
-        {(!form.proposalId || !form.solutionTopic.trim()) && (
+        {(!form.proposalId || !(form.solutionTopic || '').trim()) && (
           <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Proposal ID and Solution Topic are required</p>
         )}
       </div>
@@ -374,7 +403,7 @@ function DeleteDialog({ label, onConfirm, onCancel, saving, type, linkedCount })
           </>
         ) : (
           <>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}><span style={{ display: 'inline-flex', padding: 12, borderRadius: '50%', background: '#fee2e2', color: '#dc2626' }}><Trash2 size={28} /></span></div>
             <h3 style={{ margin: '0 0 8px' }}>Delete this entry?</h3>
             <p style={{ margin: '0 0 20px', color: 'var(--muted)', fontSize: 14 }}>{label}</p>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
@@ -457,40 +486,48 @@ export default function SolutionTracker({ onRefreshed, view }) {
 
 
   // ── CRUD handlers ─────────────────────────────────────────────────────────
+  // If the row carries a solution item, its status mirrors the BD Status.
+  function withSolStatus(form, existing) {
+    const hasSol = !!(form.solutionTopic || existing?.solutionTopic);
+    return hasSol && form.bdStatus ? { ...form, status: form.bdStatus } : form;
+  }
+
+  // Push BD-level fields to every other row sharing this Proposal ID.
+  async function propagateBdFields(form, skipSno) {
+    const otherRows = rows.filter(
+      r => r.proposalId === form.proposalId && String(r.sno) !== String(skipSno)
+    );
+    const changed = otherRows.filter(r =>
+      (form.submissionToClient && r.submissionToClient !== form.submissionToClient) ||
+      (form.bdStatus && r.bdStatus !== form.bdStatus) ||
+      (form.bdStatus && r.solutionTopic && r.status !== form.bdStatus)
+    );
+    await Promise.all(changed.map(r => updateSolutionRow(r.sno, {
+      ...r,
+      ...(form.submissionToClient ? { submissionToClient: form.submissionToClient } : {}),
+      ...(form.bdStatus ? { bdStatus: form.bdStatus } : {}),
+      ...(form.bdStatus && r.solutionTopic ? { status: form.bdStatus } : {}),
+    })));
+  }
+
   async function handleSaveBD(form) {
     setSaving(true);
     try {
       // Use != null so sno=0 is treated as a valid row key (truthy check would fail for 0)
       if (form.sno != null && form.sno !== '') {
         // ── Edit existing BD anchor row ──────────────────────────────────────
-        await updateSolutionRow(form.sno, form);
+        const self = rows.find(r => String(r.sno) === String(form.sno));
+        await updateSolutionRow(form.sno, withSolStatus(form, self));
 
-        // Propagate submissionToClient to every other sol row under this P ID
-        // so all Excel rows reflect the same BD-level date.
-        if (form.submissionToClient) {
-          const otherRows = rows.filter(
-            r => r.proposalId === form.proposalId &&
-                 String(r.sno) !== String(form.sno)
-          );
-          await Promise.all(
-            otherRows.map(r => updateSolutionRow(r.sno, { ...r, submissionToClient: form.submissionToClient }))
-          );
-        }
+        // Propagate BD-level fields (submissionToClient + BD Status) to every
+        // other row under this P ID so all Excel rows stay in sync.
+        await propagateBdFields(form, form.sno);
       } else {
         // ── New BD entry ─────────────────────────────────────────────────────
         const existingAnchor = rows.find(r => r.proposalId === form.proposalId && r.bdSNo);
         if (existingAnchor) {
-          await updateSolutionRow(existingAnchor.sno, form);
-          // Propagate submissionToClient to other rows too
-          if (form.submissionToClient) {
-            const otherRows = rows.filter(
-              r => r.proposalId === form.proposalId &&
-                   String(r.sno) !== String(existingAnchor.sno)
-            );
-            await Promise.all(
-              otherRows.map(r => updateSolutionRow(r.sno, { ...r, submissionToClient: form.submissionToClient }))
-            );
-          }
+          await updateSolutionRow(existingAnchor.sno, withSolStatus(form, existingAnchor));
+          await propagateBdFields(form, existingAnchor.sno);
         } else {
           await addSolutionRow(form);
         }
@@ -508,6 +545,10 @@ export default function SolutionTracker({ onRefreshed, view }) {
     setSaving(true);
     try {
       let payload = { ...form };
+
+      // Solution status always follows the proposal's BD Status
+      const bdAnchor = rows.find(r => r.proposalId === form.proposalId);
+      if (bdAnchor?.bdStatus) payload.status = bdAnchor.bdStatus;
 
       if (!form.sno && form.proposalId) {
         const anchor = rows.find(r => r.proposalId === form.proposalId);
@@ -706,14 +747,10 @@ export default function SolutionTracker({ onRefreshed, view }) {
                           {view === 'bd' && canEdit('bd') ? (
                             <div style={{ display: 'flex', gap: 5 }}>
                               {canUpdate('bd') && (
-                                <button
-                                  onClick={() => setBdModal(r)}
-                                  title="Edit BD Lead"
-                                  style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--card)', cursor: 'pointer', fontSize: 11 }}
-                                >✏️ Edit</button>
+                                <EditButton onClick={() => setBdModal(r)} title="Edit BD Lead" />
                               )}
                               {canDelete('bd') && (
-                                <button
+                                <DeleteButton
                                   onClick={() => setDelTarget({
                                     type: 'bd',
                                     sno: r.sno,
@@ -722,8 +759,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                     label: `${r.proposalId}${r.proposalVersion ? ' / ' + r.proposalVersion : ''} — ${r.clientName}`,
                                   })}
                                   title="Delete BD Lead (cascades to linked Solution items)"
-                                  style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #fca5a5', background: '#fee2e2', color: '#991b1b', cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' }}
-                                >🗑️ Delete</button>
+                                />
                               )}
                             </div>
                           ) : (
@@ -796,18 +832,18 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                             <td style={{ padding: '8px 10px' }}>{s.typeOfService || '—'}</td>
                                             <td style={{ padding: '8px 10px' }}>{s.developmentCategory || '—'}</td>
                                             <td style={{ padding: '8px 10px' }}>{s.solutionValue ? `₹${s.solutionValue}` : '—'}</td>
-                                            <td style={{ padding: '8px 10px' }}>{pill(s.status)}</td>
+                                            <td style={{ padding: '8px 10px' }}>{pill(r.bdStatus || s.status)}</td>
                                             <td style={{ padding: '8px 10px' }}>{r.submissionToClient || '—'}</td>
                                             <td style={{ padding: '8px 10px' }}>
                                               <div style={{ display: 'flex', gap: 5 }}>
-                                                <button
-                                                  onClick={() => setSolModal({ mode: 'edit', row: s })}
-                                                  style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--card)', cursor: 'pointer', fontSize: 11 }}
-                                                >✏️</button>
-                                                <button
+                                                <EditButton
+                                                  onClick={() => setSolModal({ mode: 'edit', row: s, programTopic: r.programTopic, bdStatus: r.bdStatus })}
+                                                  title="Edit Solution Item"
+                                                />
+                                                <DeleteButton
                                                   onClick={() => setDelTarget({ sno: s.sno, label: `SNo ${s.sno} — ${s.proposalId} / ${s.solutionTopic}`, type: 'sol' })}
-                                                  style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #fca5a5', background: '#fee2e2', color: '#991b1b', cursor: 'pointer', fontSize: 11 }}
-                                                >🗑️</button>
+                                                  title="Delete Solution Item"
+                                                />
                                                 {canCreate('engagement') && (
                                                   <button
                                                     title="Add to Engagement Calendar"
@@ -835,7 +871,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                   )}
 
                                   <button
-                                    onClick={() => setSolModal({ mode: 'add', lockedPid: r.proposalId })}
+                                    onClick={() => setSolModal({ mode: 'add', lockedPid: r.proposalId, programTopic: r.programTopic, bdStatus: r.bdStatus })}
                                     style={{ padding: '6px 14px', borderRadius: 6, border: '1px dashed var(--accent)', background: 'transparent', color: 'var(--accent)', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}
                                   >+ Add Solution Item</button>
                                 </>
@@ -871,6 +907,8 @@ export default function SolutionTracker({ onRefreshed, view }) {
         <SolModal
           initial={null}
           proposalId={solModal.lockedPid}
+          programTopic={solModal.programTopic}
+          bdStatus={solModal.bdStatus}
           onSave={handleSaveSol}
           onClose={() => setSolModal(null)}
           saving={saving}
@@ -880,6 +918,8 @@ export default function SolutionTracker({ onRefreshed, view }) {
         <SolModal
           initial={solModal.row}
           proposalId={solModal.row.proposalId}
+          programTopic={solModal.programTopic}
+          bdStatus={solModal.bdStatus}
           onSave={handleSaveSol}
           onClose={() => setSolModal(null)}
           saving={saving}

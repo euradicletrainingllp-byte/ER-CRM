@@ -3,6 +3,7 @@ import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { getContentDevTracker, addContentDevRow, updateContentDevRow, deleteContentDevRow } from '../services/api.js';
 import { syncCDTWithEC } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import { DeleteButton } from '../components/ActionButtons.jsx';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDt = d => {
@@ -233,8 +234,7 @@ function DetailPanel({ row, canEdit, onUpdate, onDelete, saving }) {
             {isCompleted ? '✓ Completed' : '⏳ Pending'}
           </span>
           {canEdit && (
-            <button className="btn btn-sm" style={{ padding:'3px 10px', fontSize:11, background:'#fee2e2', color:'var(--red)', border:'1px solid #fca5a5', marginTop:4 }}
-              onClick={() => onDelete(row)}>🗑 Delete</button>
+            <DeleteButton title="Delete Entry" style={{ marginTop:4 }} onClick={() => onDelete(row)} />
           )}
         </div>
       </div>

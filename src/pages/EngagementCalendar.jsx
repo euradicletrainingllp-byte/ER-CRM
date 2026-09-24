@@ -3,6 +3,8 @@ import { useLocation } from 'react-router-dom';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { getEngagements, addEngagementRow, updateEngagementRow, deleteEngagementRow } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
+import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.jsx';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -47,125 +49,6 @@ const STATUS_COLORS = {
   'Re-Schedule':  { bg: '#ffedd5', color: '#9a3412' },
 };
 
-/* ─── Excel-style multi-select filter dropdown ──────────────────────────── */
-function ExcelFilter({ label, allValues, selected, onChange }) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState('');
-  const ref = useRef(null);
-
-  // close on outside click
-  useEffect(() => {
-    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const visible = allValues.filter(v => v.toLowerCase().includes(search.toLowerCase()));
-  const allSelected = selected.size === 0; // size 0 = "All selected" state
-  const active = selected.size > 0;
-
-  const toggle = val => {
-    const next = new Set(selected);
-    if (next.has(val)) next.delete(val); else next.add(val);
-    // if all values are now checked (or none remain), reset to "All"
-    if (next.size === allValues.length) onChange(new Set());
-    else onChange(next);
-  };
-
-  const selectAll  = () => { setSearch(''); onChange(new Set()); };
-  const clearAll   = () => { onChange(new Set(allValues)); }; // select none = effectively hide all
-
-  return (
-    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 5,
-          padding: '6px 12px',
-          border: `1px solid ${active ? '#2563eb' : '#e2e8f0'}`,
-          borderRadius: 7,
-          background: active ? '#eff6ff' : '#fff',
-          color: active ? '#1e40af' : '#1a3a5c',
-          fontWeight: active ? 700 : 600,
-          fontSize: 12,
-          cursor: 'pointer',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        {label}
-        {active && (
-          <span style={{ background: '#2563eb', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px', fontWeight: 700 }}>
-            {selected.size}
-          </span>
-        )}
-        <span style={{ fontSize: 10, color: active ? '#2563eb' : '#94a3b8' }}>▼</span>
-      </button>
-
-      {open && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 0, marginTop: 4,
-          background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 600,
-          minWidth: 200, maxWidth: 280, padding: '10px 0',
-        }}>
-          {/* Search within filter */}
-          <div style={{ padding: '0 10px 8px' }}>
-            <input
-              autoFocus
-              placeholder="Search…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{
-                width: '100%', padding: '5px 10px', border: '1px solid #e2e8f0',
-                borderRadius: 6, fontSize: 12, outline: 'none',
-              }}
-            />
-          </div>
-
-          {/* Select All / Clear */}
-          <div style={{ display: 'flex', gap: 6, padding: '0 10px 8px', borderBottom: '1px solid #f1f5f9' }}>
-            <button onClick={selectAll} style={{ fontSize: 11, padding: '3px 10px', border: '1px solid #e2e8f0', borderRadius: 5, cursor: 'pointer', background: allSelected ? '#eff6ff' : '#fff', fontWeight: allSelected ? 700 : 500 }}>
-              All
-            </button>
-            <button onClick={clearAll} style={{ fontSize: 11, padding: '3px 10px', border: '1px solid #e2e8f0', borderRadius: 5, cursor: 'pointer', background: '#fff' }}>
-              Clear
-            </button>
-          </div>
-
-          {/* Value list */}
-          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-            {visible.length === 0 && (
-              <div style={{ padding: '10px 14px', fontSize: 12, color: '#94a3b8' }}>No matches</div>
-            )}
-            {visible.map(val => {
-              const checked = selected.size === 0 || selected.has(val);
-              return (
-                <label
-                  key={val}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 9,
-                    padding: '5px 14px', cursor: 'pointer', fontSize: 12,
-                    color: '#1a3a5c',
-                    background: checked && selected.size > 0 ? '#eff6ff' : 'transparent',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggle(val)}
-                    style={{ width: 14, height: 14, accentColor: '#2563eb', cursor: 'pointer' }}
-                  />
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val || '(blank)'}</span>
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ─── EG ID auto-generator ───────────────────────────────────────────────────
    Finds the largest numeric suffix across all existing EG IDs and increments.
    e.g. ["EG.ID 423", "EG.ID 425"] → "EG.ID 426"                            */
@@ -182,6 +65,9 @@ function generateNextEgId(existingIds) {
 }
 
 /* ─── Add / Edit Engagement Modal ──────────────────────────────────────── */
+// Fields synced from Ops Checklist → Finance — read-only in the Engagement Calendar form
+const OPS_MANAGED_FIELDS = ['invoice', 'payment', 'receivedDate'];
+
 function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, engagements }) {
   const isEdit = !!initial;
 
@@ -311,7 +197,7 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
                         price:          match.price          || '',
                         travelExpenses: '',
                         gst:            '',
-                        payment:        match.payment        || '',
+                        payment:        '',   // managed per session in Ops Checklist
                         amountReceived: '',
                         receivedDate:   '',
                         comments:       match.comments       || '',
@@ -350,24 +236,40 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
             ['Location (VILT / City)',          'location'],
             ['Lead Consultant',                 'consultant1'],
             ['Co-Consultant',                   'consultant2'],
-            ['Contract',                        'contract'],
-            ['PO Status',                       'poStatus'],
+            ['Contract Type',                   'contract'],
+            ['Contract Status',                 'poStatus'],
             ['Invoice Date',                    'invoice',         '', 'date'],
             ['Price (₹)',                       'price',           '', 'number'],
             ['Travel, Stay & Misc. Exp. (₹)',  'travelExpenses',  '', 'number'],
             ['GST (₹)',                         'gst',             '', 'number'],
-            ['Payment',                         'payment'],
+            ['Payment Status',                  'payment'],
             ['Amount Received',                 'amountReceived'],
             ['Received Date',                   'receivedDate',    '', 'date'],
             ['Comments',                        'comments',        'full'],
             ['Feedback',                        'feedback',        'full'],
             ['NPS',                             'nps'],
-          ].map(([label, key, span, type]) => (
-            <div className={`form-field ${span || ''}`} key={key}>
-              <label className="form-label">{label}</label>
-              <input type={type || 'text'} className="form-input" value={form[key]} onChange={e => set(key, e.target.value)} />
-            </div>
-          ))}
+          ].map(([label, key, span, type]) => {
+            // Finance fields are owned by Ops Checklist → Finance tab (synced here automatically)
+            const locked = OPS_MANAGED_FIELDS.includes(key);
+            return (
+              <div className={`form-field ${span || ''}`} key={key}>
+                <label className="form-label">{label}{locked && ' 🔒'}</label>
+                <input
+                  type={type || 'text'}
+                  className="form-input"
+                  value={form[key] ?? ''}
+                  onChange={locked ? undefined : e => set(key, e.target.value)}
+                  readOnly={locked}
+                  disabled={locked}
+                  title={locked ? 'Updated from Ops Checklist → Finance' : undefined}
+                  style={locked ? { background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' } : undefined}
+                />
+                {locked && (
+                  <span style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Edit in Ops Checklist → Finance</span>
+                )}
+              </div>
+            );
+          })}
 
           <div className="form-field">
             <label className="form-label">Status</label>
@@ -435,13 +337,13 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
     ['Location / Mode',  eng.location    || '—'],
     ['Consultant 1',     eng.consultant1 || '—'],
     ['Consultant 2',     eng.consultant2 || '—'],
-    ['Contract',         eng.contract    || '—'],
-    ['PO Status',        eng.poStatus    || '—'],
+    ['Contract Type',    eng.contract    || '—'],
+    ['Contract Status',  eng.poStatus    || '—'],
     ['Invoice Date',     eng.invoice ? fmtDt(eng.invoice) : '—'],
     ['Price (₹)',        eng.price > 0 ? fmtINR(eng.price) : '—'],
     ['Travel & Misc. (₹)', eng.travelExpenses > 0 ? fmtINR(eng.travelExpenses) : (eng.travelExpenses === 0 && eng.price > 0 ? '₹0' : '—')],
     ['GST (₹)',          eng.gst > 0 ? fmtINR(eng.gst) : (eng.gst === 0 && eng.price > 0 ? '₹0' : '—')],
-    ['Payment',          eng.payment        || '—'],
+    ['Payment Status',   eng.payment        || '—'],
     ['Amt Received',     eng.amountReceived || '—'],
     ['Received Date',    eng.receivedDate   || '—'],
     ['Comments',         eng.comments       || '—'],
@@ -556,16 +458,14 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
             )}
             {canEditEng && (
               <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
-                <button
-                  className="btn btn-outline btn-sm"
-                  style={{ padding: '4px 12px', fontSize: 12 }}
+                <EditButton
+                  title="Edit Engagement"
                   onClick={e => { e.stopPropagation(); onEdit(eng); }}
-                >✏ Edit</button>
-                <button
-                  className="btn btn-sm"
-                  style={{ padding: '4px 12px', fontSize: 12, background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5' }}
+                />
+                <DeleteButton
+                  title="Delete Engagement"
                   onClick={e => { e.stopPropagation(); onDelete(eng); }}
-                >🗑 Delete</button>
+                />
               </div>
             )}
           </div>
@@ -601,14 +501,10 @@ export default function EngagementCalendar({ onRefreshed }) {
     }
   }, []);
 
-  // Excel-style multi-select filters — Set() of selected values; empty Set = "All"
-  const [fStatus,   setFStatus]   = useState(new Set());
-  const [fCompany,  setFCompany]  = useState(new Set());
-  const [fYear,     setFYear]     = useState(new Set());
-  const [fSector,   setFSector]   = useState(new Set());
-  const [fSvcType,  setFSvcType]  = useState(new Set());
-  const [fConsult,  setFConsult]  = useState(new Set());
-  const [fLocation, setFLocation] = useState(new Set());
+  // Excel-style filters (per column, with value counts, blanks and sort)
+  const filterState = useExcelFilters(data);
+  const { filtered } = filterState;
+  const totalRev = filtered.reduce((s, e) => s + (e.price || 0), 0);
 
   const load = async () => {
     setLoading(true); setError(null);
@@ -621,43 +517,6 @@ export default function EngagementCalendar({ onRefreshed }) {
   };
 
   useEffect(() => { load(); }, []);
-
-  // unique sorted values for each filter column
-  const uniq = useCallback((fn, sort = true) => {
-    const vals = [...new Set(data.map(fn).filter(v => v && String(v).trim()))].map(String);
-    return sort ? vals.sort() : vals;
-  }, [data]);
-
-  const allStatuses   = useMemo(() => uniq(e => e.status), [data]);
-  const allCompanies  = useMemo(() => uniq(e => e.company), [data]);
-  const allYears      = useMemo(() => uniq(e => e.startDate?.slice(0, 4)).reverse(), [data]);
-  const allSectors    = useMemo(() => uniq(e => e.sector), [data]);
-  const allSvcTypes   = useMemo(() => uniq(e => e.serviceType), [data]);
-  const allConsults   = useMemo(() => uniq(e => e.consultant1), [data]);
-  const allLocations  = useMemo(() => uniq(e => e.location), [data]);
-
-  const matches = (set, val) => set.size === 0 || set.has(String(val));
-
-  const filtered = useMemo(() =>
-    data.filter(e =>
-      matches(fStatus,   e.status)              &&
-      matches(fCompany,  e.company)             &&
-      matches(fYear,     e.startDate?.slice(0,4)) &&
-      matches(fSector,   e.sector)              &&
-      matches(fSvcType,  e.serviceType)         &&
-      matches(fConsult,  e.consultant1)         &&
-      matches(fLocation, e.location)
-    ),
-    [data, fStatus, fCompany, fYear, fSector, fSvcType, fConsult, fLocation]
-  );
-
-  const totalRev   = filtered.reduce((s, e) => s + (e.price || 0), 0);
-  const activeFilters = [fStatus, fCompany, fYear, fSector, fSvcType, fConsult, fLocation].filter(s => s.size > 0).length;
-
-  const clearAll = () => {
-    setFStatus(new Set()); setFCompany(new Set()); setFYear(new Set());
-    setFSector(new Set()); setFSvcType(new Set()); setFConsult(new Set()); setFLocation(new Set());
-  };
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
@@ -784,22 +643,7 @@ export default function EngagementCalendar({ onRefreshed }) {
           🔽 Filter by:
         </span>
 
-        <ExcelFilter label="Status"       allValues={allStatuses}  selected={fStatus}   onChange={setFStatus}   />
-        <ExcelFilter label="Company"      allValues={allCompanies} selected={fCompany}  onChange={setFCompany}  />
-        <ExcelFilter label="Year"         allValues={allYears}     selected={fYear}     onChange={setFYear}     />
-        <ExcelFilter label="Sector"       allValues={allSectors}   selected={fSector}   onChange={setFSector}   />
-        <ExcelFilter label="Service Type" allValues={allSvcTypes}  selected={fSvcType}  onChange={setFSvcType}  />
-        <ExcelFilter label="Consultant"   allValues={allConsults}  selected={fConsult}  onChange={setFConsult}  />
-        <ExcelFilter label="Location"     allValues={allLocations} selected={fLocation} onChange={setFLocation} />
-
-        {activeFilters > 0 && (
-          <button
-            onClick={clearAll}
-            style={{ fontSize: 12, padding: '5px 12px', border: '1px solid #dc2626', borderRadius: 7, background: '#fee2e2', color: '#dc2626', fontWeight: 700, cursor: 'pointer', marginLeft: 4 }}
-          >
-            ✕ Clear all ({activeFilters})
-          </button>
-        )}
+        <ExcelFilterButtons state={filterState} />
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn-outline btn-sm" onClick={load}>↺ Refresh</button>
