@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
-import { getContentDevTracker, addContentDevRow, updateContentDevRow, deleteContentDevRow } from '../services/api.js';
+import { peekList, getContentDevTracker, addContentDevRow, updateContentDevRow, deleteContentDevRow } from '../services/api.js';
 import { syncCDTWithEC } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import SyncScopeModal from '../components/SyncScopeModal.jsx';
 import { DeleteButton } from '../components/ActionButtons.jsx';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -277,8 +278,10 @@ function DetailPanel({ row, canEdit, onUpdate, onDelete, saving }) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ContentDevelopmentTracker({ onRefreshed }) {
-  const [data,      setData]      = useState([]);
-  const [loading,   setLoading]   = useState(true);
+  const [data,      setData]      = useState(() => peekList('cdt') || []);
+  const [loading,   setLoading]   = useState(() => !peekList('cdt'));   // full loader only on the very first visit
+  const [refreshing, setRefreshing] = useState(false);                  // quiet background refresh
+  const [scopeOpen, setScopeOpen] = useState(false);
   const [error,     setError]     = useState(null);
   const [search,    setSearch]    = useState('');
   const [statusF,   setStatusF]   = useState('All');
@@ -293,14 +296,21 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
   const { canEdit } = usePermissions();
   const editable = canEdit('content-dev');
 
+  // Show the last loaded rows straight away, then fetch fresh rows in the background
   const load = async () => {
-    setLoading(true); setError(null);
+    const saved = peekList('cdt');
+    if (saved) { setData(d => (d.length ? d : saved)); setLoading(false); }
+    else setLoading(true);
+    setRefreshing(true); setError(null);
     try {
       const rows = await getContentDevTracker();
       setData(rows);
       onRefreshed?.(new Date().toLocaleTimeString());
-    } catch(e) { setError(e); }
-    finally { setLoading(false); }
+    } catch(e) {
+      if (saved) showToast('⚠ Could not refresh from Excel — showing the last saved copy.');
+      else setError(e);
+    }
+    finally { setLoading(false); setRefreshing(false); }
   };
 
   useEffect(() => { load(); }, []);
@@ -344,10 +354,10 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
     finally { setSaving(false); }
   };
 
-  const handleSyncWithEC = async () => {
+  const handleSyncWithEC = async (scope = 'recent') => {
     setSyncing(true); setSyncProg({ done:0, total:0 });
     try {
-      const { updated, added, errors } = await syncCDTWithEC(p => setSyncProg(p));
+      const { updated, added, errors } = await syncCDTWithEC(p => setSyncProg(p), scope);
       const errPart = errors.length ? ` · ${errors.length} error${errors.length>1?'s':''}` : '';
       showToast(`✓ Synced: ${updated} updated, ${added} added${errPart}`);
       await new Promise(r => setTimeout(r, 1500));
@@ -372,6 +382,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
 
       {showAdd   && <AddModal onSave={handleAdd} onClose={() => setShowAdd(false)} saving={saving} />}
       {deleteRow && <DeleteConfirmModal row={deleteRow} onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
+      {scopeOpen && <SyncScopeModal target="Content Dev Tracker" onClose={() => setScopeOpen(false)} onConfirm={scope => { setScopeOpen(false); handleSyncWithEC(scope); }} />}
 
       {/* KPIs */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:16, flexShrink:0 }}>
@@ -393,8 +404,8 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
             <select className="form-input" value={statusF} onChange={e => setStatusF(e.target.value)}>
               {['All','Completed','Pending'].map(s => <option key={s}>{s}</option>)}
             </select>
-            <button className="btn btn-outline btn-sm" onClick={load} disabled={syncing}>↺</button>
-            <button className="btn btn-outline btn-sm" onClick={handleSyncWithEC} disabled={syncing||saving}
+            <button className="btn btn-outline btn-sm" onClick={load} disabled={syncing || refreshing} title={refreshing ? 'Refreshing from Excel…' : 'Refresh'}>{refreshing ? '⟳' : '↺'}</button>
+            <button className="btn btn-outline btn-sm" onClick={() => setScopeOpen(true)} disabled={syncing||saving}
               style={{ color:syncing?'var(--muted)':'var(--accent)', borderColor:'var(--accent)' }}>
               {syncing ? (syncProg?.total>0 ? `⏳ ${syncProg.done}/${syncProg.total}` : '⏳ Syncing…') : '🔄 Sync with EC'}
             </button>

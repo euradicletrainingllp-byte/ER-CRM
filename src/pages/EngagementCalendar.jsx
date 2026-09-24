@@ -1,7 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
-import { getEngagements, addEngagementRow, updateEngagementRow, deleteEngagementRow } from '../services/api.js';
+import { ErrorState } from '../components/LoadingState.jsx';
+import {
+  getEngagementsForRange, getAllEngagementsCached, buildMonthRange,
+  peekEngagementsForRange, prefetchEngagementsForRange, patchEngagementCaches,
+  addEngagementRow, updateEngagementRow, deleteEngagementRow,
+} from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.jsx';
@@ -322,7 +326,7 @@ function DeleteEngagementModal({ eng, onConfirm, onClose, saving }) {
 }
 
 /* ─── Engagement Card (accordion) ───────────────────────────────────────── */
-function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
+function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }) {
   const [open, setOpen] = useState(false);
   const sc = STATUS_COLORS[eng.status] || { bg: '#f1f5f9', color: '#475569' };
 
@@ -359,8 +363,11 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
       borderRadius: 9,
       marginBottom: 7,
       overflow: 'hidden',
-      boxShadow: open ? '0 3px 14px rgba(0,0,0,0.07)' : '0 1px 3px rgba(0,0,0,0.04)',
-      transition: 'box-shadow 0.18s',
+      boxShadow: highlight
+        ? '0 0 0 2px #e8760a, 0 4px 16px rgba(232,118,10,0.25)'
+        : (open ? '0 3px 14px rgba(0,0,0,0.07)' : '0 1px 3px rgba(0,0,0,0.04)'),
+      opacity: eng.pending ? 0.75 : 1,
+      transition: 'box-shadow 0.18s, opacity 0.2s',
     }}>
       {/* ── Header row ── */}
       <div
@@ -395,6 +402,16 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
           <div style={{ fontSize: 11, color: '#64748b', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {eng.topic}
           </div>
+          {highlight && (
+            <span style={{ display: 'inline-block', marginTop: 4, fontSize: 10, fontWeight: 800, color: '#fff', background: '#e8760a', borderRadius: 20, padding: '2px 8px' }}>
+              ⏭ Next up
+            </span>
+          )}
+          {eng.pending && (
+            <span style={{ display: 'inline-block', marginTop: 4, marginLeft: highlight ? 6 : 0, fontSize: 10, fontWeight: 700, color: '#1e40af', background: '#dbeafe', borderRadius: 20, padding: '2px 8px' }}>
+              ⟳ Saving to Excel…
+            </span>
+          )}
         </div>
 
         {/* Start Date */}
@@ -456,7 +473,7 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
                 💰 Revenue: {fmtINR(eng.price)}
               </div>
             )}
-            {canEditEng && (
+            {canEditEng && !eng.pending && (
               <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
                 <EditButton
                   title="Edit Engagement"
@@ -475,125 +492,487 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng }) {
   );
 }
 
+/* ─── Date-range helpers (page level) ───────────────────────────────────── */
+const pad2 = n => String(n).padStart(2, '0');
+const todayISO = () => {
+  const t = new Date();
+  return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`;
+};
+const addMonths = (ym, delta) => {
+  const d = new Date(ym.year, ym.month + delta, 1);
+  return { year: d.getFullYear(), month: d.getMonth() };
+};
+// Start month so that the current month sits in the middle of an N-month range
+// (3 → prev, current, next; 1 → current only; 12 → 5 before … 6 after)
+const defaultStart = span => {
+  const t = new Date();
+  return addMonths({ year: t.getFullYear(), month: t.getMonth() }, -Math.floor((span - 1) / 2));
+};
+const SPAN_OPTIONS = [1, 2, 3, 4, 6, 12];
+const MIN_YEAR = 2022;
+const MAX_SPAN = 24;
+const rowKey = e => `${e.egId}|${e.sno}`;
+
+/* ─── Range navigator (Months / Year view) ──────────────────────────────── */
+function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan, onShift, onToday, onJumpMonth, onJumpYear, onChipClick }) {
+  const [customOpen, setCustomOpen] = useState(!SPAN_OPTIONS.includes(span));
+  const [draft, setDraft] = useState(String(span));
+  useEffect(() => { setDraft(String(span)); }, [span]);
+
+  const applyDraft = () => {
+    const n = Math.max(1, Math.min(MAX_SPAN, parseInt(draft, 10) || 1));
+    setDraft(String(n));
+    if (n !== span) onSpan(n);
+  };
+
+  const first = win.months[0];
+  const last  = win.months[win.months.length - 1];
+  const thisYear = new Date().getFullYear();
+  const years = [];
+  for (let y = Math.max(thisYear + 2, first.year); y >= Math.min(MIN_YEAR, first.year); y--) years.push(y);
+  const currentKey = todayISO().slice(0, 7);
+
+  const unit = viewMode === 'year' ? 'year' : (span === 1 ? 'month' : `${span} months`);
+  const seg = active => ({
+    padding: '5px 14px', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer',
+    background: active ? '#1a3a5c' : 'transparent', color: active ? '#fff' : '#475569',
+  });
+  const lbl = { fontSize: 12, fontWeight: 700, color: '#64748b' };
+  const ctl = w => ({ width: w, padding: '4px 8px', fontSize: 12 });
+
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
+      padding: '10px 16px', marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+        <span style={lbl}>📅 View:</span>
+        <div style={{ display: 'inline-flex', border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
+          <button type="button" style={seg(viewMode === 'months')} onClick={() => onMode('months')} disabled={loading}>Months</button>
+          <button type="button" style={seg(viewMode === 'year')}   onClick={() => onMode('year')}   disabled={loading}>Year</button>
+        </div>
+
+        {viewMode === 'months' ? (
+          <>
+            <span style={lbl}>Show</span>
+            <select
+              className="form-input"
+              style={ctl(120)}
+              value={customOpen ? 'custom' : String(span)}
+              disabled={loading}
+              onChange={e => {
+                const v = e.target.value;
+                if (v === 'custom') { setCustomOpen(true); return; }
+                setCustomOpen(false);
+                onSpan(Number(v));
+              }}
+            >
+              {SPAN_OPTIONS.map(n => <option key={n} value={n}>{n} month{n > 1 ? 's' : ''}</option>)}
+              <option value="custom">Custom…</option>
+            </select>
+            {customOpen && (
+              <input
+                type="number" min={1} max={MAX_SPAN}
+                className="form-input" style={ctl(72)}
+                value={draft}
+                title={`Number of months (1–${MAX_SPAN}) — press Enter to apply`}
+                disabled={loading}
+                onChange={e => setDraft(e.target.value)}
+                onBlur={applyDraft}
+                onKeyDown={e => { if (e.key === 'Enter') applyDraft(); }}
+              />
+            )}
+            <span style={lbl}>From</span>
+            <input
+              type="month" className="form-input" style={ctl(150)}
+              value={first.key}
+              disabled={loading}
+              onChange={e => { if (e.target.value) onJumpMonth(e.target.value); }}
+            />
+          </>
+        ) : (
+          <>
+            <span style={lbl}>Year</span>
+            <select
+              className="form-input" style={ctl(100)}
+              value={first.year}
+              disabled={loading}
+              onChange={e => onJumpYear(Number(e.target.value))}
+            >
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </>
+        )}
+
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(-1)} disabled={loading}>
+            ◀ Previous {unit}
+          </button>
+          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={onToday} disabled={loading}
+                  title="Go to the current period and scroll to the next upcoming delivery">
+            ● Today
+          </button>
+          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(1)} disabled={loading}>
+            Next {unit} ▶
+          </button>
+        </div>
+      </div>
+
+      {/* Month chips — click to jump to that month in the list */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ ...lbl, fontWeight: 600, marginRight: 4 }}>
+          {first.key === last.key ? first.label : `${first.label} – ${last.label}`}
+          {win.months.length > 1 && ` · ${win.months.length} months`}
+          {!containsToday && ' · (current month not in view)'}
+        </span>
+        {win.months.map(m => {
+          const isNow = m.key === currentKey;
+          return (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => onChipClick(m.key)}
+              title={`Jump to ${m.label}`}
+              style={{
+                fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, cursor: 'pointer',
+                border: isNow ? '1px solid #1a3a5c' : '1px solid transparent',
+                background: isNow ? '#1a3a5c' : '#f1f5f9',
+                color: isNow ? '#fff' : '#475569',
+              }}
+            >
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Loading skeleton (only when a period has never been loaded) ───────── */
+function SkeletonCards({ count = 6 }) {
+  return Array.from({ length: count }).map((_, i) => (
+    <div key={i} className="ec-skel" style={{ height: 58, borderRadius: 9, marginBottom: 7, border: '1px solid #e2e8f0' }} />
+  ));
+}
+
+// Form values → row shape used by the page (form keys already match row keys)
+const rowFromForm = form => ({
+  ...form,
+  day:            Number(form.day)            || 1,
+  price:          Number(form.price)          || 0,
+  travelExpenses: Number(form.travelExpenses) || 0,
+  gst:            Number(form.gst)            || 0,
+});
+
+// Form values → Excel column names expected by the Power Automate flow
+const formToExcel = form => ({
+  'EG ID':                           form.egId           || '',
+  company:                           form.company        || '',
+  'Start Date':                      form.startDate      || '',
+  'End Date':                        form.endDate        || '',
+  topic:                             form.topic          || '',
+  sector:                            form.sector         || '',
+  'Service Type':                    form.serviceType    || '',
+  offering:                          form.offering       || '',
+  day:                               Number(form.day)    || 1,
+  location:                          form.location       || '',
+  'Consultant - 1':                  form.consultant1    || '',
+  'Consultant - 2':                  form.consultant2    || '',
+  status:                            form.status         || '',
+  contract:                          form.contract       || '',
+  'PO Status':                       form.poStatus       || '',
+  invoice:                           form.invoice        || '',
+  'Price (INR)':                     Number(form.price)  || 0,
+  'Travel, Stay and Misc Expenses':  Number(form.travelExpenses) || 0,
+  gst:                               Number(form.gst)    || 0,
+  payment:                           form.payment        || '',
+  'Amount Received':                 form.amountReceived || '',
+  'Received Date':                   form.receivedDate   || '',
+  comments:                          form.comments       || '',
+  feedback:                          form.feedback       || '',
+  nps:                               form.nps            || '',
+});
+
 /* ─── Main Page ─────────────────────────────────────────────────────────── */
 export default function EngagementCalendar({ onRefreshed }) {
   const location = useLocation();
 
-  const [data,        setData]        = useState([]);
-  const [loading,     setLoading]     = useState(true);
+  // View: 'months' (N months starting at `start`) or 'year' (Jan–Dec of start.year)
+  const [viewMode, setViewMode] = useState('months');
+  const [span,     setSpan]     = useState(3);
+  const [start,    setStart]    = useState(() => defaultStart(3));
+  const win = useMemo(
+    () => (viewMode === 'year'
+      ? buildMonthRange(start.year, 0, 12)
+      : buildMonthRange(start.year, start.month, span)),
+    [viewMode, span, start],
+  );
+  const today = todayISO();
+  const containsToday = today >= win.from && today <= win.to;
+  const rangeLabel = win.months.length === 1
+    ? win.months[0].label
+    : `${win.months[0].label} – ${win.months[win.months.length - 1].label}`;
+
+  // Show the saved copy (if any) on the very first render — no blank screen
+  const [data, setData] = useState(() => peekEngagementsForRange(win.from, win.to) || []);
+  const [rangeLoading, setRangeLoading] = useState(() => !peekEngagementsForRange(win.from, win.to));
+  const [syncing,     setSyncing]     = useState(false);   // background refresh in progress
   const [error,       setError]       = useState(null);
   const [showAdd,     setShowAdd]     = useState(false);
   const [addPrefill,  setAddPrefill]  = useState(null);
+  const [allRows,     setAllRows]     = useState(null);    // full list, loaded only for the Add form
+  const [preparingAdd, setPreparingAdd] = useState(false);
   const [editRow,     setEditRow]     = useState(null);
   const [deleteRow,   setDeleteRow]   = useState(null);
   const [saving,      setSaving]      = useState(false);
   const [toast,       setToast]       = useState('');
+  const [scrollNonce, setScrollNonce] = useState(0);       // bump to re-run auto-scroll
 
   const { canEdit } = usePermissions();
+  const requestId    = useRef(0);
+  const cardRefs     = useRef({});
+  const monthRefs    = useRef({});
+  const scrolledFor  = useRef('');
+  const toastTimer   = useRef(null);
+  const revalTimer   = useRef(null);
+  const loadRef      = useRef(null);
+
+  const showToast = msg => {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(''), 3500);
+  };
+  useEffect(() => () => { clearTimeout(toastTimer.current); clearTimeout(revalTimer.current); }, []);
+
+  // Add form needs EVERY EG ID (to generate the next one), not just the visible
+  // range — load the full list only at that moment (cached for 2 minutes).
+  const openAdd = async (prefill = null) => {
+    setAddPrefill(prefill);
+    setPreparingAdd(true);
+    try {
+      setAllRows(await getAllEngagementsCached());
+    } catch {
+      setAllRows(null);
+      showToast('⚠ Could not load all EG IDs — suggested EG ID is based on the visible months only. Please verify it.');
+    } finally {
+      setPreparingAdd(false);
+      setShowAdd(true);
+    }
+  };
 
   // Open the Add modal pre-filled when navigated from Solution Tracker
   useEffect(() => {
     if (location.state?.prefill) {
-      setAddPrefill(location.state.prefill);
-      setShowAdd(true);
+      openAdd(location.state.prefill);
       // Clear the navigation state so a browser refresh doesn't re-open the modal
       window.history.replaceState({}, '', location.pathname);
     }
   }, []);
 
+  /**
+   * Stale-while-revalidate load:
+   *  1. show the saved copy of this range immediately (if one exists)
+   *  2. fetch a fresh copy in the background and swap it in quietly
+   * keepCurrent: keep what is on screen (used by Refresh and after saves)
+   */
+  const load = useCallback(async ({ force = false, keepCurrent = false } = {}) => {
+    const id = ++requestId.current;
+    let hasData = keepCurrent;
+    if (!keepCurrent) {
+      const cached = peekEngagementsForRange(win.from, win.to);
+      if (cached) { setData(cached); setRangeLoading(false); hasData = true; }
+      else        { setData([]);     setRangeLoading(true); }
+    }
+    setSyncing(true); setError(null);
+    try {
+      const rows = await getEngagementsForRange(win.from, win.to, { force });
+      if (id !== requestId.current) return;
+      setData(rows);
+      setRangeLoading(false);
+      onRefreshed?.(new Date().toLocaleTimeString());
+    } catch (e) {
+      if (id !== requestId.current) return;
+      if (hasData) showToast('⚠ Could not refresh from Excel — showing the last saved copy.');
+      else { setError(e); setRangeLoading(false); }
+    } finally {
+      if (id === requestId.current) setSyncing(false);
+    }
+  }, [win.from, win.to, onRefreshed]);
+  loadRef.current = load;
+
+  // Quiet refresh a moment after a write (Excel Online needs ~1-2s to reflect it)
+  const revalidateSoon = () => {
+    clearTimeout(revalTimer.current);
+    revalTimer.current = setTimeout(() => loadRef.current?.({ force: true, keepCurrent: true }), 2500);
+  };
+
+  // Reload whenever the range changes (saved ranges appear instantly)
+  useEffect(() => { load(); }, [win.from, win.to]);
+
+  // Preload the previous and next period so Previous / Next feel instant
+  useEffect(() => {
+    if (syncing || rangeLoading || error) return;
+    const t = setTimeout(() => {
+      const n    = viewMode === 'year' ? 12 : span;
+      const base = viewMode === 'year' ? { year: start.year, month: 0 } : start;
+      [-n, n].forEach(d => {
+        const s = addMonths(base, d);
+        const r = buildMonthRange(s.year, s.month, n);
+        prefetchEngagementsForRange(r.from, r.to);
+      });
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [syncing, rangeLoading, error, win.from, win.to]);
+
+  /* ── Range controls ── */
+  const changeMode = mode => {
+    if (mode === viewMode) return;
+    const nowYear = new Date().getFullYear();
+    if (mode === 'year') {
+      setStart({ year: containsToday ? nowYear : start.year, month: 0 });
+    } else {
+      setStart(start.year === nowYear ? defaultStart(span) : { year: start.year, month: 0 });
+    }
+    setViewMode(mode);
+  };
+  const changeSpan = n => {
+    setSpan(n);
+    if (containsToday) setStart(defaultStart(n));   // keep the current month centred
+  };
+  const shift = dir => setStart(s => (viewMode === 'year'
+    ? { year: s.year + dir, month: 0 }
+    : addMonths(s, dir * span)));
+  const goToday = () => {
+    setStart(viewMode === 'year' ? { year: new Date().getFullYear(), month: 0 } : defaultStart(span));
+    setScrollNonce(n => n + 1);
+  };
+  const jumpMonth = ym => {
+    const [y, m] = ym.split('-').map(Number);
+    if (y && m) setStart({ year: y, month: m - 1 });
+  };
+  const jumpYear = y => setStart({ year: y, month: 0 });
+  const scrollToMonth = key => {
+    monthRefs.current[key]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  // Undated rows are shown only when the range includes today, so they are not lost
+  const windowRows = useMemo(
+    () => data.filter(e => (e.undated ? containsToday : true)),
+    [data, containsToday],
+  );
+
   // Excel-style filters (per column, with value counts, blanks and sort)
-  const filterState = useExcelFilters(data);
+  const filterState = useExcelFilters(windowRows);
   const { filtered } = filterState;
   const totalRev = filtered.reduce((s, e) => s + (e.price || 0), 0);
 
-  const load = async () => {
-    setLoading(true); setError(null);
-    try {
-      const rows = await getEngagements();
-      setData(rows);
-      onRefreshed?.(new Date().toLocaleTimeString());
-    } catch (e) { setError(e); }
-    finally { setLoading(false); }
-  };
+  // Group the filtered rows by month (keeps the filter/sort order inside a group)
+  const groups = useMemo(() => {
+    const byKey = new Map(win.months.map(m => [m.key, { ...m, rows: [] }]));
+    const undated = { key: 'undated', label: 'No start date', rows: [] };
+    filtered.forEach(e => {
+      if (!e.startDate) { undated.rows.push(e); return; }
+      // An engagement that started before the range is shown in the first month
+      const k = (e.startDate < win.from ? win.from : e.startDate).slice(0, 7);
+      (byKey.get(k) || byKey.get(win.months[0].key)).rows.push(e);
+    });
+    const list = [...byKey.values()];
+    if (undated.rows.length) list.push(undated);
+    return list;
+  }, [filtered, win]);
 
-  useEffect(() => { load(); }, []);
+  // Next upcoming (or ongoing) delivery — only when the current month is in view
+  const nextUpKey = useMemo(() => {
+    if (!containsToday) return null;
+    let best = null;
+    filtered.forEach(e => {
+      if (!e.startDate) return;
+      if (/cancel/i.test(e.status || '')) return;
+      const end = e.endDate && e.endDate >= e.startDate ? e.endDate : e.startDate;
+      if (end < today) return;                       // already finished
+      if (!best || e.startDate < best.startDate) best = e;
+    });
+    return best ? rowKey(best) : null;
+  }, [filtered, containsToday, today]);
 
-  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+  // Auto-scroll the next upcoming delivery to the middle of the screen
+  // (once per range, and again whenever "Today" / "Next up" is clicked)
+  useEffect(() => {
+    if (rangeLoading || !nextUpKey) return;
+    const token = `${win.from}|${win.to}|${scrollNonce}`;
+    if (scrolledFor.current === token) return;
+    const el = cardRefs.current[nextUpKey];
+    if (!el) return;
+    scrolledFor.current = token;
+    const raf = requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    return () => cancelAnimationFrame(raf);
+  }, [rangeLoading, nextUpKey, win.from, win.to, scrollNonce]);
 
+  /* ── Writes ── */
+
+  // Add: needs Excel to assign the S No, so the modal waits for the save —
+  // then the new row appears straight away and is confirmed by a quiet refresh.
   const handleAdd = async (form) => {
     setSaving(true);
     try {
-      await addEngagementRow({
-        ...form,
-        day:            Number(form.day)            || 1,
-        price:          Number(form.price)          || 0,
-        travelExpenses: Number(form.travelExpenses) || 0,
-        gst:            Number(form.gst)            || 0,
-      });
+      await addEngagementRow(rowFromForm(form));
       setShowAdd(false);
+      setAddPrefill(null);
+      setAllRows(null);
+      const row = { ...rowFromForm(form), sno: '—', pending: true };
+      if (!row.startDate || (row.startDate <= win.to && (row.endDate || row.startDate) >= win.from)) {
+        setData(d => [...d, row]);
+      }
       showToast('✓ Engagement added to Excel!');
-      await load();
+      revalidateSoon();
     } catch (e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
   };
 
+  // Edit: optimistic — the card updates instantly, Excel is written in the
+  // background, and the change is rolled back if the save fails.
   const handleEdit = async (form) => {
     if (!editRow) return;
-    setSaving(true);
+    const original = editRow;
+    const oldKey   = rowKey(original);
+    const updated  = { ...original, ...rowFromForm(form) };
+    const newKey   = rowKey(updated);
+    setEditRow(null);
+    setData(d => d.map(r => (rowKey(r) === oldKey ? { ...updated, pending: true } : r)));
     try {
-      // Use exact Excel column names for fields with spaces/special chars
-      await updateEngagementRow(editRow.egId, editRow.sno, {
-        'EG ID':                           form.egId           || '',
-        company:                           form.company        || '',
-        'Start Date':                      form.startDate      || '',
-        'End Date':                        form.endDate        || '',
-        topic:                             form.topic          || '',
-        sector:                            form.sector         || '',
-        'Service Type':                    form.serviceType    || '',
-        offering:                          form.offering       || '',
-        day:                               Number(form.day)    || 1,
-        location:                          form.location       || '',
-        'Consultant - 1':                  form.consultant1    || '',
-        'Consultant - 2':                  form.consultant2    || '',
-        status:                            form.status         || '',
-        contract:                          form.contract       || '',
-        'PO Status':                       form.poStatus       || '',
-        invoice:                           form.invoice        || '',
-        'Price (INR)':                     Number(form.price)  || 0,
-        'Travel, Stay and Misc Expenses':  Number(form.travelExpenses) || 0,
-        gst:                               Number(form.gst)    || 0,
-        payment:                           form.payment        || '',
-        'Amount Received':                 form.amountReceived || '',
-        'Received Date':                   form.receivedDate   || '',
-        comments:                          form.comments       || '',
-        feedback:                          form.feedback       || '',
-        nps:                               form.nps            || '',
-      });
-      setEditRow(null);
+      await updateEngagementRow(original.egId, original.sno, formToExcel(form));
+      setData(d => d.map(r => (rowKey(r) === newKey ? { ...r, pending: false } : r)));
+      patchEngagementCaches(rows => rows.map(r => (rowKey(r) === oldKey ? { ...r, ...rowFromForm(form) } : r)));
       showToast('✓ Engagement updated!');
-      // Small delay before reload — Excel Online has ~1-2s lag between a PA write
-      // and the change being visible on the next read. Without this, load() fetches
-      // stale data and the update appears to not have reflected.
-      await new Promise(res => setTimeout(res, 1500));
-      await load();
-    } catch (e) { showToast('❌ ' + e.message); }
-    finally { setSaving(false); }
+      revalidateSoon();
+    } catch (e) {
+      setData(d => d.map(r => (rowKey(r) === newKey ? original : r)));
+      showToast('❌ Update failed — changes reverted. ' + e.message);
+    }
   };
 
+  // Delete: optimistic — the card disappears instantly and comes back if it fails.
   const handleDelete = async () => {
     if (!deleteRow) return;
-    setSaving(true);
+    const victim   = deleteRow;
+    const vKey     = rowKey(victim);
+    const snapshot = data;
+    setDeleteRow(null);
+    setData(d => d.filter(r => rowKey(r) !== vKey));
     try {
-      await deleteEngagementRow(deleteRow.egId, deleteRow.sno);
-      setDeleteRow(null);
+      await deleteEngagementRow(victim.egId, victim.sno);
+      patchEngagementCaches(rows => rows.filter(r => rowKey(r) !== vKey));
+      setAllRows(null);
       showToast('✓ Engagement deleted!');
-      await load();
-    } catch (e) { showToast('❌ ' + e.message); }
-    finally { setSaving(false); }
+      revalidateSoon();
+    } catch (e) {
+      setData(prev => (prev.some(r => rowKey(r) === vKey) ? prev : snapshot));
+      showToast('❌ Delete failed — engagement restored. ' + e.message);
+    }
   };
 
-  if (loading) return <LoadingState message="Loading Engagement Calendar from OneDrive…" />;
-  if (error)   return <ErrorState error={error} onRetry={load} />;
+  const currentKey = today.slice(0, 7);
 
   return (
     <div>
@@ -602,34 +981,62 @@ export default function EngagementCalendar({ onRefreshed }) {
           from { opacity: 0; transform: translateY(-5px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+        .ec-skel {
+          background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+          background-size: 400% 100%;
+          animation: ecShimmer 1.4s ease infinite;
+        }
+        @keyframes ecShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+        .ec-syncbar { position: relative; height: 3px; overflow: hidden; border-radius: 2px; margin-bottom: 4px; }
+        .ec-syncbar.on::after {
+          content: ''; position: absolute; top: 0; left: -40%; width: 40%; height: 100%;
+          background: #e8760a; border-radius: 2px; animation: ecSlideBar 1.1s ease-in-out infinite;
+        }
+        @keyframes ecSlideBar { 0% { left: -40%; } 100% { left: 100%; } }
       `}</style>
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: 'fixed', top: 70, right: 24, background: '#1a3a5c', color: '#fff', padding: '10px 20px', borderRadius: 8, zIndex: 999, fontSize: 13, fontWeight: 600, boxShadow: '0 4px 12px rgba(0,0,0,0.18)' }}>
+        <div style={{ position: 'fixed', top: 70, right: 24, background: '#1a3a5c', color: '#fff', padding: '10px 20px', borderRadius: 8, zIndex: 999, fontSize: 13, fontWeight: 600, boxShadow: '0 4px 12px rgba(0,0,0,0.18)', maxWidth: 420 }}>
           {toast}
         </div>
       )}
+
+      {/* ── Range navigator: Months (1–24) or Year — never blocked while loading ── */}
+      <RangeNav
+        viewMode={viewMode}
+        span={span}
+        win={win}
+        loading={false}
+        containsToday={containsToday}
+        onMode={changeMode}
+        onSpan={changeSpan}
+        onShift={shift}
+        onToday={goToday}
+        onJumpMonth={jumpMonth}
+        onJumpYear={jumpYear}
+        onChipClick={scrollToMonth}
+      />
 
       {/* ── KPI Row ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 18 }}>
         <div className="kpi-card accent">
           <div className="kpi-label">Filtered Sessions</div>
-          <div className="kpi-value">{filtered.length}</div>
-          <div className="kpi-sub">of {data.length} total</div>
+          <div className="kpi-value">{rangeLoading ? '…' : filtered.length}</div>
+          <div className="kpi-sub">of {windowRows.length} in {rangeLabel}</div>
         </div>
         <div className="kpi-card green">
           <div className="kpi-label">Filtered Revenue</div>
-          <div className="kpi-value">{fmt(totalRev)}</div>
+          <div className="kpi-value">{rangeLoading ? '…' : fmt(totalRev)}</div>
           <div className="kpi-sub">{fmtINR(totalRev)}</div>
         </div>
         <div className="kpi-card blue">
           <div className="kpi-label">Unique Clients</div>
-          <div className="kpi-value">{[...new Set(filtered.map(e => e.company))].length}</div>
+          <div className="kpi-value">{rangeLoading ? '…' : [...new Set(filtered.map(e => e.company))].length}</div>
         </div>
         <div className="kpi-card purple">
           <div className="kpi-label">Delivered</div>
-          <div className="kpi-value">{filtered.filter(e => e.status === 'Delivered').length}</div>
+          <div className="kpi-value">{rangeLoading ? '…' : filtered.filter(e => e.status === 'Delivered').length}</div>
         </div>
       </div>
 
@@ -645,10 +1052,22 @@ export default function EngagementCalendar({ onRefreshed }) {
 
         <ExcelFilterButtons state={filterState} />
 
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="btn btn-outline btn-sm" onClick={load}>↺ Refresh</button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          {syncing && !rangeLoading && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#e8760a' }}>⟳ Syncing with Excel…</span>
+          )}
+          {nextUpKey && (
+            <button className="btn btn-outline btn-sm" onClick={() => setScrollNonce(n => n + 1)} title="Scroll to the next upcoming delivery">
+              ⏭ Next up
+            </button>
+          )}
+          <button className="btn btn-outline btn-sm" onClick={() => load({ force: true, keepCurrent: !rangeLoading })} disabled={syncing}>
+            ↺ Refresh
+          </button>
           {canEdit('engagement') && (
-            <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add Engagement</button>
+            <button className="btn btn-primary btn-sm" onClick={() => openAdd()} disabled={preparingAdd}>
+              {preparingAdd ? '⏳ Preparing…' : '+ Add Engagement'}
+            </button>
           )}
         </div>
       </div>
@@ -668,35 +1087,71 @@ export default function EngagementCalendar({ onRefreshed }) {
         ))}
       </div>
 
-      {/* ── Scrollable card list ── */}
-      <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 340px)', paddingRight: 2 }}>
-        {filtered.length === 0
-          ? (
-            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '52px 0', textAlign: 'center', color: '#64748b', fontSize: 14 }}>
-              No engagements match the current filters
-            </div>
-          )
-          : filtered.map((eng, i) => (
-            <EngagementCard
-              key={`${eng.egId}-${i}`}
-              eng={eng}
-              canEditEng={canEdit('engagement')}
-              onEdit={setEditRow}
-              onDelete={setDeleteRow}
-            />
-          ))
-        }
+      {/* Thin progress bar instead of covering the page */}
+      <div className={`ec-syncbar${syncing ? ' on' : ''}`} />
 
-        {filtered.length > 0 && (
+      {/* ── Scrollable card list, grouped by month ── */}
+      <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 440px)', minHeight: 260, paddingRight: 2 }}>
+        {error ? (
+          <ErrorState error={error} onRetry={() => load({ force: true })} />
+        ) : rangeLoading ? (
+          <SkeletonCards />
+        ) : filtered.length === 0 ? (
+          <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '52px 0', textAlign: 'center', color: '#64748b', fontSize: 14 }}>
+            {windowRows.length === 0
+              ? `No engagements in ${rangeLabel}`
+              : 'No engagements match the current filters'}
+          </div>
+        ) : (
+          groups.map(g => (
+            <div key={g.key} ref={el => { if (el) monthRefs.current[g.key] = el; }} style={{ marginBottom: 10, scrollMarginTop: 8 }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                fontSize: 12, fontWeight: 800, color: '#1a3a5c',
+                textTransform: 'uppercase', letterSpacing: 0.6,
+                padding: '8px 4px 6px',
+              }}>
+                {g.label}
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', background: '#f1f5f9', borderRadius: 20, padding: '1px 8px' }}>
+                  {g.rows.length}
+                </span>
+                {g.key === currentKey && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#fff', background: '#1a3a5c', borderRadius: 20, padding: '1px 8px', textTransform: 'none', letterSpacing: 0 }}>
+                    Current month
+                  </span>
+                )}
+              </div>
+              {g.rows.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#94a3b8', padding: '4px 6px 8px' }}>No engagements this month</div>
+              ) : g.rows.map((eng, i) => (
+                <div
+                  key={`${rowKey(eng)}-${i}`}
+                  ref={el => { if (el) cardRefs.current[rowKey(eng)] = el; }}
+                >
+                  <EngagementCard
+                    eng={eng}
+                    highlight={rowKey(eng) === nextUpKey}
+                    canEditEng={canEdit('engagement')}
+                    onEdit={setEditRow}
+                    onDelete={setDeleteRow}
+                  />
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+
+        {!error && !rangeLoading && filtered.length > 0 && (
           <div style={{ textAlign: 'center', padding: '14px 0', fontSize: 12, color: '#94a3b8' }}>
-            Showing all {filtered.length} engagement{filtered.length !== 1 ? 's' : ''}
+            Showing {filtered.length} engagement{filtered.length !== 1 ? 's' : ''} for {rangeLabel}.
+            Use “Previous / Next” or change the view to see other periods.
           </div>
         )}
       </div>
 
-      {showAdd   && <AddEditEngagementModal initial={null} prefill={addPrefill} onSave={handleAdd}  onClose={() => { setShowAdd(false); setAddPrefill(null); }} saving={saving} engagements={data} />}
-      {editRow   && <AddEditEngagementModal initial={editRow} onSave={handleEdit} onClose={() => setEditRow(null)}    saving={saving} engagements={data} />}
-      {deleteRow && <DeleteEngagementModal  eng={deleteRow}   onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
+      {showAdd   && <AddEditEngagementModal initial={null} prefill={addPrefill} onSave={handleAdd}  onClose={() => { setShowAdd(false); setAddPrefill(null); }} saving={saving} engagements={allRows || data} />}
+      {editRow   && <AddEditEngagementModal initial={editRow} onSave={handleEdit} onClose={() => setEditRow(null)}    saving={false} engagements={data} />}
+      {deleteRow && <DeleteEngagementModal  eng={deleteRow}   onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={false} />}
     </div>
   );
 }

@@ -184,10 +184,197 @@ export async function getEngagements(filters = {}) {
   }).filter(r => r.company); // only require company — egId always has a fallback
 }
 
+// ─── ENGAGEMENT CALENDAR — 3-MONTH WINDOW LOADING ────────────────────────────
+// Loading all rows at once makes the Power Automate flow time out (HTTP 504)
+// once the sheet grows to hundreds of rows. The Engagement Calendar page loads
+// a 3-month window instead (previous, current and next month). The range is sent
+// to the flow so it can filter on its side; the rows are ALSO filtered here, so
+// the page works correctly even if the flow still returns every row.
+
+const EC_CACHE_TTL_MS = 2 * 60 * 1000;          // reuse a window for 2 minutes
+const _ecCache = new Map();                      // key → { ts, promise }
+
+/** Clear cached engagement reads (called automatically after every write). */
+export function invalidateEngagementCache() {
+  _ecCache.clear();
+}
+
+const pad2 = n => String(n).padStart(2, '0');
+
+/** 'YYYY-MM-DD' → Excel serial number (days since 1899-12-30). */
+export function isoToExcelSerial(iso) {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  return Math.round(Date.UTC(y, m - 1, d) / 86400000) + 25569;
+}
+
+/**
+ * Build a 3-month window centred on (year, monthIndex 0-11).
+ * Returns { from, to, months: [{ key:'YYYY-MM', label:'Sep 2026', year, month }] }
+ */
+export function buildMonthWindow(year, month) {
+  const SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const months = [-1, 0, 1].map(delta => {
+    const dt = new Date(year, month + delta, 1);
+    const y = dt.getFullYear(), m = dt.getMonth();
+    return { key: `${y}-${pad2(m + 1)}`, label: `${SHORT[m]} ${y}`, year: y, month: m };
+  });
+  const first = months[0], last = months[2];
+  const lastDay = new Date(last.year, last.month + 1, 0).getDate();
+  return {
+    from: `${first.key}-01`,
+    to:   `${last.key}-${pad2(lastDay)}`,
+    months,
+  };
+}
+
+/**
+ * Range of `count` months starting at (year, monthIndex 0-11).
+ * Returns { from, to, months: [{ key:'YYYY-MM', label:'Sep 2026', year, month }] }
+ */
+export function buildMonthRange(year, month, count = 3) {
+  const SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const n = Math.max(1, Math.min(36, Number(count) || 1));
+  const months = Array.from({ length: n }, (_, i) => {
+    const dt = new Date(year, month + i, 1);
+    const y = dt.getFullYear(), m = dt.getMonth();
+    return { key: `${y}-${pad2(m + 1)}`, label: `${SHORT[m]} ${y}`, year: y, month: m };
+  });
+  const first = months[0], last = months[n - 1];
+  const lastDay = new Date(last.year, last.month + 1, 0).getDate();
+  return { from: `${first.key}-01`, to: `${last.key}-${pad2(lastDay)}`, months };
+}
+
+/** True when the engagement overlaps [from, to] (ISO strings compare correctly). */
+export function engagementInRange(e, from, to) {
+  if (!e.startDate) return false;
+  const start = e.startDate;
+  const end   = e.endDate && e.endDate >= start ? e.endDate : start;
+  return start <= to && end >= from;
+}
+
+// Retry only READ calls, only for gateway/throttling errors. A 504 from Power
+// Automate often has no CORS headers, so the browser reports it as a TypeError
+// ("Failed to fetch") — treat that as retryable too.
+async function withReadRetry(fn, delays = [2000, 5000]) {
+  let lastErr;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message || '');
+      const retryable = err instanceof TypeError || /\((429|502|503|504)\)/.test(msg);
+      if (!retryable || attempt === delays.length) break;
+      await new Promise(res => setTimeout(res, delays[attempt]));
+    }
+  }
+  if (lastErr instanceof TypeError) {
+    throw new Error('The Power Automate flow did not respond in time (timeout / 504). Please try again in a minute.');
+  }
+  throw lastErr;
+}
+
+// ── Saved copy of each loaded range (memory + browser storage) ──────────────
+// Lets the page show data instantly (stale-while-revalidate) while a fresh
+// copy loads from Excel in the background. Browser copy expires after 24h.
+const _ecData = new Map();                       // key → { ts, rows }
+const EC_STORE_KEY = 'ercrm.engagements.cache.v1';
+const EC_STORE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const EC_STORE_MAX_ENTRIES = 12;
+
+function storeReadAll() {
+  try { return JSON.parse(localStorage.getItem(EC_STORE_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+function storeWriteAll(all) {
+  try { localStorage.setItem(EC_STORE_KEY, JSON.stringify(all)); } catch { /* storage full / blocked */ }
+}
+function storeSave(key, rows) {
+  const all = storeReadAll();
+  all[key] = { ts: Date.now(), rows };
+  const keys = Object.keys(all).sort((a, b) => all[b].ts - all[a].ts);
+  keys.slice(EC_STORE_MAX_ENTRIES).forEach(k => delete all[k]);
+  storeWriteAll(all);
+}
+
+function cachedRead(key, loader, force, persist = false) {
+  const hit = _ecCache.get(key);
+  if (!force && hit && Date.now() - hit.ts < EC_CACHE_TTL_MS) return hit.promise;
+  const entry = { ts: Date.now(), promise: null };
+  entry.promise = withReadRetry(loader).then(rows => {
+    _ecData.set(key, { ts: Date.now(), rows });
+    if (persist) storeSave(key, rows);
+    return rows;
+  }).catch(err => {
+    if (_ecCache.get(key) === entry) _ecCache.delete(key);   // never cache a failure
+    throw err;
+  });
+  _ecCache.set(key, entry);
+  return entry.promise;
+}
+
+/** Last known rows for a range (memory first, then browser copy) — or null. Never hits the network. */
+export function peekEngagementsForRange(from, to) {
+  const key = `range|${from}|${to}`;
+  const mem = _ecData.get(key);
+  if (mem) return mem.rows;
+  const saved = storeReadAll()[key];
+  if (saved && Array.isArray(saved.rows) && Date.now() - saved.ts < EC_STORE_MAX_AGE_MS) {
+    _ecData.set(key, saved);
+    return saved.rows;
+  }
+  return null;
+}
+
+/** Load a range in the background (no-op if a fresh copy is already cached). */
+export function prefetchEngagementsForRange(from, to) {
+  const hit = _ecCache.get(`range|${from}|${to}`);
+  if (hit && Date.now() - hit.ts < EC_CACHE_TTL_MS) return;
+  getEngagementsForRange(from, to).catch(() => { /* silent — it is only a prefetch */ });
+}
+
+/** Apply a change to every saved copy (used after a successful save/delete). */
+export function patchEngagementCaches(mutate) {
+  for (const [k, v] of _ecData) _ecData.set(k, { ...v, rows: mutate(v.rows) });
+  const all = storeReadAll();
+  Object.keys(all).forEach(k => { if (Array.isArray(all[k].rows)) all[k].rows = mutate(all[k].rows); });
+  storeWriteAll(all);
+}
+
+/**
+ * Engagements overlapping [from, to] plus rows with no Start Date
+ * (flagged `undated: true`). Cached for 2 minutes; pass { force: true } to refresh.
+ */
+export function getEngagementsForRange(from, to, { force = false } = {}) {
+  return cachedRead(`range|${from}|${to}`, async () => {
+    const rows = await getEngagements({
+      fromDate:   from,
+      toDate:     to,
+      fromSerial: isoToExcelSerial(from),
+      toSerial:   isoToExcelSerial(to),
+    });
+    return rows
+      .filter(e => !e.startDate || engagementInRange(e, from, to))
+      .map(e => (e.startDate ? e : { ...e, undated: true }));
+  }, force, true);
+}
+
+/** Every engagement (used only when the Add form needs all EG IDs). Cached. */
+export function getAllEngagementsCached({ force = false } = {}) {
+  return cachedRead('all', () => getEngagements(), force);
+}
+
+// Tell the background sync that the Engagement Calendar changed
+function notifyEcChanged(result) {
+  try { window.dispatchEvent(new CustomEvent('ercrm:ec-changed')); } catch { /* non-browser */ }
+  return result;
+}
+
 export async function addEngagementRow(rowData) {
   // Use exact Excel column names for fields with spaces/special chars so PA
   // triggerBody()?['Service Type'] matches without needing camelCase mapping.
   // Single-word columns (sector, offering, etc.) still work as-is (CI match).
+  invalidateEngagementCache();
   return callEngagementFlow('create', {
     'EG ID':                           rowData.egId           || '',
     company:                           rowData.company        || '',
@@ -214,7 +401,7 @@ export async function addEngagementRow(rowData) {
     comments:                          rowData.comments       || '',
     feedback:                          rowData.feedback       || '',
     nps:                               rowData.nps            || '',
-  });
+  }).then(notifyEcChanged);
 }
 
 export async function updateEngagementRow(egId, sno, updates) {
@@ -227,11 +414,13 @@ export async function updateEngagementRow(egId, sno, updates) {
   // The flow's Key Column is 'SNo' and its Key Value reads triggerBody()?['SNo']
   // (case-sensitive). 'SNo' also feeds the item/SNo cell, so it must carry the
   // real value or the S No cell would be blanked. rowId / sno kept as fallbacks.
-  return callEngagementFlow('update', { ...updates, SNo: key, rowId: key, sno: key });
+  invalidateEngagementCache();
+  return callEngagementFlow('update', { ...updates, SNo: key, rowId: key, sno: key }).then(notifyEcChanged);
 }
 
 export async function deleteEngagementRow(egId, sno) {
-  return callEngagementFlow('delete', { egId, sno });
+  invalidateEngagementCache();
+  return callEngagementFlow('delete', { egId, sno }).then(notifyEcChanged);
 }
 
 // ─── OPS CHECKLIST ───────────────────────────────────────────────────────────
@@ -250,7 +439,7 @@ const fmtDtField = d => {
   return s;
 };
 
-export async function getOpsChecklist() {
+async function fetchOpsChecklist() {
   const data = await callOpsFlow('get');
   const rows = Array.isArray(data?.value) ? data.value : Array.isArray(data) ? data : [];
   return rows.map((r, i) => ({
@@ -422,7 +611,7 @@ async function callContentDevFlow(action, payload = {}) {
   return callFlow('CONTENT_DEV_CRUD', { action, ...payload });
 }
 
-export async function getContentDevTracker() {
+async function fetchContentDevTracker() {
   const data = await callContentDevFlow('get');
   const rows = Array.isArray(data?.value) ? data.value
              : Array.isArray(data)        ? data
@@ -503,7 +692,7 @@ async function callSolutionFlow(action, payload = {}) {
   return callFlow('SOLUTION_CRUD', { action, ...payload });
 }
 
-export async function getSolutionTracker() {
+async function fetchSolutionTracker() {
   const data = await callSolutionFlow('get');
   const rows = Array.isArray(data?.value) ? data.value
              : Array.isArray(data)        ? data
@@ -645,3 +834,38 @@ function sanitiseLocation(val) {
   if (!s || s === '#VALUE!' || s === 'null') return 'VILT';
   return s;
 }
+
+
+// ─── Instant display for tracker pages (stale-while-revalidate) ─────────────
+// Every successful load is remembered (memory + browser copy, 24h). Pages show
+// the remembered rows immediately and swap in fresh rows when they arrive.
+const _listMem = new Map();
+const LIST_STORE_PREFIX = 'ercrm.list.v1.';
+const LIST_MAX_AGE_MS   = 24 * 60 * 60 * 1000;
+const LIST_MAX_CHARS    = 1500000;          // skip the browser copy for very large lists
+
+function rememberList(name, rows) {
+  _listMem.set(name, rows);
+  try {
+    const json = JSON.stringify({ ts: Date.now(), rows });
+    if (json.length < LIST_MAX_CHARS) localStorage.setItem(LIST_STORE_PREFIX + name, json);
+  } catch { /* storage full / blocked — memory copy still works */ }
+  return rows;
+}
+
+/** Last loaded rows for 'ops' | 'cdt' | 'solution' — or null. Never hits the network. */
+export function peekList(name) {
+  if (_listMem.has(name)) return _listMem.get(name);
+  try {
+    const v = JSON.parse(localStorage.getItem(LIST_STORE_PREFIX + name) || 'null');
+    if (v && Array.isArray(v.rows) && Date.now() - v.ts < LIST_MAX_AGE_MS) {
+      _listMem.set(name, v.rows);
+      return v.rows;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export async function getOpsChecklist()      { return rememberList('ops',      await withReadRetry(fetchOpsChecklist)); }
+export async function getContentDevTracker() { return rememberList('cdt',      await withReadRetry(fetchContentDevTracker)); }
+export async function getSolutionTracker()   { return rememberList('solution', await withReadRetry(fetchSolutionTracker)); }

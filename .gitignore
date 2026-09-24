@@ -1,0 +1,12 @@
+# Dependencies & build output (re-created by npm install / npm run build)
+node_modules/
+dist/
+
+# Local backups and working files
+Claude outputs/
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+*.log

@@ -133,10 +133,10 @@ function SessionModal({ eng, onClose }) {
             {eng.egId || 'Engagement'}
           </div>
           <div style={{ fontSize:17, fontWeight:800, color:'#fff', marginTop:4, lineHeight:'22px' }}>
-            {eng.company}
+            {eng.topic || '—'}
           </div>
           <div style={{ fontSize:12, color:'rgba(255,255,255,0.85)', marginTop:3, fontStyle:'italic' }}>
-            {eng.topic || '—'}
+            {eng.company}
           </div>
           {/* Status + Offering tags */}
           <div style={{ display:'flex', gap:6, marginTop:10, flexWrap:'wrap' }}>
@@ -241,7 +241,7 @@ function EngBar({ eng, ymd, onSelect }) {
   return (
     <div
       onClick={() => onSelect(eng)}
-      title={`${eng.company} — ${eng.topic} [${eng.status}]`}
+      title={`${eng.topic} — ${eng.company} [${eng.status}]`}
       onMouseEnter={e => e.currentTarget.style.filter = 'brightness(0.93)'}
       onMouseLeave={e => e.currentTarget.style.filter = 'brightness(1)'}
       style={{
@@ -264,6 +264,10 @@ function EngBar({ eng, ymd, onSelect }) {
         <>
           <div style={{ fontSize:10, fontWeight:800, whiteSpace:'nowrap',
                         overflow:'hidden', textOverflow:'ellipsis', lineHeight:'15px' }}>
+            {eng.topic || '—'}
+          </div>
+          <div style={{ fontSize:9, fontWeight:600, opacity:0.8, whiteSpace:'nowrap',
+                        overflow:'hidden', textOverflow:'ellipsis', lineHeight:'12px' }}>
             {eng.company}
           </div>
           {eng.offering && (

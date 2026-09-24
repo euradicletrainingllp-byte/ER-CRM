@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  getSolutionTracker,
+  getSolutionTracker, peekList,
   addSolutionRow,
   updateSolutionRow,
   deleteSolutionRow,
@@ -424,8 +424,9 @@ export default function SolutionTracker({ onRefreshed, view }) {
   const navigate = useNavigate();
   const { canCreate, canUpdate, canDelete, canEdit } = usePermissions();
 
-  const [rows, setRows]       = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows]       = useState(() => peekList('solution') || []);
+  const [loading, setLoading] = useState(() => !peekList('solution'));   // full loader only on the very first visit
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError]     = useState('');
   const [search, setSearch]   = useState('');
   // Set of proposalIds whose Sol rows are currently expanded
@@ -438,17 +439,22 @@ export default function SolutionTracker({ onRefreshed, view }) {
   const [delTarget, setDelTarget] = useState(null);
   const [saving, setSaving]       = useState(false);
 
+  // Show the last loaded rows straight away, then fetch fresh rows in the background
   const load = useCallback(async () => {
-    setLoading(true);
+    const saved = peekList('solution');
+    if (saved) { setRows(r => (r.length ? r : saved)); setLoading(false); }
+    else setLoading(true);
+    setRefreshing(true);
     setError('');
     try {
       const data = await getSolutionTracker();
       setRows(data);
       onRefreshed?.(new Date().toLocaleTimeString());
     } catch (e) {
-      setError(e.message || 'Failed to load data');
+      if (!saved) setError(e.message || 'Failed to load data');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [onRefreshed]);
 
@@ -654,7 +660,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
             onChange={e => setSearch(e.target.value)}
             style={{ ...inp, width: 220 }}
           />
-          <button onClick={load} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }}>🔄 Refresh</button>
+          <button onClick={load} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }} disabled={refreshing}>{refreshing ? '⟳ Refreshing…' : '🔄 Refresh'}</button>
           {view === 'bd' && canCreate('bd') && (
             <button
               onClick={() => setBdModal('add')}
