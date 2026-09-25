@@ -2,7 +2,18 @@ import { useState, useEffect, useMemo } from 'react';
 import KPICard from '../components/KPICard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
-import { getEngagements, getOpsChecklist, getBDTracker } from '../services/api.js';
+import { getAllEngagementsCached, peekAllEngagements, peekList, getOpsChecklist, getBDTracker, getSolutionTracker } from '../services/api.js';
+import OperationsDashboard from '../components/OperationsDashboard.jsx';
+import SolutioningDashboard from '../components/SolutioningDashboard.jsx';
+
+// Department dashboards (add more tabs here as departments are added)
+const DASH_TABS = [
+  { key: 'overview',   label: '📋 Overview' },
+  { key: 'operations', label: '⚙️ Operations' },
+  { key: 'solutioning', label: '💡 Solutioning' },
+];
+const TAB_KEY = 'ercrm.dashboard.tab';
+const readTab = () => { try { return localStorage.getItem(TAB_KEY) || 'overview'; } catch { return 'overview'; } };
 
 const fmt = n => n ? '₹' + (n / 100000).toFixed(1) + 'L' : '₹0';
 const today = new Date().toISOString().slice(0, 10);
@@ -45,25 +56,33 @@ function clScore(cl) {
 }
 
 export default function Dashboard({ onRefreshed }) {
-  const [engData,  setEngData]  = useState([]);
-  const [opsData,  setOpsData]  = useState([]);
-  const [bdData,   setBdData]   = useState([]);
-  const [loading,  setLoading]  = useState(true);
+  // Show the last loaded data straight away; fresh data replaces it when it arrives
+  const [engData,  setEngData]  = useState(() => peekAllEngagements() || []);
+  const [opsData,  setOpsData]  = useState(() => peekList('ops') || []);
+  const [bdData,   setBdData]   = useState(() => peekList('bd') || []);
+  const [solData,  setSolData]  = useState(() => peekList('solution'));   // null until first load
+  const [loading,  setLoading]  = useState(() => !peekAllEngagements());
+  const [refreshing, setRefreshing] = useState(false);
   const [errors,   setErrors]   = useState({});
+  const [tab, setTabState] = useState(readTab);
+  const setTab = t => { setTabState(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* ignore */ } };
 
   const load = async () => {
-    setLoading(true);
+    if (!peekAllEngagements()) setLoading(true);
+    setRefreshing(true);
     setErrors({});
     const errs = {};
 
     await Promise.allSettled([
-      getEngagements().then(setEngData).catch(e => { errs.eng = e; setEngData([]); }),
-      getOpsChecklist().then(setOpsData).catch(e => { errs.ops = e; setOpsData([]); }),
-      getBDTracker().then(setBdData).catch(e => { errs.bd = e; setBdData([]); }),
+      getAllEngagementsCached({ force: true }).then(setEngData).catch(e => { errs.eng = e; }),
+      getOpsChecklist().then(setOpsData).catch(e => { errs.ops = e; }),
+      getBDTracker().then(setBdData).catch(e => { errs.bd = e; }),
+      getSolutionTracker().then(setSolData).catch(e => { errs.solution = e; setSolData(d => d || []); }),
     ]);
 
     setErrors(errs);
     setLoading(false);
+    setRefreshing(false);
     onRefreshed?.(new Date().toLocaleTimeString());
   };
 
@@ -93,10 +112,42 @@ export default function Dashboard({ onRefreshed }) {
   const maxCount   = byCompany[0]?.[1] || 1;
   const monthMon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  if (loading) return <LoadingState message="Loading CRM data from OneDrive Excel…" />;
-
   return (
     <div>
+      {/* Department tabs */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1px solid var(--border)' }}>
+        {DASH_TABS.map(t => (
+          <button key={t.key} type="button" onClick={() => setTab(t.key)} aria-pressed={tab === t.key}
+            style={{
+              padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', background: 'none', border: 'none',
+              borderBottom: tab === t.key ? '3px solid var(--primary)' : '3px solid transparent',
+              color: tab === t.key ? 'var(--primary)' : 'var(--muted)', marginBottom: -1,
+            }}>
+            {t.label}
+          </button>
+        ))}
+        {refreshing && !loading && <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>⟳ Updating from Excel…</span>}
+      </div>
+
+      {tab === 'solutioning' ? (
+        !solData ? (
+          <LoadingState message="Loading Solution Tracker and BD Tracker…" />
+        ) : (
+          <>
+            {(errors.solution || errors.bd) && (
+              <div style={{ background: '#fff7ed', border: '1px solid #fbbf24', borderRadius: 10, padding: '12px 18px', marginBottom: 16, fontSize: 13 }}>
+                ⚠️ Showing the last loaded data — {[errors.solution && 'Solution Tracker', errors.bd && 'BD Tracker'].filter(Boolean).join(' and ')} could not be refreshed.
+              </div>
+            )}
+            <SolutioningDashboard solutions={solData} bd={bdData} refreshing={refreshing} />
+          </>
+        )
+      ) : loading ? (
+        <LoadingState message="Loading CRM data from OneDrive Excel…" />
+      ) : tab === 'operations' ? (
+        <OperationsDashboard engagements={engData} refreshing={refreshing} />
+      ) : (
+      <>
       {/* KPIs */}
       <div className="kpi-grid">
         <KPICard label="Total Engagements" value={engData.length} sub="All time from Excel" icon="📋" variant="accent" />
@@ -218,6 +269,8 @@ export default function Dashboard({ onRefreshed }) {
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

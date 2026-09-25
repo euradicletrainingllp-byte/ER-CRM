@@ -45,6 +45,10 @@ async function callBDFlow(action, payload = {}) {
 }
 
 export async function getBDTracker() {
+  return rememberList('bd', await withReadRetry(fetchBDTracker));
+}
+
+async function fetchBDTracker() {
   const data = await callBDFlow('get');
   const rows = Array.isArray(data?.value) ? data.value
              : Array.isArray(data)        ? data
@@ -62,6 +66,7 @@ export async function getBDTracker() {
     commercials:   Number(getField(r, 'Commercials', 'commercials') ?? 0) || null,
     comments:      getField(r, 'Comments', 'comments') ?? '',
     serviceType:   getField(r, 'Service Type', 'Service_Type', 'serviceType') ?? '',
+    industry:      getField(r, 'Industry', 'industry', 'Industry / Sector', 'Sector') ?? '',
     proposalLink1: getField(r, 'Proposal Link 1', 'Proposal_Link_1') ?? '',
     modules:       getField(r, 'Modules', 'modules') ?? '',
     proposalLink2: getField(r, 'Proposal Link 2', 'Proposal_Link_2') ?? '',
@@ -164,6 +169,8 @@ export async function getEngagements(filters = {}) {
       offering:    getField(r, 'Offering', 'offering') ?? '',
       day:         Number(getField(r, 'Day', 'day') ?? 0) || 0,
       location:    sanitiseLocation(getField(r, 'Location', 'location')),
+      // raw Excel value (blank / '#VALUE!' kept) — used by the Operations dashboard for delivery mode
+      locationRaw: String(getField(r, 'Location', 'location') ?? '').trim(),
       consultant1: getField(r, 'Consultant - 1', 'Consultant_1', 'Consultant___1', 'consultant1') ?? '',
       consultant2: getField(r, 'Consultant - 2', 'Consultant_2', 'Consultant___2', 'consultant2') ?? '',
       consultant3: getField(r, 'Consultant - 3', 'Consultant_3', 'Consultant___3', 'consultant3') ?? '',
@@ -326,6 +333,18 @@ export function peekEngagementsForRange(from, to) {
   return null;
 }
 
+/** Last known FULL Engagement Calendar (memory first, then browser copy) — or null. */
+export function peekAllEngagements() {
+  const mem = _ecData.get('all');
+  if (mem) return mem.rows;
+  const saved = storeReadAll()['all'];
+  if (saved && Array.isArray(saved.rows) && Date.now() - saved.ts < EC_STORE_MAX_AGE_MS) {
+    _ecData.set('all', saved);
+    return saved.rows;
+  }
+  return null;
+}
+
 /** Load a range in the background (no-op if a fresh copy is already cached). */
 export function prefetchEngagementsForRange(from, to) {
   const hit = _ecCache.get(`range|${from}|${to}`);
@@ -361,7 +380,7 @@ export function getEngagementsForRange(from, to, { force = false } = {}) {
 
 /** Every engagement (used only when the Add form needs all EG IDs). Cached. */
 export function getAllEngagementsCached({ force = false } = {}) {
-  return cachedRead('all', () => getEngagements(), force);
+  return cachedRead('all', () => getEngagements(), force, true);
 }
 
 // Tell the background sync that the Engagement Calendar changed
@@ -721,6 +740,7 @@ async function fetchSolutionTracker() {
     lineOfService:       getField(r, 'Line of Service', 'Line_of_Service', 'lineOfService') ?? '',
     typeOfService:       getField(r, 'Type of Service', 'Type_of_Service', 'typeOfService') ?? '',
     developmentCategory: getField(r, 'Development Category', 'Development_Category', 'developmentCategory') ?? '',
+    industry:            getField(r, 'Industry', 'industry', 'Industry / Sector', 'Sector') ?? '',
     solutionValue:       getField(r, 'Solution Value', 'Solution_Value', 'solutionValue') ?? '',
     status:              getField(r, 'Status', 'status') ?? '',
     remarks:             getField(r, 'Remarks', 'remarks') ?? '',
@@ -853,7 +873,7 @@ function rememberList(name, rows) {
   return rows;
 }
 
-/** Last loaded rows for 'ops' | 'cdt' | 'solution' — or null. Never hits the network. */
+/** Last loaded rows for 'ops' | 'cdt' | 'solution' | 'bd' — or null. Never hits the network. */
 export function peekList(name) {
   if (_listMem.has(name)) return _listMem.get(name);
   try {

@@ -61,7 +61,7 @@ const inp = {
 };
 
 // ── Fixed dropdown option lists ────────────────────────────────────────────────
-const PROGRAM_TYPE_OPTS     = ['Standard', 'Customized'];
+const PROGRAM_TYPE_OPTS     = ['Standard', 'Customized', 'New Creation'];
 const ENGAGEMENT_TYPE_OPTS  = ['Standalone', 'Journey'];
 const LINE_OF_SERVICE_OPTS  = ['Training', 'Talent Management', 'HR Services', 'Coaching', 'Other'];
 const TYPE_OF_SERVICE_OPTS  = ['Facilitation', 'Coaching', 'One-O-One Coaching', 'Mini Group Coaching', 'Assessment & Development Centres', 'Success Presentation'];
