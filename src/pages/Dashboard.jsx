@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import KPICard from '../components/KPICard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
-import { getAllEngagementsCached, peekAllEngagements, peekList, getOpsChecklist, getBDTracker, getSolutionTracker } from '../services/api.js';
+import { getAllEngagementsCached, peekAllEngagements, peekList, getOpsChecklist, getSolutionTracker } from '../services/api.js';
 import OperationsDashboard from '../components/OperationsDashboard.jsx';
 import SolutioningDashboard from '../components/SolutioningDashboard.jsx';
 
@@ -59,7 +59,6 @@ export default function Dashboard({ onRefreshed }) {
   // Show the last loaded data straight away; fresh data replaces it when it arrives
   const [engData,  setEngData]  = useState(() => peekAllEngagements() || []);
   const [opsData,  setOpsData]  = useState(() => peekList('ops') || []);
-  const [bdData,   setBdData]   = useState(() => peekList('bd') || []);
   const [solData,  setSolData]  = useState(() => peekList('solution'));   // null until first load
   const [loading,  setLoading]  = useState(() => !peekAllEngagements());
   const [refreshing, setRefreshing] = useState(false);
@@ -76,7 +75,6 @@ export default function Dashboard({ onRefreshed }) {
     await Promise.allSettled([
       getAllEngagementsCached({ force: true }).then(setEngData).catch(e => { errs.eng = e; }),
       getOpsChecklist().then(setOpsData).catch(e => { errs.ops = e; }),
-      getBDTracker().then(setBdData).catch(e => { errs.bd = e; }),
       getSolutionTracker().then(setSolData).catch(e => { errs.solution = e; setSolData(d => d || []); }),
     ]);
 
@@ -110,6 +108,9 @@ export default function Dashboard({ onRefreshed }) {
   const scheduled  = engData.filter(e => e.status === 'Scheduled').length;
   const tentative  = engData.filter(e => e.status === 'Tentative').length;
   const maxCount   = byCompany[0]?.[1] || 1;
+  // BD Tracker page = BD view of the combined Solution Tracker (SOLUTION_CRUD flow)
+  const bdCount = useMemo(() => new Set((solData || []).map(r =>
+    String(r.bdSNo ?? '').trim() || String(r.proposalId ?? '').trim()).filter(Boolean)).size, [solData]);
   const monthMon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   return (
@@ -134,12 +135,12 @@ export default function Dashboard({ onRefreshed }) {
           <LoadingState message="Loading Solution Tracker and BD Tracker…" />
         ) : (
           <>
-            {(errors.solution || errors.bd) && (
+            {errors.solution && (
               <div style={{ background: '#fff7ed', border: '1px solid #fbbf24', borderRadius: 10, padding: '12px 18px', marginBottom: 16, fontSize: 13 }}>
-                ⚠️ Showing the last loaded data — {[errors.solution && 'Solution Tracker', errors.bd && 'BD Tracker'].filter(Boolean).join(' and ')} could not be refreshed.
+                ⚠️ Showing the last loaded data — the Solution Tracker could not be refreshed ({errors.solution.message}).
               </div>
             )}
-            <SolutioningDashboard solutions={solData} bd={bdData} refreshing={refreshing} />
+            <SolutioningDashboard solutions={solData} bd={[]} refreshing={refreshing} />
           </>
         )
       ) : loading ? (
@@ -153,7 +154,7 @@ export default function Dashboard({ onRefreshed }) {
         <KPICard label="Total Engagements" value={engData.length} sub="All time from Excel" icon="📋" variant="accent" />
         <KPICard label="Revenue — Delivered" value={fmt(revenue)} sub={`${engData.filter(e=>e.status==='Delivered').length} delivered sessions`} icon="💰" variant="green" />
         <KPICard label="Scheduled Sessions" value={scheduled} sub={`${tentative} tentative`} icon="🗓" variant="blue" />
-        <KPICard label="BD Prospects" value={bdData.length} sub="In BD Tracker" icon="🎯" variant="purple" />
+        <KPICard label="BD Prospects" value={bdCount} sub="In BD Tracker" icon="🎯" variant="purple" />
       </div>
 
       {Object.keys(errors).length > 0 && (

@@ -403,7 +403,7 @@ export default function SolutioningDashboard({ solutions, bd, refreshing }) {
           <CountValueBars rows={industryMix} tip={tip} countWord="Opportunities" empty={`No opportunities in ${fyName}`} />
           {industryNR && (
             <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
-              "Not recorded" = no Industry filled in. Add an <strong>Industry</strong> column to the Solution Tracker or BD Tracker Excel table,
+              "Not recorded" = no Industry filled in. Add an <strong>Industry</strong> column to the Solution Tracker Excel table,
               or map clients to industries in <code>src/config/clientIndustry.js</code>.
             </div>
           )}
