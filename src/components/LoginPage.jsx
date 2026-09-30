@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { useMsal, useIsAuthenticated } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { loginRequest, ALLOWED_DOMAINS, ALLOWED_EMAILS } from '../config/authConfig.js';
+import { logEvent, flushSoon, endAuditSession } from '../services/auditLogger.js';
 
 function isAllowed(email = '') {
   const em = email.toLowerCase().trim();
@@ -138,7 +139,11 @@ export default function LoginPage() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Activity log: record the logout and send it before leaving the page
+    logEvent({ Category: 'AUTH', Action: 'LOGOUT', Module: 'auth' });
+    await flushSoon(1500);
+    endAuditSession();
     instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin });
   };
 

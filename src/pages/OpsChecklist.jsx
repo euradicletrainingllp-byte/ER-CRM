@@ -714,7 +714,7 @@ export default function OpsChecklist({ onRefreshed }) {
   if (error)   return <ErrorState error={error} onRetry={load} />;
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 68px)', overflow:'hidden' }}>
+    <div className="tracker-page">
       {toast && (
         <div style={{ position:'fixed', top:70, right:24, background:'var(--primary)', color:'#fff', padding:'10px 20px', borderRadius:8, zIndex:999, fontSize:13, fontWeight:600, boxShadow:'0 4px 12px rgba(0,0,0,0.15)' }}>
           {toast}

@@ -1,4 +1,5 @@
 import { useMsal, useAccount } from '@azure/msal-react';
+import { logEvent, flushSoon, endAuditSession } from '../services/auditLogger.js';
 
 const TITLES = {
   '/':           'Dashboard',
@@ -22,7 +23,11 @@ export default function TopBar({ path, lastRefreshed, onRefresh, loading }) {
     .join('')
     .slice(0, 2) || 'ER';
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Activity log: record the logout and send it before leaving the page
+    logEvent({ Category: 'AUTH', Action: 'LOGOUT', Module: 'auth' });
+    await flushSoon(1500);
+    endAuditSession();
     instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin });
   };
 

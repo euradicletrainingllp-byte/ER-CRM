@@ -27,6 +27,7 @@ import {
   getOpsChecklist,      updateOpsRow,        addOpsRow,        deleteOpsRow,
   getContentDevTracker, updateContentDevRow, addContentDevRow, deleteContentDevRow,
 } from './api.js';
+import { logEvent, withAuditContext } from './auditLogger.js';
 
 // ─── Field mapping (EC row → tracker fields owned by the EC) ─────────────────
 
@@ -240,7 +241,27 @@ export async function recoverInterruptedSync(onProgress) {
  * @returns {Promise<{ skipped?: string, updated: number, added: number, planned: number, inScope: number, byTarget: object }>}
  * @throws  {SyncRolledBackError} when a change failed and the run was undone
  */
-export async function runEcSync({ targets = ['ops', 'cdt'], scope = 'recent', onProgress } = {}) {
+export async function runEcSync(options = {}) {
+  // Activity log: one BULK_SYNC summary row; every write inside the run is
+  // recorded with Category SYNC and the same CorrelationId.
+  const startedAt = performance.now();
+  const label = `EC → ${(options.targets || ['ops', 'cdt']).join(' + ')} · scope: ${options.scope || 'recent'}`;
+  return withAuditContext({ Category: 'SYNC' }, async ctx => {
+    try {
+      const res = await runEcSyncCore(options);
+      logEvent({ Category: 'SYNC', Action: 'BULK_SYNC', Module: 'engagement', CorrelationId: ctx.CorrelationId,
+        RecordLabel: res?.skipped ? `${label} · skipped (${res.skipped})` : label,
+        NewValues: res, DurationMs: performance.now() - startedAt });
+      return res;
+    } catch (err) {
+      logEvent({ Category: 'SYNC', Action: 'BULK_SYNC', Module: 'engagement', CorrelationId: ctx.CorrelationId,
+        RecordLabel: label, Result: 'FAILED', ErrorMessage: err?.message || String(err), DurationMs: performance.now() - startedAt });
+      throw err;
+    }
+  });
+}
+
+async function runEcSyncCore({ targets = ['ops', 'cdt'], scope = 'recent', onProgress } = {}) {
   const empty = { updated: 0, added: 0, planned: 0, inScope: 0, byTarget: {} };
   if (!targets.length) return { ...empty, skipped: 'no-targets' };
   if (!acquireLock())  return { ...empty, skipped: 'locked' };

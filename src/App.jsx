@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { MsalProvider } from '@azure/msal-react';
-import { PublicClientApplication, EventType } from '@azure/msal-browser';
+import { PublicClientApplication, EventType, InteractionType } from '@azure/msal-browser';
 import { msalConfig } from './config/authConfig.js';
 import AuthGuard          from './components/AuthGuard.jsx';
 import Sidebar            from './components/Sidebar.jsx';
@@ -16,6 +16,7 @@ import ERCalendar            from './pages/ERCalendar.jsx';
 import NoAccessPage       from './pages/NoAccessPage.jsx';
 import { PermissionsProvider } from './context/PermissionsContext.jsx';
 import { usePermissions } from './hooks/usePermissions.js';
+import { logEvent, setAuditUser, firstTimeThisSession, AUDIT_OPTIONS } from './services/auditLogger.js';
 import './styles/index.css';
 
 /**
@@ -26,8 +27,22 @@ import './styles/index.css';
 function PermissionRoute({ page, children }) {
   const { isAdmin, canAccess } = usePermissions();
   if (isAdmin || canAccess(page)) return children;
+  return <DeniedPage page={page} />;
+}
+
+// Activity log: record the blocked page, then show the normal No Access page
+function DeniedPage({ page }) {
+  useEffect(() => {
+    logEvent({ Category: 'ACCESS', Action: 'PAGE_DENIED', Module: page, RecordLabel: window.location.pathname, Result: 'FAILED' });
+  }, [page]);
   return <NoAccessPage page={page} />;
 }
+
+// Activity log: page key for each route (used for PAGE_VIEW rows)
+const ROUTE_MODULE = {
+  '/': 'dashboard', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops',
+  '/content-dev': 'content-dev', '/solution': 'solution', '/er-calendar': 'engagement', '/admin': 'permissions',
+};
 
 // Initialise MSAL once at module level.
 // IMPORTANT: Do NOT call getAllAccounts() or any other MSAL method here —
@@ -42,10 +57,38 @@ msalInstance.addEventCallback(event => {
   }
 });
 
+// Activity log: sign-in success / failure (never affects sign-in itself)
+msalInstance.addEventCallback(event => {
+  try {
+    if (event.eventType === EventType.LOGIN_SUCCESS) {
+      setAuditUser(event.payload?.account || event.payload);
+      firstTimeThisSession('start');   // so AuthGuard does not also log SESSION_RESUMED
+      logEvent({
+        Category: 'AUTH', Module: 'auth',
+        Action: event.interactionType === InteractionType.Silent ? 'LOGIN_SSO' : 'LOGIN',
+      });
+    } else if (
+      event.eventType === EventType.ACQUIRE_TOKEN_FAILURE &&
+      event.interactionType !== InteractionType.Silent      // silent SSO misses are normal
+    ) {
+      logEvent({
+        Category: 'AUTH', Action: 'LOGIN_FAILED', Module: 'auth', Result: 'FAILED',
+        ErrorMessage: event.error?.errorCode || event.error?.message || 'Sign-in failed',
+      });
+    }
+  } catch { /* ignore */ }
+});
+
 function Shell() {
   const location = useLocation();
   const [lastRefreshed, setLastRefreshed] = useState('');
   const [loading,       setLoading]       = useState(false);
+
+  // Activity log: one PAGE_VIEW row per page opened
+  useEffect(() => {
+    if (!AUDIT_OPTIONS.logPageViews) return;
+    logEvent({ Category: 'ACCESS', Action: 'PAGE_VIEW', Module: ROUTE_MODULE[location.pathname] || 'other', RecordLabel: location.pathname });
+  }, [location.pathname]);
 
   return (
     <div className="app-shell">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getSolutionTracker, peekList,
@@ -9,6 +9,43 @@ import {
 import { usePermissions } from '../hooks/usePermissions.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { Trash2 } from 'lucide-react';
+import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.jsx';
+
+// ── Excel-style filter columns (same behaviour as the Engagement Calendar) ────
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// Year / month of a BD lead: Date of Discussion first, else the BD Month text ("Sep 2026")
+function bdYearMonth(r) {
+  const d = String(r.dateOfDiscussion || '');
+  if (/^\d{4}-\d{2}/.test(d)) return { y: d.slice(0, 4), m: Number(d.slice(5, 7)) };
+  const t = String(r.bdMonth || '');
+  const y = (t.match(/(19|20)\d{2}/) || [''])[0];
+  const mi = MONTHS_SHORT.findIndex(mm => t.toLowerCase().includes(mm.toLowerCase()));
+  return { y, m: mi >= 0 ? mi + 1 : 0 };
+}
+const toNum = v => Number(String(v ?? '').replace(/[^0-9.]/g, '')) || 0;
+const fmtL  = n => (n > 0 ? '₹' + (n / 100000).toFixed(1) + 'L' : '₹0');
+const fmtIN = n => (n > 0 ? '₹' + Math.round(n).toLocaleString('en-IN') : '—');
+const solVals = (r, k) => (r._sols || []).map(s => s[k]);
+
+const BD_FILTER_COLUMNS = [
+  { key: 'year',     label: 'Year',          get: r => bdYearMonth(r).y, order: 'desc' },
+  { key: 'month',    label: 'Month',         get: r => { const m = bdYearMonth(r).m; return m ? MONTHS_SHORT[m - 1] : ''; }, order: 'month', sortBy: r => bdYearMonth(r).m },
+  { key: 'bdStatus', label: 'BD Status',     get: r => r.bdStatus },
+  { key: 'client',   label: 'Client',        get: r => r.clientName },
+  { key: 'topic',    label: 'Program Topic', get: r => r.programTopic },
+  { key: 'poc',      label: 'Client POC',    get: r => r.clientPoc },
+  { key: 'version',  label: 'Version',       get: r => r.proposalVersion },
+  { key: 'value',    label: 'Proposal Value', get: r => (r.bdProposalValue ? String(r.bdProposalValue) : ''), sortBy: r => toNum(r.bdProposalValue) },
+];
+const SOL_FILTER_COLUMNS = [
+  ...BD_FILTER_COLUMNS,
+  { key: 'solMonth',   label: 'Sol Month',       get: r => solVals(r, 'solutionMonth') },
+  { key: 'programType', label: 'Program Type',   get: r => solVals(r, 'programType') },
+  { key: 'engType',    label: 'Engagement Type', get: r => solVals(r, 'engagementType') },
+  { key: 'los',        label: 'Line of Service', get: r => solVals(r, 'lineOfService') },
+  { key: 'tos',        label: 'Type of Service', get: r => solVals(r, 'typeOfService') },
+  { key: 'devCat',     label: 'Dev Category',    get: r => solVals(r, 'developmentCategory') },
+];
 
 // ── Status colours ────────────────────────────────────────────────────────────
 const STATUS_COLORS = {
@@ -472,7 +509,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
 
   // ── Derived data ──────────────────────────────────────────────────────────
   // One BD anchor row per unique Proposal ID
-  const bdRows = (() => {
+  const allBdRows = useMemo(() => {
     const seen = new Set();
     return rows
       .filter(r => r.proposalId)
@@ -482,8 +519,30 @@ export default function SolutionTracker({ onRefreshed, view }) {
         seen.add(k);
         return true;
       })
-      .filter(r => !search || [r.proposalId, r.clientName, r.programTopic, r.bdStatus, r.bdMonth].join(' ').toLowerCase().includes(search.toLowerCase()));
-  })();
+      .map(r => ({ ...r, _sols: rows.filter(x => x.proposalId === r.proposalId && x.solutionTopic) }));
+  }, [rows]);
+
+  // Excel-style column filters + sorting (shared with Engagement Calendar)
+  const filterState = useExcelFilters(allBdRows, view === 'bd' ? BD_FILTER_COLUMNS : SOL_FILTER_COLUMNS);
+  const bdRows = filterState.filtered
+    .filter(r => !search || [r.proposalId, r.clientName, r.programTopic, r.bdStatus, r.bdMonth, r.clientPoc,
+      ...(r._sols || []).map(x => x.solutionTopic)].join(' ').toLowerCase().includes(search.toLowerCase()));
+
+  // KPI figures (follow the active filters)
+  const kpi = {
+    total:    bdRows.length,
+    all:      allBdRows.length,
+    value:    bdRows.reduce((t, r) => t + toNum(r.bdProposalValue), 0),
+    wonValue: bdRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + toNum(r.bdProposalValue), 0),
+    clients:  new Set(bdRows.map(r => r.clientName).filter(Boolean)).size,
+    won:      bdRows.filter(r => r.bdStatus === 'Won').length,
+    lost:     bdRows.filter(r => r.bdStatus === 'Lost').length,
+    inProc:   bdRows.filter(r => r.bdStatus === 'In Process').length,
+    solItems: bdRows.reduce((t, r) => t + (r._sols || []).length, 0),
+    solValue: bdRows.reduce((t, r) => t + (r._sols || []).reduce((u, x) => u + toNum(x.solutionValue), 0), 0),
+  };
+  const decided = kpi.won + kpi.lost;
+  const winRate = decided ? Math.round((kpi.won / decided) * 100) : 0;
 
   // Sol rows grouped by proposalId
   function getSolRows(pid) {
@@ -636,16 +695,17 @@ export default function SolutionTracker({ onRefreshed, view }) {
   const thStyle = {
     padding: '10px 12px', fontWeight: 700, fontSize: 11, color: 'var(--muted)',
     textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
-    borderBottom: '2px solid var(--border)', background: 'var(--surface)',
+    borderBottom: '2px solid var(--border)', background: 'var(--surface, #F8F9FB)',
+    position: 'sticky', top: 0, zIndex: 2, boxShadow: 'inset 0 -2px 0 var(--border)',
   };
   const tdStyle = { padding: '11px 12px', verticalAlign: 'middle' };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: '24px 28px', maxWidth: 1400, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
+    <div className="tracker-page" style={{ maxWidth: 1400, margin: '0 auto', width: '100%' }}>
+      {/* ── Fixed header: title, KPIs, filter bar ── */}
+      <div className="tracker-fixed">
+        <div style={{ marginBottom: 14 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>
             {view === 'bd' ? '🎯 BD Tracker' : '💡 Solution Tracker'}
           </h1>
@@ -653,30 +713,81 @@ export default function SolutionTracker({ onRefreshed, view }) {
             BD pipeline with linked solution items — click a row to expand
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input
-            placeholder="Search…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ ...inp, width: 220 }}
-          />
-          <button onClick={load} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontSize: 13 }} disabled={refreshing}>{refreshing ? '⟳ Refreshing…' : '🔄 Refresh'}</button>
-          {view === 'bd' && canCreate('bd') && (
-            <button
-              onClick={() => setBdModal('add')}
-              style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}
-            >+ Add BD Lead</button>
+
+        {/* KPI Row */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 14 }}>
+          <div className="kpi-card accent">
+            <div className="kpi-label">Filtered Proposals</div>
+            <div className="kpi-value">{loading ? '…' : kpi.total}</div>
+            <div className="kpi-sub">of {kpi.all} total</div>
+          </div>
+          {view === 'bd' ? (
+            <div className="kpi-card green">
+              <div className="kpi-label">Proposal Value</div>
+              <div className="kpi-value">{loading ? '…' : fmtL(kpi.value)}</div>
+              <div className="kpi-sub">{fmtIN(kpi.value)}</div>
+            </div>
+          ) : (
+            <div className="kpi-card green">
+              <div className="kpi-label">Solution Items</div>
+              <div className="kpi-value">{loading ? '…' : kpi.solItems}</div>
+              <div className="kpi-sub">Value {fmtIN(kpi.solValue)}</div>
+            </div>
           )}
+          <div className="kpi-card blue">
+            <div className="kpi-label">Unique Clients</div>
+            <div className="kpi-value">{loading ? '…' : kpi.clients}</div>
+            <div className="kpi-sub">{kpi.inProc} in process</div>
+          </div>
+          <div className="kpi-card purple">
+            <div className="kpi-label">Won</div>
+            <div className="kpi-value">{loading ? '…' : kpi.won}</div>
+            <div className="kpi-sub">{decided ? `${winRate}% win rate · ${fmtL(kpi.wonValue)}` : 'No closed proposals'}</div>
+          </div>
+        </div>
+
+        {/* Excel-style Filter Bar */}
+        <div style={{
+          background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
+          padding: '12px 16px', marginBottom: 14,
+          display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginRight: 4 }}>
+            🔽 Filter by:
+          </span>
+
+          <ExcelFilterButtons state={filterState} />
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {refreshing && !loading && (
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#e8760a' }}>⟳ Syncing with Excel…</span>
+            )}
+            <input
+              placeholder="Search…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ ...inp, width: 180, padding: '5px 10px', height: 32 }}
+            />
+            <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing}>
+              ↺ Refresh
+            </button>
+            {view === 'bd' && canCreate('bd') && (
+              <button className="btn btn-primary btn-sm" onClick={() => setBdModal('add')} style={{ whiteSpace: 'nowrap' }}>
+                + Add BD Lead
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Main Card */}
-      <div style={{ background: 'var(--card)', borderRadius: 10, padding: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+      <div style={{ background: 'var(--card)', borderRadius: 10, padding: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', overflow: 'hidden', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {loading && <div style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>Loading…</div>}
         {error   && <div style={{ textAlign: 'center', padding: 48, color: '#ef4444' }}>⚠ {error}</div>}
 
         {!loading && !error && (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+          <div className="tracker-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ textAlign: 'left' }}>
@@ -696,7 +807,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                 {bdRows.length === 0 && (
                   <tr>
                     <td colSpan={view === 'bd' ? 9 : 10} style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
-                      No BD entries found. Click <strong>+ Add BD Entry</strong> to create one.
+                      {allBdRows.length && bdRows.length === 0 ? 'No proposals match the current filters' : <>No BD entries found. Click <strong>+ Add BD Lead</strong> to create one.</>}
                     </td>
                   </tr>
                 )}
@@ -891,10 +1002,11 @@ export default function SolutionTracker({ onRefreshed, view }) {
                 })}
               </tbody>
             </table>
-            <div style={{ padding: '10px 16px', color: 'var(--muted)', fontSize: 12 }}>
-              {bdRows.length} proposal{bdRows.length !== 1 ? 's' : ''}
-            </div>
           </div>
+          <div className="tracker-fixed" style={{ padding: '10px 16px', color: 'var(--muted)', fontSize: 12, borderTop: '1px solid var(--border)' }}>
+            Showing {bdRows.length} of {allBdRows.length} proposal{allBdRows.length !== 1 ? 's' : ''}
+          </div>
+          </>
         )}
       </div>
 

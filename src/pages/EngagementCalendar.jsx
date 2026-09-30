@@ -975,7 +975,7 @@ export default function EngagementCalendar({ onRefreshed }) {
   const currentKey = today.slice(0, 7);
 
   return (
-    <div>
+    <div className="tracker-page">
       <style>{`
         @keyframes egSlide {
           from { opacity: 0; transform: translateY(-5px); }
@@ -1003,6 +1003,7 @@ export default function EngagementCalendar({ onRefreshed }) {
       )}
 
       {/* ── Range navigator: Months (1–24) or Year — never blocked while loading ── */}
+      <div className="tracker-fixed">
       <RangeNav
         viewMode={viewMode}
         span={span}
@@ -1089,9 +1090,10 @@ export default function EngagementCalendar({ onRefreshed }) {
 
       {/* Thin progress bar instead of covering the page */}
       <div className={`ec-syncbar${syncing ? ' on' : ''}`} />
+      </div>
 
       {/* ── Scrollable card list, grouped by month ── */}
-      <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 440px)', minHeight: 260, paddingRight: 2 }}>
+      <div className="tracker-scroll" style={{ overflowX: 'hidden', paddingRight: 2 }}>
         {error ? (
           <ErrorState error={error} onRetry={() => load({ force: true })} />
         ) : rangeLoading ? (

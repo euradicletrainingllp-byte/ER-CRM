@@ -4,9 +4,138 @@
  */
 
 import FLOW_URLS from '../config/powerAutomate.js';
+import { logEvent, withAuditContext, normKey, normVal, AUDIT_OPTIONS } from './auditLogger.js';
+
+// ─── Activity log hook ───────────────────────────────────────────────────────
+// Every tracker read/write goes through callFlow(), so this is the single place
+// where create / read / update / delete are recorded. The last rows read from
+// Excel are remembered (per module, keyed by S No) so an update can record
+// exactly which fields changed, and a delete can record the removed row.
+const AUDIT_MODULE = {
+  BD_TRACKER_CRUD:    'bd',
+  ENGAGEMENT_CRUD:    'engagement',
+  OPS_CHECKLIST_CRUD: 'ops',
+  CONTENT_DEV_CRUD:   'content-dev',
+  SOLUTION_CRUD:      'solution',
+};
+const AUDIT_ACTION = { get: 'READ', create: 'CREATE', update: 'UPDATE', delete: 'DELETE' };
+const AUDIT_META_KEYS = new Set(['action', 'rowId', 'sno', 'SNo', 'newSno']);
+const _auditRows = new Map();          // module → Map(sno → { vals:{norm→value}, names:{norm→column} })
+
+function auditRowsOf(module) {
+  if (!_auditRows.has(module)) _auditRows.set(module, new Map());
+  return _auditRows.get(module);
+}
+
+function auditIndexRow(raw) {
+  const vals = {}, names = {};
+  for (const [k, v] of Object.entries(raw || {})) {
+    if (k.startsWith('@odata') || k === 'ItemInternalId') continue;
+    const n = normKey(k);
+    if (!(n in vals)) { vals[n] = v; names[n] = k.trim(); }
+  }
+  return { vals, names };
+}
+
+function auditRecordId(body) {
+  const v = body.rowId ?? body.SNo ?? body.sno ?? body['S No'] ?? body['S.No'];
+  return v === undefined || v === null ? '' : String(v).trim();
+}
+
+function auditLabel(vals) {
+  const pick = (...keys) => { for (const k of keys) { const v = vals[normKey(k)]; if (v) return String(v).trim(); } return ''; };
+  const who  = pick('Client', 'Company', 'Client Name');
+  const what = pick('Topic', 'Program Topic', 'Solution Topic');
+  const eg   = pick('EG ID', 'Proposal ID');
+  return [eg, who, what].filter(Boolean).join(' · ');
+}
+
+function auditRecord(flowKey, body, data, startedAt, error) {
+  try {
+    const Module = AUDIT_MODULE[flowKey];
+    const Action = AUDIT_ACTION[body?.action];
+    if (!Module || !Action) return;
+    if (Action === 'READ' && !AUDIT_OPTIONS.logReads && !error) return;
+
+    const DurationMs = Math.round(performance.now() - startedAt);
+    const rows = auditRowsOf(Module);
+    const RecordId = Action === 'READ' ? '' : (auditRecordId(body) || String(body['EG ID'] ?? body['Proposal ID'] ?? ''));
+    const base = { Category: 'CRUD', Action, Module, RecordId, DurationMs };
+
+    // Payload fields (one entry per column, aliases such as 'Start Date ' merged)
+    const payload = {}, payloadNames = {};
+    for (const [k, v] of Object.entries(body || {})) {
+      if (AUDIT_META_KEYS.has(k)) continue;
+      const n = normKey(k);
+      if (!(n in payload)) { payload[n] = v; payloadNames[n] = k.replace(/\n/g, ' ').trim(); }
+    }
+
+    if (error) {
+      logEvent({ ...base, RecordLabel: auditLabel(payload), Result: 'FAILED',
+        ErrorMessage: String(error?.message || error).slice(0, 2000) });
+      return;
+    }
+
+    if (Action === 'READ') {
+      const list = Array.isArray(data?.value) ? data.value : Array.isArray(data) ? data : [];
+      for (const raw of list) {
+        const idx = auditIndexRow(raw);
+        const sno = normVal(idx.vals.sno);
+        if (sno) rows.set(sno, idx);
+      }
+      const range = body.fromDate && body.toDate ? ` (${body.fromDate} → ${body.toDate})` : '';
+      logEvent({ ...base, RecordLabel: `${list.length} rows loaded${range}` });
+      return;
+    }
+
+    const prev = RecordId ? rows.get(normVal(RecordId)) : null;
+
+    if (Action === 'CREATE') {
+      const NewValues = {};
+      for (const n of Object.keys(payload)) if (normVal(payload[n]) !== '') NewValues[payloadNames[n]] = payload[n];
+      logEvent({ ...base, RecordLabel: auditLabel(payload),
+        ChangedFields: Object.keys(NewValues).join(', '), NewValues });
+      return;
+    }
+
+    if (Action === 'DELETE') {
+      const OldValues = {};
+      if (prev) for (const n of Object.keys(prev.vals)) OldValues[prev.names[n]] = prev.vals[n];
+      logEvent({ ...base, RecordLabel: prev ? auditLabel(prev.vals) : auditLabel(payload), OldValues });
+      if (RecordId) rows.delete(normVal(RecordId));
+      return;
+    }
+
+    // UPDATE — record only the columns whose value actually changed
+    const OldValues = {}, NewValues = {}, changed = [];
+    for (const n of Object.keys(payload)) {
+      const before = prev ? prev.vals[n] : undefined;
+      if (prev && normVal(before) === normVal(payload[n])) continue;
+      if (!prev && normVal(payload[n]) === '') continue;
+      changed.push(payloadNames[n]);
+      NewValues[payloadNames[n]] = payload[n];
+      if (prev) OldValues[payloadNames[n]] = before ?? '';
+    }
+    logEvent({ ...base, RecordLabel: auditLabel(prev ? { ...prev.vals, ...payload } : payload),
+      ChangedFields: changed.join(', ') || '(no change)', OldValues: prev ? OldValues : '', NewValues });
+    if (prev) for (const n of Object.keys(payload)) prev.vals[n] = payload[n];
+  } catch { /* logging must never break a save */ }
+}
 
 // ─── Core caller ─────────────────────────────────────────────────────────────
 async function callFlow(flowKey, body = {}) {
+  const startedAt = performance.now();
+  try {
+    const result = await callFlowRaw(flowKey, body);
+    auditRecord(flowKey, body, result, startedAt, null);
+    return result;
+  } catch (err) {
+    auditRecord(flowKey, body, null, startedAt, err);
+    throw err;
+  }
+}
+
+async function callFlowRaw(flowKey, body = {}) {
   const url = FLOW_URLS[flowKey];
   if (!url) throw new Error(`FLOW_NOT_CONFIGURED:${flowKey}`);
 
@@ -108,6 +237,11 @@ export async function deleteBDRow(sno) {
 // After a delete, renumber all rows whose S.No > deletedSno
 // Processes in ascending order so there are no key conflicts in Excel.
 export async function renumberBDRows(deletedSno, allRows) {
+  // Activity log: the S No shifts are recorded as RENUMBER rows sharing one CorrelationId
+  return withAuditContext({ Action: 'RENUMBER', Category: 'SYSTEM' }, () => renumberBDRowsInner(deletedSno, allRows));
+}
+
+async function renumberBDRowsInner(deletedSno, allRows) {
   const rowsToUpdate = allRows
     .filter(r => r.sno > deletedSno)
     .sort((a, b) => a.sno - b.sno);

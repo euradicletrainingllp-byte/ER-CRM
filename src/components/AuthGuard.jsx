@@ -8,6 +8,7 @@ import { InteractionStatus } from '@azure/msal-browser';
 import { useEffect } from 'react';
 import { loginRequest, ALLOWED_DOMAINS, ALLOWED_EMAILS } from '../config/authConfig.js';
 import LoginPage from './LoginPage.jsx';
+import { logEvent, setAuditUser, firstTimeThisSession } from '../services/auditLogger.js';
 
 function isAllowed(email = '') {
   const em = email.toLowerCase().trim();
@@ -73,6 +74,24 @@ export default function AuthGuard({ children }) {
       });
     }
   }, [inProgress]);
+
+  // Activity log: identify the user; record a returning session (cached sign-in)
+  // or a blocked e-mail domain. Runs once per tab session.
+  const auditEmail = getEmail(accounts[0]).toLowerCase();
+  useEffect(() => {
+    if (!auditEmail) return;
+    setAuditUser(accounts[0]);
+    if (!isAllowed(auditEmail)) {
+      if (firstTimeThisSession(`denied:${auditEmail}`)) {
+        logEvent({ Category: 'AUTH', Action: 'ACCESS_DENIED_DOMAIN', Module: 'auth', Result: 'FAILED',
+          ErrorMessage: `${auditEmail} is not in the allowed domains / e-mails` });
+      }
+      return;
+    }
+    if (firstTimeThisSession('start')) {
+      logEvent({ Category: 'AUTH', Action: 'SESSION_RESUMED', Module: 'auth' });
+    }
+  }, [auditEmail]);
 
   // While MSAL is handling the redirect response, show a loading screen
   // instead of flashing the login page for a split second.

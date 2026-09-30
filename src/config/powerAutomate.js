@@ -41,6 +41,12 @@ const FLOW_URLS = {
   // Payload: { action, sno, Proposal ID, BD S No, Sol S No, Client Name, ... }
   SOLUTION_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/02/workflows/e512fd82e2e3425d9dbba7d231588e76/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pD3X9t1IvsUzmgTgJ33jtJtYE4lwco3j7g6Lut77LFY",      // ← paste your PA CRUD Router URL here
 
+  // ── ACTIVITY LOG (audit trail) ────────────────────────────────────────────
+  // SharePoint list: "CRM ACTIVITY LOG"  ·  Flow: "CRM Activity Log"
+  // Payload: { action: 'append', events: [ ...log rows ] }
+  // Paste the flow's HTTP POST URL between the quotes. Leave "" to switch logging off.
+  AUDIT_LOG: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/15/workflows/f53e8afec01e4ca487ed4081d2e9505d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=qxJNgzrAmUg_KGqXdnMoElKgxwHKRC3Xyb5PP_6J7bo",
+
 };
 
 export default FLOW_URLS;
