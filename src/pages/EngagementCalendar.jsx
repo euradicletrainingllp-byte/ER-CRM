@@ -9,6 +9,10 @@ import {
 import { usePermissions } from '../hooks/usePermissions.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.jsx';
+import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
+import ChecklistPicker, { ChecklistChips } from '../components/ChecklistPicker.jsx';
+import { parseChecklist } from '../config/opsChecklistItems.js';
+import { pushNewEngagementToOps } from '../services/syncWithEC.js';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -109,6 +113,8 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
         comments:       initial.comments       || '',
         feedback:       initial.feedback       || '',
         nps:            initial.nps            || '',
+        proposalLink:   initial.proposalLink   || '',
+        opsChecklist:   initial.opsChecklist   || '',
       };
     }
     // Add mode — use prefill values from Solution Tracker if provided
@@ -138,6 +144,8 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
       comments:       '',
       feedback:       '',
       nps:            '',
+      proposalLink:   prefill?.proposalLink || '',
+      opsChecklist:   prefill?.opsChecklist || '',
     };
   });
 
@@ -176,6 +184,7 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
                       contract: '', poStatus: '', invoice: '', price: '',
                       travelExpenses: '', gst: '', payment: '', amountReceived: '',
                       receivedDate: '', comments: '', feedback: '', nps: '',
+                      proposalLink: prefill?.proposalLink || '', opsChecklist: prefill?.opsChecklist || '',
                     });
                   } else {
                     // Find the most-recent row with this EG ID and pre-fill all fields
@@ -207,6 +216,8 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
                         comments:       match.comments       || '',
                         feedback:       match.feedback       || '',
                         nps:            match.nps            || '',
+                        proposalLink:   prefill?.proposalLink || match.proposalLink || '',
+                        opsChecklist:   prefill?.opsChecklist || match.opsChecklist || '',
                       });
                     } else {
                       set('egId', val);
@@ -274,6 +285,23 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
               </div>
             );
           })}
+
+          {/* ── Carried from the Solution / BD Tracker ── */}
+          <div className="form-field full">
+            <label className="form-label">Proposal Link{prefill?.proposalLink && !isEdit ? ' (from Solution Tracker)' : ''}</label>
+            <LinkInput className="form-input" value={form.proposalLink} onChange={v => set('proposalLink', v)} placeholder="https://… (proposal document)" />
+          </div>
+          <div className="form-field full">
+            <label className="form-label">
+              Operations Checklist — items Ops must arrange{prefill?.opsChecklist && !isEdit ? ' (ticked by BD when Won)' : ''}
+            </label>
+            <ChecklistPicker value={form.opsChecklist} onChange={v => set('opsChecklist', v)} />
+            {!isEdit && (
+              <span style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                Carried to the Operations Checklist as soon as the engagement is saved.
+              </span>
+            )}
+          </div>
 
           <div className="form-field">
             <label className="form-label">Status</label>
@@ -353,7 +381,9 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }
     ['Comments',         eng.comments       || '—'],
     ['Feedback',         eng.feedback       || '—'],
     ['NPS',              eng.nps            || '—'],
+    ['Proposal Link',    eng.proposalLink ? <LinkButton url={eng.proposalLink} label="Open proposal" compact /> : '—'],
   ];
+  const checklistCount = parseChecklist(eng.opsChecklist).length;
 
   return (
     <div style={{
@@ -466,6 +496,12 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#1a3a5c' }}>{val}</div>
               </div>
             ))}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 5 }}>
+              Operations Checklist (from BD){checklistCount ? ` · ${checklistCount} item${checklistCount > 1 ? 's' : ''}` : ''}
+            </div>
+            <ChecklistChips value={eng.opsChecklist} empty="No checklist carried from BD" />
           </div>
           <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             {eng.price > 0 && (
@@ -692,6 +728,8 @@ const formToExcel = form => ({
   comments:                          form.comments       || '',
   feedback:                          form.feedback       || '',
   nps:                               form.nps            || '',
+  'Proposal Link':                   form.proposalLink   || '',
+  'Ops Checklist':                   form.opsChecklist   || '',
 });
 
 /* ─── Main Page ─────────────────────────────────────────────────────────── */
@@ -924,8 +962,14 @@ export default function EngagementCalendar({ onRefreshed }) {
       if (!row.startDate || (row.startDate <= win.to && (row.endDate || row.startDate) >= win.from)) {
         setData(d => [...d, row]);
       }
-      showToast('✓ Engagement added to Excel!');
+      showToast('✓ Engagement added to Excel! Creating its Ops Checklist row…');
       revalidateSoon();
+      // Carry the engagement (and the BD checklist) to the Ops Checklist straight away
+      pushNewEngagementToOps(rowFromForm(form))
+        .then(res => showToast(res.ok
+          ? `✓ Ops Checklist ${res.created ? 'row created' : 'row updated'} (S No ${res.sno})`
+          : `⚠ Ops Checklist not updated: ${res.reason}`))
+        .catch(err => showToast('⚠ Ops Checklist not updated: ' + err.message + ' — use "Sync with EC" in the Ops Checklist.'));
     } catch (e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
   };

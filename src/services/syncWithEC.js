@@ -9,8 +9,12 @@
  * POC, completion dates) are NEVER touched — even on updates.
  */
 
-import { getEngagements, updateEngagementRow } from './api.js';
-import { runEcSync } from './syncEngine.js';
+import {
+  getEngagements, updateEngagementRow,
+  getEngagementsForRange, getAllEngagementsCached,
+  getOpsChecklist, addOpsRow, updateOpsRow,
+} from './api.js';
+import { runEcSync, ecToOC } from './syncEngine.js';
 
 // ─── Manual "Sync with EC" buttons ────────────────────────────────────────────
 // Both buttons use the all-or-nothing, incremental engine (syncEngine.js).
@@ -97,6 +101,8 @@ function ecUpdateBody(e) {
     comments:                          e.comments       || '',
     feedback:                          e.feedback       || '',
     nps:                               e.nps            || '',
+    'Proposal Link':                   e.proposalLink   || '',
+    'Ops Checklist':                   e.opsChecklist   || '',
   };
 }
 
@@ -131,4 +137,50 @@ export async function syncOpsFinanceToEC(sno, changes, fullRow) {
 
   await updateEngagementRow(ec.egId, ec.sno, ecUpdateBody({ ...ec, ...ecChanges }));
   return { synced: true };
+}
+
+// ─── New engagement → Ops Checklist (immediately after "Save Engagement") ────
+
+const wait = ms => new Promise(res => setTimeout(res, ms));
+const normTxt = v => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/**
+ * Finds the engagement that was just added (Excel assigns its S No) and creates
+ * the matching Ops Checklist row straight away — carrying the BD checklist.
+ * Uses the same field mapping as "Sync with EC", so a later sync sees no change.
+ *
+ * @param {object} added  the engagement form values that were saved
+ * @returns {{ ok: boolean, sno?: string, created?: boolean, reason?: string }}
+ */
+export async function pushNewEngagementToOps(added) {
+  let match = null;
+  // Excel Online needs a moment before the new row (and its S No) is readable
+  for (const delay of [2500, 4000, 6000]) {
+    await wait(delay);
+    const rows = added.startDate
+      ? await getEngagementsForRange(added.startDate, added.endDate && added.endDate >= added.startDate ? added.endDate : added.startDate, { force: true })
+      : await getAllEngagementsCached({ force: true });
+    const candidates = rows.filter(r =>
+      normTxt(r.egId) === normTxt(added.egId) &&
+      normTxt(r.company) === normTxt(added.company) &&
+      normTxt(r.topic) === normTxt(added.topic) &&
+      (r.startDate || '') === (added.startDate || '') &&
+      String(r.sno ?? '').trim() !== '');
+    if (candidates.length) {
+      match = candidates.sort((a, b) => (Number(b.sno) || 0) - (Number(a.sno) || 0))[0];
+      break;
+    }
+  }
+  if (!match) return { ok: false, reason: 'the new engagement could not be found in Excel yet — use "Sync with EC" in the Ops Checklist' };
+
+  const sno = String(match.sno).trim();
+  const payload = ecToOC(match);
+  const ocRows = await getOpsChecklist();
+  const existing = ocRows.find(r => String(r.sno ?? '').trim() === sno);
+  if (existing) {
+    await updateOpsRow(sno, payload);
+    return { ok: true, sno, created: false };
+  }
+  await addOpsRow({ 'S No': sno, ...payload });
+  return { ok: true, sno, created: true };
 }

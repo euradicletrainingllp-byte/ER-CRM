@@ -10,6 +10,15 @@ import { usePermissions } from '../hooks/usePermissions.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { Trash2 } from 'lucide-react';
 import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.jsx';
+import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
+import ChecklistPicker, { ChecklistChips } from '../components/ChecklistPicker.jsx';
+import { parseChecklist } from '../config/opsChecklistItems.js';
+
+// A Won proposal must carry the Operations checklist ticked by the BD person
+const needsChecklist = r => r?.bdStatus === 'Won' && parseChecklist(r.opsChecklist).length === 0;
+// Proposal link for a solution item: its own link, else any link saved under the same Proposal ID
+const proposalLinkFor = (rows, pid, own) =>
+  own || (rows.find(x => x.proposalId === pid && String(x.proposalV1Link || '').trim()) || {}).proposalV1Link || '';
 
 // ── Excel-style filter columns (same behaviour as the Engagement Calendar) ────
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -74,7 +83,7 @@ const EMPTY_BD = {
   proposalId: '', clientName: '', clientPoc: '', contactNumber: '',
   dateOfDiscussion: '', clientExpectedDate: '', bdMonth: '',
   programTopic: '', proposalVersion: 'V1', bdStatus: 'In Process', bdProposalValue: '',
-  submissionToClient: '',
+  submissionToClient: '', opsChecklist: '',
 };
 const EMPTY_SOL = {
   proposalId: '', solutionTopic: '', solutionMonth: '', programType: '',
@@ -197,6 +206,8 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
   const [pidSelect, setPidSelect] = useState('__new__');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const checklistMissing = needsChecklist(form);
+  const blocked = saving || !form.proposalId.trim() || !form.clientName.trim() || checklistMissing;
 
   // Auto-derive BD Month (e.g. "Sep 2026") whenever Date of Discussion changes
   function handleDateChange(dateVal) {
@@ -316,15 +327,28 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
           </Field>
           <Field label="BD Proposal Value"><input style={inp} value={form.bdProposalValue} onChange={e => set('bdProposalValue', e.target.value)} placeholder="₹ Amount" /></Field>
           <Field label="Date of Submission to Client" half><input type="date" style={inp} value={form.submissionToClient} onChange={e => set('submissionToClient', e.target.value)} /></Field>
+
+          {/* ── Won → BD ticks what Operations must arrange ── */}
+          {form.bdStatus === 'Won' && (
+            <Field label="Operations Checklist * — tick everything Operations must arrange">
+              <div style={{ fontSize: 12, color: '#9a3412', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, padding: '6px 10px', marginBottom: 6 }}>
+                🎉 Proposal won! This list goes to the Engagement Calendar and the Operations Checklist when the engagement is added.
+              </div>
+              <ChecklistPicker value={form.opsChecklist} onChange={v => set('opsChecklist', v)} required />
+            </Field>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
           <button onClick={onClose} disabled={saving} style={{ padding: '8px 18px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}>Cancel</button>
-          <button onClick={() => onSave(form)} disabled={saving || !form.proposalId.trim() || !form.clientName.trim()} style={{ padding: '8px 22px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, cursor: (saving || !form.proposalId.trim() || !form.clientName.trim()) ? 'not-allowed' : 'pointer', opacity: (saving || !form.proposalId.trim() || !form.clientName.trim()) ? 0.5 : 1 }}>
+          <button onClick={() => onSave(form)} disabled={blocked} style={{ padding: '8px 22px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, cursor: blocked ? 'not-allowed' : 'pointer', opacity: blocked ? 0.5 : 1 }}>
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
         {(!form.proposalId.trim() || !form.clientName.trim()) && (
           <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Proposal ID and Client Name are required</p>
+        )}
+        {checklistMissing && (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Tick the Operations Checklist before saving a Won proposal</p>
         )}
       </div>
     </div>
@@ -388,7 +412,7 @@ function SolModal({ initial, proposalId, programTopic, bdStatus, onSave, onClose
           </Field>
           <Field label="Solution Value" half><input style={inp} value={form.solutionValue} onChange={e => set('solutionValue', e.target.value)} placeholder="₹ Amount" /></Field>
           <Field label="Remarks"><textarea style={{ ...inp, resize: 'vertical', minHeight: 56 }} value={form.remarks} onChange={e => set('remarks', e.target.value)} /></Field>
-          <Field label="Proposal V1 Link2"><input style={inp} value={form.proposalV1Link} onChange={e => set('proposalV1Link', e.target.value)} placeholder="https://..." /></Field>
+          <Field label="Proposal Link"><LinkInput inputStyle={inp} value={form.proposalV1Link} onChange={v => set('proposalV1Link', v)} placeholder="https://..." /></Field>
           <Field label="Status (from BD Status)" half>
             <div style={{ ...inp, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', cursor: 'default' }}>
               {pill(form.status)}
@@ -565,17 +589,20 @@ export default function SolutionTracker({ onRefreshed, view }) {
     const changed = otherRows.filter(r =>
       (form.submissionToClient && r.submissionToClient !== form.submissionToClient) ||
       (form.bdStatus && r.bdStatus !== form.bdStatus) ||
-      (form.bdStatus && r.solutionTopic && r.status !== form.bdStatus)
+      (form.bdStatus && r.solutionTopic && r.status !== form.bdStatus) ||
+      (form.opsChecklist && r.opsChecklist !== form.opsChecklist)
     );
     await Promise.all(changed.map(r => updateSolutionRow(r.sno, {
       ...r,
       ...(form.submissionToClient ? { submissionToClient: form.submissionToClient } : {}),
       ...(form.bdStatus ? { bdStatus: form.bdStatus } : {}),
       ...(form.bdStatus && r.solutionTopic ? { status: form.bdStatus } : {}),
+      ...(form.opsChecklist ? { opsChecklist: form.opsChecklist } : {}),
     })));
   }
 
   async function handleSaveBD(form) {
+    if (needsChecklist(form)) { alert('Please tick the Operations Checklist for this Won proposal.'); return; }
     setSaving(true);
     try {
       // Use != null so sno=0 is treated as a valid row key (truthy check would fail for 0)
@@ -631,6 +658,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
             bdStatus:           anchor.bdStatus           || payload.bdStatus,
             bdProposalValue:    anchor.bdProposalValue    || payload.bdProposalValue,
             submissionToClient: anchor.submissionToClient || payload.submissionToClient,
+            opsChecklist:       anchor.opsChecklist       || payload.opsChecklist,
           };
 
           const hasSolRows = rows.some(r => r.proposalId === form.proposalId && r.solutionTopic);
@@ -847,7 +875,12 @@ export default function SolutionTracker({ onRefreshed, view }) {
                         <td style={tdStyle}>{r.clientName}</td>
                         <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.programTopic || '—'}</td>
                         <td style={tdStyle}>{r.bdMonth || '—'}</td>
-                        <td style={tdStyle}>{pill(r.bdStatus)}</td>
+                        <td style={tdStyle}>
+                          {pill(r.bdStatus)}
+                          {needsChecklist(r) && (
+                            <span title="Won — Operations Checklist not ticked yet. Edit the BD lead to tick it." style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700, color: '#b91c1c' }}>⚠ Checklist pending</span>
+                          )}
+                        </td>
                         <td style={tdStyle}>{r.bdProposalValue ? `₹${r.bdProposalValue}` : '—'}</td>
                         {view !== 'bd' && (
                           <td style={tdStyle}>
@@ -914,6 +947,16 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Proposal Version</div>
                                     <div>{r.proposalVersion || '—'}</div>
                                   </div>
+                                  <div>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Proposal Link</div>
+                                    <div>{proposalLinkFor(rows, r.proposalId, r.proposalV1Link) ? <LinkButton url={proposalLinkFor(rows, r.proposalId, r.proposalV1Link)} label="Open proposal" compact /> : '—'}</div>
+                                  </div>
+                                  {r.bdStatus === 'Won' && (
+                                    <div style={{ gridColumn: '1 / -1' }}>
+                                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Operations Checklist</div>
+                                      <ChecklistChips value={r.opsChecklist} empty="⚠ Not ticked yet — edit this lead to tick it" />
+                                    </div>
+                                  )}
                                 </div>
                               ) : (
                                 /* ── Solution Tracker expanded: BD detail strip + Sol items ── */
@@ -930,7 +973,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
                                       <thead>
                                         <tr>
-                                          {['Sol S No', 'Sol Month', 'Solution Topic', 'Line of Service', 'Type of Service', 'Dev Category', 'Sol Value', 'Status', 'Submitted to Client', 'Actions'].map(h => (
+                                          {['Sol S No', 'Sol Month', 'Solution Topic', 'Line of Service', 'Type of Service', 'Dev Category', 'Sol Value', 'Status', 'Submitted to Client', 'Proposal', 'Actions'].map(h => (
                                             <th key={h} style={{ padding: '6px 10px', fontWeight: 700, fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'left', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
                                           ))}
                                         </tr>
@@ -951,6 +994,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                             <td style={{ padding: '8px 10px' }}>{s.solutionValue ? `₹${s.solutionValue}` : '—'}</td>
                                             <td style={{ padding: '8px 10px' }}>{pill(r.bdStatus || s.status)}</td>
                                             <td style={{ padding: '8px 10px' }}>{r.submissionToClient || '—'}</td>
+                                            <td style={{ padding: '8px 10px' }}><LinkButton url={s.proposalV1Link} label="Open" compact /></td>
                                             <td style={{ padding: '8px 10px' }}>
                                               <div style={{ display: 'flex', gap: 5 }}>
                                                 <EditButton
@@ -964,13 +1008,15 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                                 {canCreate('engagement') && (
                                                   <button
                                                     title="Add to Engagement Calendar"
-                                                    onClick={() => navigate('/engagement', {
+                                                    onClick={() => (!needsChecklist(r) || window.confirm('This proposal is Won but the BD person has not ticked the Operations Checklist yet.\n\nAdd the engagement anyway? (The checklist can be ticked in the Engagement Calendar form.)')) && navigate('/engagement', {
                                                       state: {
                                                         prefill: {
                                                           company:     r.clientName       || '',
                                                           topic:       s.solutionTopic    || '',
                                                           serviceType: s.typeOfService    || '',
                                                           sector:      s.developmentCategory || '',
+                                                          proposalLink: proposalLinkFor(rows, r.proposalId, s.proposalV1Link),
+                                                          opsChecklist: r.opsChecklist || s.opsChecklist || '',
                                                         },
                                                       },
                                                     })}

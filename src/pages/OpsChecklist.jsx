@@ -6,6 +6,8 @@ import { syncOpsWithEC, syncOpsFinanceToEC, OPS_FINANCE_TO_EC } from '../service
 import { usePermissions } from '../hooks/usePermissions.js';
 import SyncScopeModal from '../components/SyncScopeModal.jsx';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
+import { ChecklistChips } from '../components/ChecklistPicker.jsx';
+import { parseChecklist } from '../config/opsChecklistItems.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const addDays = (dateStr, n) => {
@@ -274,6 +276,9 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
   const score     = clScore(row);
   const scoreColor = score === 100 ? 'var(--green)' : score > 60 ? 'var(--accent)' : 'var(--red)';
   const invDue = addDays(endDate, 1);
+  // Items the BD person ticked when the proposal was won
+  const bdKeys = new Set(parseChecklist(row.bdChecklist));
+  const bdOpen = CL_ITEMS.filter(it => bdKeys.has(it.key) && !['Yes','NA'].includes(row[it.key] ?? '')).length;
   const payDue = row.invoiceActualDate ? addDays(toInputDate(row.invoiceActualDate), 30) : null;
 
   return (
@@ -326,6 +331,15 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
       <div style={{ flex:1, overflowY:'auto', padding:16 }}>
 
         {/* ── Checklist Tab ── */}
+        {tab === 'checklist' && bdKeys.size > 0 && (
+          <div style={{ background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:8, padding:'8px 12px', marginBottom:12 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#9a3412', marginBottom:5 }}>
+              📋 BD asked Operations to arrange {bdKeys.size} item{bdKeys.size > 1 ? 's' : ''}
+              {bdOpen > 0 ? ` · ${bdOpen} still open` : ' · all done ✓'}
+            </div>
+            <ChecklistChips value={row.bdChecklist} />
+          </div>
+        )}
         {tab === 'checklist' && (
           <table style={{ width:'100%', fontSize:12, borderCollapse:'collapse' }}>
             <thead>
@@ -352,7 +366,7 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
                 return (
                   <tr key={item.key} style={{
                     borderBottom:'1px solid var(--border)',
-                    background: status==='Yes' ? '#f0fdf4' : status==='NA' ? '#f9fafb' : 'transparent',
+                    background: status==='Yes' ? '#f0fdf4' : status==='NA' ? '#f9fafb' : bdKeys.has(item.key) ? '#fffbf5' : 'transparent',
                   }}>
                     <td style={{ padding:'8px 6px 6px 0', color:'var(--muted)', verticalAlign:'top' }}>{idx+1}</td>
 
@@ -364,6 +378,11 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
                         textDecoration: status==='Yes' ? 'line-through' : 'none',
                       }}>
                         {item.label}
+                        {bdKeys.has(item.key) && (
+                          <span title="Ticked by the BD person when the proposal was won" style={{ marginLeft:6, fontSize:9, fontWeight:800, color:'#9a3412', background:'#ffedd5', border:'1px solid #fed7aa', borderRadius:10, padding:'1px 6px', textDecoration:'none', display:'inline-block', verticalAlign:'middle' }}>
+                            Required by BD
+                          </span>
+                        )}
                       </div>
                       {dLabel && <div style={{ fontSize:10, color:dColor, fontWeight:600, marginTop:1 }}>{dLabel}</div>}
                       <CommentCell
@@ -498,6 +517,7 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
               ['Consultant 1', row.consultant1], ['Consultant 2', row.consultant2], ['Consultant 3', row.consultant3],
               ['Contract Type', row.contractType], ['Contract Status', row.contractStatus],
               ['Pax List Received', row.paxListReceived], ['Status', row.status],
+              ['BD Checklist', parseChecklist(row.bdChecklist).length ? `${parseChecklist(row.bdChecklist).length} item(s) — see Checklist tab` : ''],
             ].map(([label, val]) => (
               <div key={label}>
                 <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>{label}</div>
@@ -805,6 +825,7 @@ export default function OpsChecklist({ onRefreshed }) {
                           {r.consultant1 && <span>👤 {r.consultant1}</span>}
                           {r.egId && <span style={{ fontFamily:'monospace' }}>{r.egId}</span>}
                           {r.noOfParticipants > 0 && <span>👥 {r.noOfParticipants}</span>}
+                          {parseChecklist(r.bdChecklist).length > 0 && <span title="Items BD asked Operations to arrange" style={{ color:'#9a3412', fontWeight:600 }}>📋 BD: {parseChecklist(r.bdChecklist).length}</span>}
                         </div>
                       </div>
                     );

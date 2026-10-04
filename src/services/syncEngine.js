@@ -53,6 +53,9 @@ export function ecToOC(ec) {
   };
   // Day: only when the EC value is a real number (e.g. "0.5+0.5" is left untouched)
   if (ec.day > 0) p.day = String(ec.day);
+  // BD checklist (ticked when the proposal was won) → OC 'BD Checklist'.
+  // Only sent when the EC row carries one, so OC values are never blanked.
+  if (String(ec.opsChecklist || '').trim()) p.bdChecklist = String(ec.opsChecklist).trim();
   return p;
 }
 

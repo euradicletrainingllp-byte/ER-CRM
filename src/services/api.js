@@ -321,6 +321,9 @@ export async function getEngagements(filters = {}) {
       comments:       getField(r, 'Comments ', 'Comments', 'comments') ?? '',
       feedback:       getField(r, 'Feedback ', 'Feedback', 'feedback') ?? '',
       nps:            getField(r, 'NPS', 'nps') ?? '',
+      // Carried from the Solution / BD Tracker when the engagement is added
+      proposalLink:   getField(r, 'Proposal Link', 'Proposal_Link', 'proposalLink') ?? '',
+      opsChecklist:   getField(r, 'Ops Checklist', 'Ops_Checklist', 'opsChecklist') ?? '',
     };
   }).filter(r => r.company); // only require company — egId always has a fallback
 }
@@ -554,6 +557,8 @@ export async function addEngagementRow(rowData) {
     comments:                          rowData.comments       || '',
     feedback:                          rowData.feedback       || '',
     nps:                               rowData.nps            || '',
+    'Proposal Link':                   rowData.proposalLink   || '',
+    'Ops Checklist':                   rowData.opsChecklist   || '',
   }).then(notifyEcChanged);
 }
 
@@ -688,6 +693,8 @@ async function fetchOpsChecklist() {
     invoiceComment:          getField(r,'Comments - Invoice Generated','Comments___Invoice_Generated') ?? '',
     paymentReceived:         getField(r,'Payment Received','Payment_Received') ?? '',
     paymentActualDate:       fmtDtField(getField(r,'Actual Payout Date','Actual_Payout_Date')),
+    // Items the BD person ticked when the proposal was won (carried via the Engagement Calendar)
+    bdChecklist:             getField(r,'BD Checklist','BD_Checklist','bdChecklist') ?? '',
   })).filter(r => r.company);
 }
 
@@ -719,6 +726,7 @@ const OPS_FIELD_MAP = {
   invoiceGenerated:'Invoice Generated', invoicePoc:'Internal POC47',
   invoiceActualDate:'Actual Gen. Date', invoiceComment:'Comments - Invoice Generated',
   paymentReceived:'Payment Received', paymentActualDate:'Actual Payout Date',
+  bdChecklist:'BD Checklist',
 };
 
 export async function updateOpsRow(sno, changes) {
@@ -784,7 +792,41 @@ async function fetchContentDevTracker() {
     pmRequired:     getField(r, 'PM Required', 'PM_Required', 'pmRequired') ?? '',
     // Excel column is 'Topic' (not 'Program Topic')
     topic:          getField(r, 'Topic', 'topic') ?? '',
+    // Work items — each column holds a JSON list of { id, title, link, deadline, done }
+    contentAssets:  parseWorkItems(getField(r, 'Content Assets', 'Content_Assets', 'contentAssets')),
+    preWorkItems:   parseWorkItems(getField(r, 'Pre-Work', 'Pre_Work', 'PreWork', 'preWorkItems')),
+    postWorkItems:  parseWorkItems(getField(r, 'Post-Work', 'Post_Work', 'PostWork', 'postWorkItems')),
   })).filter(r => r.client);
+}
+
+// ─── CDT work items (Content Assets / Pre-Work / Post-Work) ─────────────────
+// Stored as JSON text in one Excel cell per section. Plain text typed directly
+// in Excel is kept as a single item so nothing is lost on the next save.
+export function parseWorkItems(raw) {
+  if (Array.isArray(raw)) return raw;
+  const s = String(raw ?? '').trim();
+  if (!s) return [];
+  try {
+    const v = JSON.parse(s);
+    if (Array.isArray(v)) {
+      return v.filter(x => x && typeof x === 'object').map((x, i) => ({
+        id:       String(x.id || `w${i}`),
+        title:    String(x.title ?? ''),
+        link:     String(x.link ?? ''),
+        deadline: formatDate(x.deadline) || '',
+        done:     formatDate(x.done) || '',
+      }));
+    }
+  } catch { /* not JSON — fall through */ }
+  const isUrl = /^(https?:\/\/|www\.)/i.test(s);
+  return [{ id: 'w0', title: isUrl ? '' : s, link: isUrl ? s : '', deadline: '', done: '' }];
+}
+
+export function serializeWorkItems(items) {
+  const list = (Array.isArray(items) ? items : [])
+    .filter(x => x && (String(x.title || '').trim() || String(x.link || '').trim()))
+    .map(x => ({ id: x.id, title: String(x.title || '').trim(), link: String(x.link || '').trim(), deadline: x.deadline || '', done: x.done || '' }));
+  return list.length ? JSON.stringify(list) : '';
 }
 
 export async function addContentDevRow(rowData) {
@@ -813,6 +855,12 @@ export async function addContentDevRow(rowData) {
   if (rowData.completionDate) body['Completion Date'] = rowData.completionDate;
   // 'Topic' is the actual Excel column name (NOT 'Program Topic')
   if (rowData.topic)          body['Topic']            = rowData.topic;
+  const ca = serializeWorkItems(rowData.contentAssets);
+  const pr = serializeWorkItems(rowData.preWorkItems);
+  const po = serializeWorkItems(rowData.postWorkItems);
+  if (ca) body['Content Assets'] = ca;
+  if (pr) body['Pre-Work']       = pr;
+  if (po) body['Post-Work']      = po;
   return callContentDevFlow('create', body);
 }
 
@@ -833,6 +881,9 @@ export async function updateContentDevRow(sno, rowData) {
     'Completion Date': rowData.completionDate || '',
     'PM Required':     rowData.pmRequired     || '',
     'Topic':           rowData.topic          || '',  // actual Excel column name (NOT 'Program Topic')
+    'Content Assets':  serializeWorkItems(rowData.contentAssets),
+    'Pre-Work':        serializeWorkItems(rowData.preWorkItems),
+    'Post-Work':       serializeWorkItems(rowData.postWorkItems),
   });
 }
 
@@ -881,6 +932,8 @@ async function fetchSolutionTracker() {
     proposalV1Link:      getField(r, 'Proposal V1 Link2', 'Proposal_V1_Link', 'proposalV1Link') ?? '',
     submissionBySolTeam: formatDate(getField(r, 'Date of Submission by Sol team', 'Date_of_Submission_by_Sol_team', 'submissionBySolTeam')),
     submissionToClient:  formatDate(getField(r, 'Date of Submission to Client', 'Date of submission ER Team4', 'Date_of_submission_ER_Team4', 'submissionToClient')),
+    // Ticked by the BD person when the proposal is Won — what Operations must arrange
+    opsChecklist:        getField(r, 'Ops Checklist', 'Ops_Checklist', 'opsChecklist') ?? '',
   })).filter(r => r.proposalId);
 }
 
@@ -911,6 +964,7 @@ export async function addSolutionRow(rowData) {
     'Remarks':                          rowData.remarks             || '',
     'Proposal V1 Link2':                rowData.proposalV1Link      || '',
     'Date of Submission to Client':      rowData.submissionToClient  || '',
+    'Ops Checklist':                    rowData.opsChecklist        || '',
   });
 }
 
@@ -943,6 +997,7 @@ export async function updateSolutionRow(sno, rowData) {
     'Remarks':                          rowData.remarks             || '',
     'Proposal V1 Link2':                rowData.proposalV1Link      || '',
     'Date of Submission to Client':      rowData.submissionToClient  || '',
+    'Ops Checklist':                    rowData.opsChecklist        || '',
   });
 }
 

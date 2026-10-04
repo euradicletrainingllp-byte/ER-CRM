@@ -5,6 +5,7 @@ import { syncCDTWithEC } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
 import SyncScopeModal from '../components/SyncScopeModal.jsx';
 import { DeleteButton } from '../components/ActionButtons.jsx';
+import { LinkButton } from '../components/LinkButton.jsx';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDt = d => {
@@ -33,7 +34,131 @@ const toInputDate = d => {
   return '';
 };
 
-const EMPTY_FORM = { client:'', startDate:'', evRequired:'', poc:'', completionDate:'', pmRequired:'', topic:'' };
+const EMPTY_FORM = { client:'', startDate:'', evRequired:'', poc:'', completionDate:'', pmRequired:'', topic:'',
+  contentAssets:[], preWorkItems:[], postWorkItems:[] };
+
+// ─── Work items: Content Assets / Pre-Work / Post-Work ───────────────────────
+const WORK_SECTIONS = [
+  { key:'contentAssets', label:'Content Assets', icon:'📦', hint:'Decks, facilitator guides, videos, handouts…' },
+  { key:'preWorkItems',  label:'Pre-Work',       icon:'📝', hint:'Reading, surveys, self-assessments before the session' },
+  { key:'postWorkItems', label:'Post-Work',      icon:'🎯', hint:'Assignments, reflections, follow-ups after the session' },
+];
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const newId = () => `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+function deadlineInfo(item) {
+  if (item.done) return { text:`Done ${fmtDt(item.done)}`, color:'#166534', bg:'#dcfce7' };
+  if (!item.deadline) return { text:'No deadline', color:'#64748b', bg:'#f1f5f9' };
+  const days = Math.round((new Date(item.deadline) - new Date(todayISO())) / 86400000);
+  if (days < 0)   return { text:`${-days}d overdue`, color:'#991b1b', bg:'#fee2e2' };
+  if (days === 0) return { text:'Due today',         color:'#9a3412', bg:'#ffedd5' };
+  if (days <= 3)  return { text:`Due in ${days}d`,   color:'#9a3412', bg:'#ffedd5' };
+  return { text:`Due ${fmtDt(item.deadline)}`, color:'#1e40af', bg:'#dbeafe' };
+}
+
+/** Open / overdue counts across all three sections of a CDT row. */
+function workSummary(row) {
+  let open = 0, overdue = 0, total = 0;
+  const t = todayISO();
+  WORK_SECTIONS.forEach(sec => (row[sec.key] || []).forEach(it => {
+    total++;
+    if (!it.done) { open++; if (it.deadline && it.deadline < t) overdue++; }
+  }));
+  return { open, overdue, total };
+}
+
+const miniInp = { fontSize:12, padding:'5px 8px', border:'1px solid var(--border)', borderRadius:6, boxSizing:'border-box', width:'100%' };
+
+function WorkItemRow({ item, canEdit, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item);
+  const info = deadlineInfo(item);
+
+  if (editing) {
+    const valid = draft.title.trim() && draft.deadline;
+    return (
+      <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1.4fr 130px auto', gap:6, padding:'6px 0', borderBottom:'1px solid var(--border)', alignItems:'center' }}>
+        <input style={miniInp} value={draft.title} placeholder="Title *" onChange={e => setDraft(d => ({ ...d, title:e.target.value }))} />
+        <input style={miniInp} value={draft.link} placeholder="Link (https://…)" onChange={e => setDraft(d => ({ ...d, link:e.target.value }))} />
+        <input style={miniInp} type="date" value={draft.deadline} title="Deadline" onChange={e => setDraft(d => ({ ...d, deadline:e.target.value }))} />
+        <div style={{ display:'flex', gap:4 }}>
+          <button className="btn btn-primary btn-sm" disabled={!valid} onClick={() => { onSave(draft); setEditing(false); }}>Save</button>
+          <button className="btn btn-outline btn-sm" onClick={() => { setDraft(item); setEditing(false); }}>✕</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 0', borderBottom:'1px solid var(--border)', flexWrap:'wrap' }}>
+      {canEdit ? (
+        <input type="checkbox" checked={!!item.done} title={item.done ? 'Mark as not done' : 'Mark as done (today)'}
+          onChange={() => onSave({ ...item, done: item.done ? '' : todayISO() })}
+          style={{ width:15, height:15, accentColor:'#16a34a', cursor:'pointer' }} />
+      ) : <span style={{ width:15 }}>{item.done ? '✓' : '•'}</span>}
+      <div style={{ flex:1, minWidth:120, fontSize:13, fontWeight:600, textDecoration:item.done ? 'line-through' : 'none', color:item.done ? 'var(--muted)' : 'inherit' }}>
+        {item.title || <span style={{ color:'var(--muted)', fontWeight:400 }}>(untitled)</span>}
+      </div>
+      <LinkButton url={item.link} compact />
+      <span style={{ fontSize:11, fontWeight:700, color:info.color, background:info.bg, borderRadius:12, padding:'2px 8px', whiteSpace:'nowrap' }}
+        title={item.deadline ? `Deadline: ${fmtDt(item.deadline)}` : ''}>{info.text}</span>
+      {canEdit && (
+        <span style={{ display:'flex', gap:2 }}>
+          <button type="button" title="Edit" onClick={() => { setDraft(item); setEditing(true); }} style={{ border:'none', background:'none', cursor:'pointer', fontSize:13 }}>✏️</button>
+          <button type="button" title="Remove" onClick={onDelete} style={{ border:'none', background:'none', cursor:'pointer', fontSize:13 }}>🗑</button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** List editor for one section — every item needs a title and a deadline. */
+function WorkItemsEditor({ section, items, onChange, canEdit, defaultDeadline }) {
+  const [adding, setAdding] = useState(false);
+  const blank = () => ({ id:newId(), title:'', link:'', deadline:defaultDeadline || '', done:'' });
+  const [draft, setDraft] = useState(blank);
+  const list = items || [];
+  const open = list.filter(i => !i.done).length;
+  const valid = draft.title.trim() && draft.deadline;
+
+  const add = () => { if (!valid) return; onChange([...list, { ...draft, title:draft.title.trim(), link:draft.link.trim() }]); setDraft(blank()); setAdding(false); };
+
+  return (
+    <div style={{ border:'1px solid var(--border)', borderRadius:8, padding:'10px 12px', background:'#fff' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <span style={{ fontSize:13, fontWeight:800, color:'var(--primary)' }}>{section.icon} {section.label}</span>
+        <span style={{ fontSize:11, color:'var(--muted)' }}>{list.length ? `${list.length - open}/${list.length} done` : 'none yet'}</span>
+        {canEdit && !adding && (
+          <button type="button" className="btn btn-outline btn-sm" style={{ marginLeft:'auto', padding:'2px 10px', fontSize:11 }}
+            onClick={() => { setDraft(blank()); setAdding(true); }}>+ Add</button>
+        )}
+      </div>
+      {!list.length && !adding && <div style={{ fontSize:11, color:'#9ca3af', marginTop:4 }}>{section.hint}</div>}
+      <div style={{ marginTop:4 }}>
+        {list.map(it => (
+          <WorkItemRow key={it.id} item={it} canEdit={canEdit}
+            onSave={next => onChange(list.map(x => (x.id === it.id ? next : x)))}
+            onDelete={() => onChange(list.filter(x => x.id !== it.id))} />
+        ))}
+      </div>
+      {adding && (
+        <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1.4fr 130px auto', gap:6, marginTop:8, alignItems:'center' }}>
+          <input autoFocus style={miniInp} value={draft.title} placeholder={`${section.label} title *`} onChange={e => setDraft(d => ({ ...d, title:e.target.value }))}
+            onKeyDown={e => e.key === 'Enter' && add()} />
+          <input style={miniInp} value={draft.link} placeholder="Link (https://…)" onChange={e => setDraft(d => ({ ...d, link:e.target.value }))}
+            onKeyDown={e => e.key === 'Enter' && add()} />
+          <input style={{ ...miniInp, borderColor: draft.deadline ? 'var(--border)' : '#fca5a5' }} type="date" value={draft.deadline} title="Deadline *"
+            onChange={e => setDraft(d => ({ ...d, deadline:e.target.value }))} />
+          <div style={{ display:'flex', gap:4 }}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={!valid} onClick={add}>Add</button>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => setAdding(false)}>✕</button>
+          </div>
+          {!valid && <div style={{ gridColumn:'1 / -1', fontSize:10, color:'#b91c1c' }}>Title and deadline are required</div>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Add Modal ────────────────────────────────────────────────────────────────
 function AddModal({ onSave, onClose, saving }) {
@@ -58,7 +183,7 @@ function AddModal({ onSave, onClose, saving }) {
   );
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
-      <div style={{ background:'#fff', borderRadius:12, padding:28, width:520, maxHeight:'90vh', overflowY:'auto', boxShadow:'0 8px 40px rgba(0,0,0,0.22)' }}>
+      <div style={{ background:'#fff', borderRadius:12, padding:28, width:640, maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 8px 40px rgba(0,0,0,0.22)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
           <h3 style={{ margin:0, fontSize:16, color:'var(--primary)' }}>➕ Add Entry</h3>
           <button className="btn btn-outline btn-sm" onClick={onClose}>✕</button>
@@ -91,6 +216,11 @@ function AddModal({ onSave, onClose, saving }) {
           <div>
             <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>Completion Date</label>
             <input {...inp} type="date" value={form.completionDate} onChange={e => set('completionDate', e.target.value)} />
+          </div>
+          <div style={{ gridColumn:'1 / -1', display:'flex', flexDirection:'column', gap:10, marginBottom:10 }}>
+            {WORK_SECTIONS.map(sec => (
+              <WorkItemsEditor key={sec.key} section={sec} items={form[sec.key]} onChange={v => set(sec.key, v)} canEdit />
+            ))}
           </div>
         </div>
         <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:8 }}>
@@ -270,6 +400,16 @@ function DetailPanel({ row, canEdit, onUpdate, onDelete, saving }) {
           </div>
 
           <EditField label="Completion Date" value={row.completionDate} field="completionDate" type="date" row={row} onSave={onUpdate} canEdit={canEdit} />
+        </div>
+
+        {/* Content Assets / Pre-Work / Post-Work — each item has its own deadline */}
+        <div style={{ marginTop:18, display:'flex', flexDirection:'column', gap:10 }}>
+          <div style={{ fontSize:11, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.3px' }}>Work Items</div>
+          {WORK_SECTIONS.map(sec => (
+            <WorkItemsEditor key={sec.key} section={sec} items={row[sec.key]} canEdit={canEdit}
+              defaultDeadline={toInputDate(row.dueDate)}
+              onChange={list => onUpdate(row, { [sec.key]: list })} />
+          ))}
         </div>
       </div>
     </div>
@@ -456,6 +596,11 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
                           {r.poc && <span>👤 {r.poc}</span>}
                           {r.pmRequired && <span style={{ color:r.pmRequired==='Yes'?'#16a34a':'#dc2626' }}>PM:{r.pmRequired}</span>}
                           {r.evRequired && <span style={{ color:r.evRequired==='Yes'?'#16a34a':'#dc2626' }}>EV:{r.evRequired}</span>}
+                          {(() => { const w = workSummary(r); return w.total > 0 && (
+                            <span style={{ color: w.overdue ? '#dc2626' : w.open ? '#9a3412' : '#16a34a', fontWeight:600 }}
+                              title={`${w.total} work item(s) · ${w.open} open · ${w.overdue} overdue`}>
+                              🧩 {w.open ? `${w.open} open` : 'all done'}{w.overdue ? ` · ${w.overdue} overdue` : ''}
+                            </span>); })()}
                         </div>
                       </div>
                     );

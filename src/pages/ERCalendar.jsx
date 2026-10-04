@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { LinkButton } from '../components/LinkButton.jsx';
 import { getEngagements } from '../services/api.js';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { useExcelFilters, ExcelFilterButtons, FILTER_COLUMNS } from '../components/ExcelFilter.jsx';
@@ -175,6 +176,7 @@ function SessionModal({ eng, onClose }) {
               ['Location',    eng.location || '—'],
               ['Sector',      eng.sector || '—'],
               ['Contract Status', eng.poStatus || '—'],
+              ...(eng.proposalLink ? [['Proposal', <LinkButton url={eng.proposalLink} label="Open proposal" compact />]] : []),
             ].map(([lbl, val]) => (
               <div key={lbl}>
                 <div style={{ fontSize:10, fontWeight:700, color:'#94a3b8',
