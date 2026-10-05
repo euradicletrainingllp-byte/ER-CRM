@@ -1008,7 +1008,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                                 {canCreate('engagement') && (
                                                   <button
                                                     title="Add to Engagement Calendar"
-                                                    onClick={() => (!needsChecklist(r) || window.confirm('This proposal is Won but the BD person has not ticked the Operations Checklist yet.\n\nAdd the engagement anyway? (The checklist can be ticked in the Engagement Calendar form.)')) && navigate('/engagement', {
+                                                    onClick={() => (needsChecklist(r) ? alert('This proposal is Won but the Operations Checklist has not been ticked yet.\n\nAsk the BD person to tick it in the BD Tracker (edit the lead) before adding the engagement.') : true) && navigate('/engagement', {
                                                       state: {
                                                         prefill: {
                                                           company:     r.clientName       || '',

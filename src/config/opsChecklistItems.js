@@ -9,27 +9,22 @@
  *                       (column "Ops Checklist")
  *   • Ops Checklist   – shown as "Required by BD" tags (column "BD Checklist")
  *
- * `key` matches the item keys used in OpsChecklist.jsx (CL_ITEMS).
+ * When a `key` matches an item key in OpsChecklist.jsx (CL_ITEMS), that Ops row
+ * also gets a "Required by BD" tag; every ticked item shows in the Ops banner.
  * Values are stored in Excel as readable labels joined by "; ".
  */
 
 export const OPS_CHECKLIST_ITEMS = [
-  { key: 'calendarBlock',      label: 'Facilitator Calendar Block' },
-  { key: 'travelDetails',      label: 'Travel Details Finalised' },
-  { key: 'welcomeEmail',       label: 'Welcome Email + Pre-Work' },
-  { key: 'preWork',            label: 'Pre-Work Details' },
-  { key: 'evAndPm',            label: 'EV & PM Shared with Consultant' },
-  { key: 'bootcamp',           label: 'Bootcamp Finalised' },
-  { key: 'teachback',          label: 'Teachback Finalised' },
-  { key: 'electronicVisuals',  label: 'Electronic Visuals + QR' },
-  { key: 'participantManual',  label: 'Participant Manual' },
-  { key: 'materialPrinting',   label: 'Material Printing Required' },
-  { key: 'materialOrdering',   label: 'Material Ordering & Delivery Status' },
-  { key: 'materialConversion', label: 'Material Conversion to Editable Form' },
-  { key: 'attendanceSheet',    label: 'Attendance Sheet & Photos' },
-  { key: 'feedbackReport',     label: 'Feedback Report' },
-  { key: 'impactReport',       label: 'Impact Report' },
-  { key: 'socialMedia',        label: 'Social Media Post' },
+  { key: 'preAssessment',  label: 'Pre-Assessment' },
+  { key: 'postAssessment', label: 'Post-Assessment' },
+  { key: 'feedbackReport', label: 'Feedback Report' },    // same key as the Ops Checklist item → "Required by BD" tag
+  { key: 'impactReport',   label: 'Impact Report' },      // same key as the Ops Checklist item → "Required by BD" tag
+  { key: 'recapReckoner',  label: 'Recap Reckoner' },
+  { key: 'pmHardcopy',     label: 'PM (Hardcopy)' },
+  { key: 'pmEditable',     label: 'PM Editable' },
+  { key: 'feedbackQr',     label: 'Feedback QR' },
+  { key: 'Welcome Email',  label: 'Welcome Email' },
+  { key: 'Certificates',  label: 'Certificates' },
 ];
 
 const SEP = '; ';

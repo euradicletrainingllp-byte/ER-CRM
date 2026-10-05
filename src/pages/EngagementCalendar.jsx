@@ -10,7 +10,7 @@ import { usePermissions } from '../hooks/usePermissions.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.jsx';
 import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
-import ChecklistPicker, { ChecklistChips } from '../components/ChecklistPicker.jsx';
+import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { pushNewEngagementToOps } from '../services/syncWithEC.js';
 
@@ -293,14 +293,15 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
           </div>
           <div className="form-field full">
             <label className="form-label">
-              Operations Checklist — items Ops must arrange{prefill?.opsChecklist && !isEdit ? ' (ticked by BD when Won)' : ''}
+              Operations Checklist (set by BD when Won) 🔒
             </label>
-            <ChecklistPicker value={form.opsChecklist} onChange={v => set('opsChecklist', v)} />
-            {!isEdit && (
-              <span style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
-                Carried to the Operations Checklist as soon as the engagement is saved.
-              </span>
-            )}
+            {/* Read-only here — the list can only be changed in the BD Tracker */}
+            <div style={{ background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
+              <ChecklistChips value={form.opsChecklist} empty="No checklist from BD for this proposal" />
+            </div>
+            <span style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+              Edit in BD Tracker{!isEdit ? ' · carried to the Operations Checklist as soon as the engagement is saved' : ''}.
+            </span>
           </div>
 
           <div className="form-field">
