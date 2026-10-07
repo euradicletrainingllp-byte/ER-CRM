@@ -3,7 +3,7 @@
  *
  * syncOpsWithEC() / syncCDTWithEC() — manual "Sync with EC" buttons; both
  * delegate to the all-or-nothing engine in syncEngine.js (rows are linked
- * by S No; only EC-owned columns are written).
+ * by Index; only EC-owned columns are written).
  *
  * Columns that live only in the tracker (e.g. Contract Status, Pax List,
  * POC, completion dates) are NEVER touched — even on updates.
@@ -31,7 +31,13 @@ async function manualSync(target, onProgress, scope = 'recent') {
   if (res.skipped === 'locked') {
     throw new Error('Another sync is already running (maybe in another CRM tab) — please try again in a minute.');
   }
-  return { updated: res.updated, added: res.added, errors: [] };
+  const errors = [];
+  if (res.noKey?.length) {
+    const ex = res.noKey[0];
+    errors.push(`${res.noKey.length} engagement(s) in the Engagement Calendar have no Index and were skipped ` +
+      `(e.g. ${ex.company} · ${ex.startDate}) — add their keys in Excel.`);
+  }
+  return { updated: res.updated, added: res.added, errors };
 }
 
 /** Engagement Calendar → Ops Checklist (all-or-nothing). */
@@ -103,15 +109,17 @@ function ecUpdateBody(e) {
     nps:                               e.nps            || '',
     'Proposal Link':                   e.proposalLink   || '',
     'Ops Checklist':                   e.opsChecklist   || '',
+    'Index':                  e.engagementKey  || '',
   };
 }
 
 /**
  * Pushes Ops Checklist finance changes to the matching Engagement Calendar row
- * (rows are linked by S No, the same key syncOpsWithEC uses).
+ * (rows are linked by Index, the same key the sync uses).
  *
- * @param {string|number} sno      S No of the Ops Checklist row
+ * @param {string|number} sno      S No of the Ops Checklist row (display only)
  * @param {object}        changes  OC camelCase changes just saved
+ * @param {object}        fullRow  the OC row before the edit (carries engagementKey)
  * @returns {{ synced: boolean, reason?: string }}
  */
 export async function syncOpsFinanceToEC(sno, changes, fullRow) {
@@ -125,62 +133,55 @@ export async function syncOpsFinanceToEC(sno, changes, fullRow) {
   if ('paymentActualDate' in oc) ecChanges.receivedDate = oc.paymentActualDate ?? '';
   ecChanges.payment = ecPaymentStatus(oc);
 
-  if (sno == null || String(sno).trim() === '') return { synced: false, reason: 'row has no S No' };
+  const key = String(fullRow?.engagementKey ?? '').trim();
+  if (!key) return { synced: false, reason: 'this Ops Checklist row has no Index' };
 
   const ecRows = await getEngagements();
-  const ec = ecRows.find(r => String(r.sno) === String(sno));
-  if (!ec) return { synced: false, reason: `S No ${sno} not found in Engagement Calendar` };
+  const ec = ecRows.find(r => String(r.engagementKey).trim() === key);
+  if (!ec) return { synced: false, reason: `Index ${key} not found in Engagement Calendar` };
 
   // Skip the PA call if EC already holds these values
   const differs = Object.entries(ecChanges).some(([k, v]) => String(ec[k] ?? '') !== String(v ?? ''));
   if (!differs) return { synced: true };
 
-  await updateEngagementRow(ec.egId, ec.sno, ecUpdateBody({ ...ec, ...ecChanges }));
+  await updateEngagementRow(ec.egId, ec.sno, ecUpdateBody({ ...ec, ...ecChanges }), key);
   return { synced: true };
 }
 
 // ─── New engagement → Ops Checklist (immediately after "Save Engagement") ────
 
 const wait = ms => new Promise(res => setTimeout(res, ms));
-const normTxt = v => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
 
 /**
- * Finds the engagement that was just added (Excel assigns its S No) and creates
- * the matching Ops Checklist row straight away — carrying the BD checklist.
- * Uses the same field mapping as "Sync with EC", so a later sync sees no change.
+ * Finds the engagement that was just added (by the Index the CRM gave
+ * it) and creates the matching Ops Checklist row straight away — carrying the
+ * BD checklist. Same field mapping as "Sync with EC", so a later sync sees no change.
  *
- * @param {object} added  the engagement form values that were saved
- * @returns {{ ok: boolean, sno?: string, created?: boolean, reason?: string }}
+ * @param {object} added  the engagement that was saved (must carry engagementKey)
+ * @returns {{ ok: boolean, key?: string, created?: boolean, reason?: string }}
  */
 export async function pushNewEngagementToOps(added) {
+  const key = String(added?.engagementKey ?? '').trim();
+  if (!key) return { ok: false, reason: 'the new engagement has no Index — use "Sync with EC" in the Ops Checklist' };
   let match = null;
-  // Excel Online needs a moment before the new row (and its S No) is readable
+  // Excel Online needs a moment before the new row is readable
   for (const delay of [2500, 4000, 6000]) {
     await wait(delay);
     const rows = added.startDate
       ? await getEngagementsForRange(added.startDate, added.endDate && added.endDate >= added.startDate ? added.endDate : added.startDate, { force: true })
       : await getAllEngagementsCached({ force: true });
-    const candidates = rows.filter(r =>
-      normTxt(r.egId) === normTxt(added.egId) &&
-      normTxt(r.company) === normTxt(added.company) &&
-      normTxt(r.topic) === normTxt(added.topic) &&
-      (r.startDate || '') === (added.startDate || '') &&
-      String(r.sno ?? '').trim() !== '');
-    if (candidates.length) {
-      match = candidates.sort((a, b) => (Number(b.sno) || 0) - (Number(a.sno) || 0))[0];
-      break;
-    }
+    match = rows.find(r => String(r.engagementKey).trim() === key) || null;
+    if (match) break;
   }
   if (!match) return { ok: false, reason: 'the new engagement could not be found in Excel yet — use "Sync with EC" in the Ops Checklist' };
 
-  const sno = String(match.sno).trim();
   const payload = ecToOC(match);
   const ocRows = await getOpsChecklist();
-  const existing = ocRows.find(r => String(r.sno ?? '').trim() === sno);
+  const existing = ocRows.find(r => String(r.engagementKey ?? '').trim() === key);
   if (existing) {
-    await updateOpsRow(sno, payload);
-    return { ok: true, sno, created: false };
+    await updateOpsRow(existing.sno, payload, key);
+    return { ok: true, key, created: false };
   }
-  await addOpsRow({ 'S No': sno, ...payload });
-  return { ok: true, sno, created: true };
+  await addOpsRow({ ...payload, engagementKey: key });
+  return { ok: true, key, created: true };
 }

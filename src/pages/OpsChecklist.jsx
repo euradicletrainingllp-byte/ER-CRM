@@ -509,7 +509,7 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
         {tab === 'details' && (
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 24px', fontSize:13 }}>
             {[
-              ['EG.ID', row.egId], ['Company', row.company], ['Client SPOC', row.clientSpoc],
+              ['Index 🔒', row.engagementKey], ['EG.ID', row.egId], ['Company', row.company], ['Client SPOC', row.clientSpoc],
               ['Internal POC', row.internalPoc], ['Start Date', fmtDate(row.startDate)], ['End Date', fmtDate(row.endDate)],
               ['Topic', row.topic], ['Sector', row.sector], ['Service Type', row.serviceType],
               ['Offering', row.offering], ['Program Type', row.programType], ['Location', row.location],
@@ -652,12 +652,12 @@ export default function OpsChecklist({ onRefreshed }) {
   );
 
   const sel = selected != null ? data.find(d => d.sno === selected) : null;
-  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), String(msg).includes('⚠') ? 9000 : 3000); };
 
   const handleUpdate = async (row, changes) => {
     setSaving(true);
     try {
-      await updateOpsRow(row.sno, changes);
+      await updateOpsRow(row.sno, changes, row.engagementKey);
       setData(prev => prev.map(r => r.sno === row.sno ? { ...r, ...changes } : r));
 
       // Finance fields → keep Engagement Calendar in sync (only when a value actually changed)
@@ -692,7 +692,7 @@ export default function OpsChecklist({ onRefreshed }) {
   const handleEdit = async form => {
     setSaving(true);
     try {
-      await updateOpsRow(editRow.sno, form);
+      await updateOpsRow(editRow.sno, form, editRow.engagementKey);
       setEditRow(null);
       showToast('✓ Session updated');
       await load();
@@ -703,7 +703,7 @@ export default function OpsChecklist({ onRefreshed }) {
   const handleDelete = async () => {
     setSaving(true);
     try {
-      await deleteOpsRow(deleteRow.sno);
+      await deleteOpsRow(deleteRow.sno, deleteRow.engagementKey);
       if (selected === deleteRow.sno) setSelected(null);
       setDeleteRow(null);
       showToast('✓ Session deleted');
@@ -717,7 +717,7 @@ export default function OpsChecklist({ onRefreshed }) {
     setSyncProg({ done: 0, total: 0 });
     try {
       const { updated, added, errors } = await syncOpsWithEC(p => setSyncProg(p), scope);
-      const errPart = errors.length ? ` · ${errors.length} error${errors.length > 1 ? 's' : ''}` : '';
+      const errPart = errors.length ? ` · ⚠ ${errors.join(' ')}` : '';
       showToast(`✓ Synced: ${updated} updated, ${added} added${errPart}`);
       // Wait briefly for Excel Online to settle, then reload
       await new Promise(r => setTimeout(r, 1500));

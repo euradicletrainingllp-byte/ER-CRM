@@ -165,6 +165,40 @@ function getField(r, ...keys) {
   return undefined;
 }
 
+// ─── ENGAGEMENT INDEX (permanent link ID) ────────────────────────────────────
+// The 'Index' column links one engagement across the Engagement Calendar,
+// Ops Checklist and Content Dev Tracker. It is a fixed number (NOT a formula),
+// set once by the CRM, shown read-only, never edited. S No is display-only.
+export const ENGAGEMENT_KEY_COL = 'Index';
+
+/** Next Index for a new engagement = highest Index in the Engagement Calendar + 1. */
+export async function nextEngagementIndex() {
+  const rows = await getAllEngagementsCached({ force: true });
+  const max = rows.reduce((m, r) => Math.max(m, Number(r.engagementKey) || 0), 0);
+  return String(max + 1);
+}
+
+/** Unique ID for a tracker row that was NOT created from the calendar (manual add). */
+export function newLocalKey(prefix, now = new Date()) {
+  const p = n => String(n).padStart(2, '0');
+  const rand = Math.random().toString(36).slice(2, 7).toUpperCase().padEnd(5, '0');
+  return `${prefix}-${String(now.getFullYear()).slice(2)}${p(now.getMonth() + 1)}${p(now.getDate())}-${rand}`;
+}
+
+/** Excel stores the calendar Index as a number. */
+const keyCell = k => (/^\d+$/.test(String(k)) ? Number(k) : k);
+
+const readKey = r => String(getField(r, 'Index', 'index', 'Engagement Key', 'Engagement_Key', 'engagementKey') ?? '').trim();
+
+function requireKey(key, what) {
+  const k = String(key ?? '').trim();
+  if (!k) {
+    throw new Error(`${what} has no Index, so it can't be saved safely. ` +
+      'Rows typed straight into Excel need an Index — ask the CRM admin to add one.');
+  }
+  return k;
+}
+
 // ─── BD TRACKER ──────────────────────────────────────────────────────────────
 // All 4 operations go to the single BD_TRACKER_CRUD flow URL.
 // The flow switches internally on the `action` field.
@@ -291,6 +325,7 @@ export async function getEngagements(filters = {}) {
       egId: String(egId),
       // Excel column is 'SNo' — read it first so the real S No is used (not the list index)
       sno:  getField(r, 'SNo', 'S No', 'S.No', 'S_No', 'sno') ?? i + 1,
+      engagementKey: readKey(r),
       company:     getField(r, 'Company', 'company') ?? '',
       // EC column is ' Start Date' (leading space). PA converts spaces→underscores,
       // so the leading space becomes a leading underscore: '_Start_Date'.
@@ -531,7 +566,9 @@ export async function addEngagementRow(rowData) {
   // triggerBody()?['Service Type'] matches without needing camelCase mapping.
   // Single-word columns (sector, offering, etc.) still work as-is (CI match).
   invalidateEngagementCache();
+  const key = String(rowData.engagementKey || '').trim() || await nextEngagementIndex();
   return callEngagementFlow('create', {
+    [ENGAGEMENT_KEY_COL]:              keyCell(key),
     'EG ID':                           rowData.egId           || '',
     company:                           rowData.company        || '',
     'Start Date':                      rowData.startDate      || '',
@@ -559,26 +596,24 @@ export async function addEngagementRow(rowData) {
     nps:                               rowData.nps            || '',
     'Proposal Link':                   rowData.proposalLink   || '',
     'Ops Checklist':                   rowData.opsChecklist   || '',
-  }).then(notifyEcChanged);
+  }).then(notifyEcChanged).then(res => ({ ...(res || {}), engagementKey: key }));
 }
 
-export async function updateEngagementRow(egId, sno, updates) {
-  // The flow's "Update a row" Key Value must never be empty — PA fails with
-  // "parameters are invalid, they may not be null or empty: 'id'" (HTTP 502).
-  const key = sno == null ? '' : String(sno).trim();
-  if (!key) {
-    throw new Error(`Cannot update engagement ${egId || ''}: its S No is blank in Excel. Fill in the S No cell for this row and refresh.`);
-  }
-  // The flow's Key Column is 'SNo' and its Key Value reads triggerBody()?['SNo']
-  // (case-sensitive). 'SNo' also feeds the item/SNo cell, so it must carry the
-  // real value or the S No cell would be blanked. rowId / sno kept as fallbacks.
+export async function updateEngagementRow(egId, sno, updates, engagementKey) {
+  // The flow's "Update a row" finds the row by its Index (Key Column
+  // 'Index', Key Value triggerBody()?['Index']). S No is a
+  // =ROW()-1 formula now, so it is never used to find a row.
+  const key = requireKey(engagementKey ?? updates?.[ENGAGEMENT_KEY_COL], `Engagement ${egId || ''}`.trim());
+  const body = { ...updates };
+  delete body.SNo; delete body.sno; delete body.rowId; delete body.engagementKey;
   invalidateEngagementCache();
-  return callEngagementFlow('update', { ...updates, SNo: key, rowId: key, sno: key }).then(notifyEcChanged);
+  return callEngagementFlow('update', { ...body, [ENGAGEMENT_KEY_COL]: key }).then(notifyEcChanged);
 }
 
-export async function deleteEngagementRow(egId, sno) {
+export async function deleteEngagementRow(egId, sno, engagementKey) {
+  const key = requireKey(engagementKey, `Engagement ${egId || ''}`.trim());
   invalidateEngagementCache();
-  return callEngagementFlow('delete', { egId, sno }).then(notifyEcChanged);
+  return callEngagementFlow('delete', { egId, sno, [ENGAGEMENT_KEY_COL]: key }).then(notifyEcChanged);
 }
 
 // ─── OPS CHECKLIST ───────────────────────────────────────────────────────────
@@ -602,6 +637,7 @@ async function fetchOpsChecklist() {
   const rows = Array.isArray(data?.value) ? data.value : Array.isArray(data) ? data : [];
   return rows.map((r, i) => ({
     sno:             getField(r,'S No','S.No','S_No','sno') ?? i + 1,
+    engagementKey:   readKey(r),
     egId:            getField(r,'EG.ID','EG_ID','EG_x002e_ID') ?? '',
     company:         getField(r,'Company') ?? '',
     clientSpoc:      getField(r,'Client SPOC','Client_SPOC') ?? '',
@@ -699,7 +735,7 @@ async function fetchOpsChecklist() {
 }
 
 const OPS_FIELD_MAP = {
-  sno:'S No',
+  sno:'S No', engagementKey:'Index',
   egId:'EG ID', company:'company', clientSpoc:'Client SPOC',
   startDate:'Engagement Start Date', endDate:'Engagement End Date',
   topic:'Topic', sector:'Sector', serviceType:'Service Type', offering:'Offering',
@@ -729,9 +765,12 @@ const OPS_FIELD_MAP = {
   bdChecklist:'BD Checklist',
 };
 
-export async function updateOpsRow(sno, changes) {
+export async function updateOpsRow(sno, changes, engagementKey) {
+  const key = requireKey(engagementKey ?? changes?.engagementKey, `Ops Checklist row ${sno ?? ''}`.trim());
   const excelFields = {};
   for (const [k, v] of Object.entries(changes)) {
+    // S No is a =ROW()-1 formula and the key is permanent — never write either
+    if (k === 'sno' || k === 'engagementKey' || k === 'id' || k === 'S No' || k === ENGAGEMENT_KEY_COL) continue;
     excelFields[OPS_FIELD_MAP[k] || k] = v;
   }
   // Belt-and-suspenders: send ambiguous fields under every possible key name so
@@ -743,14 +782,17 @@ export async function updateOpsRow(sno, changes) {
   if (sdVal !== undefined) excelFields['Engagement\nStart Date'] = sdVal;
   const edVal = excelFields['Engagement End Date'];
   if (edVal !== undefined) excelFields['Engagement\nEnd Date'] = edVal;
-  return callOpsFlow('update', { rowId: sno, ...excelFields });
+  return callOpsFlow('update', { ...excelFields, rowId: key, [ENGAGEMENT_KEY_COL]: key });
 }
 
 export async function addOpsRow(form) {
+  const key = String(form.engagementKey || '').trim() || newLocalKey('OC');
   const excelFields = {};
   for (const [k, v] of Object.entries(form)) {
+    if (k === 'sno' || k === 'engagementKey' || k === 'id' || k === 'S No' || k === ENGAGEMENT_KEY_COL) continue;
     if (v !== undefined && v !== '') excelFields[OPS_FIELD_MAP[k] || k] = v;
   }
+  excelFields[ENGAGEMENT_KEY_COL] = keyCell(key);
   // Belt-and-suspenders: same alias logic as updateOpsRow — covers both create
   // and update paths so EG ID and dates land regardless of PA expression spelling.
   const egVal = excelFields['EG ID'] ?? excelFields['EG.ID'];
@@ -762,8 +804,9 @@ export async function addOpsRow(form) {
   return callOpsFlow('create', excelFields);
 }
 
-export async function deleteOpsRow(sno) {
-  return callOpsFlow('delete', { rowId: sno });
+export async function deleteOpsRow(sno, engagementKey) {
+  const key = requireKey(engagementKey, `Ops Checklist row ${sno ?? ''}`.trim());
+  return callOpsFlow('delete', { rowId: key, [ENGAGEMENT_KEY_COL]: key });
 }
 
 
@@ -780,6 +823,7 @@ async function fetchContentDevTracker() {
   return rows.map((r, i) => ({
     id:             i + 1,
     sno:            getField(r, 'SNo', 'sno') ?? i + 1,
+    engagementKey:  readKey(r),
     client:         getField(r, 'Client', 'client') ?? '',
     // Excel column is 'Start Date ' (trailing space); PA may trim or convert it
     startDate:      formatDate(getField(r, 'Start Date ', 'Start Date', 'Start_Date_', 'Start_Date', 'startDate')),
@@ -835,6 +879,7 @@ export async function addContentDevRow(rowData) {
   // Excel cell entirely, so no corrupt serial is written regardless of the
   // flow's "DateTime Format" setting.
   const body = {
+    [ENGAGEMENT_KEY_COL]: keyCell(String(rowData.engagementKey || '').trim() || newLocalKey('CD')),
     'Client':       rowData.client      || '',
     'Program Type': rowData.programType || '',
     'EV Required':  rowData.evRequired  || '',
@@ -843,7 +888,7 @@ export async function addContentDevRow(rowData) {
   };
   // sno is optional — passed by syncCDTWithEC so the Excel row gets the correct
   // S No from the Engagement Calendar instead of auto-incrementing.
-  if (rowData.sno != null && rowData.sno !== '') body['SNo'] = rowData.sno;
+  // S No is display-only — rows are linked by Index, so no SNo is sent.
   // Send Start Date under both spellings: PA flow may have been built with or
   // without the trailing space that the Excel column header has.
   if (rowData.startDate) {
@@ -864,10 +909,11 @@ export async function addContentDevRow(rowData) {
   return callContentDevFlow('create', body);
 }
 
-export async function updateContentDevRow(sno, rowData) {
+export async function updateContentDevRow(sno, rowData, engagementKey) {
+  const key = requireKey(engagementKey ?? rowData?.engagementKey, `Content Dev row ${sno ?? ''}`.trim());
   return callContentDevFlow('update', {
-    sno,
-    'SNo':             sno,                         // keep SNo cell in sync with the key
+    sno: key,                                       // flow Key Value (now the Index)
+    [ENGAGEMENT_KEY_COL]: key,
     'Client':          rowData.client         || '',
     // Send Start Date under both spellings — PA flow parameter name may or may
     // not have the trailing space that the Excel column header carries.
@@ -887,8 +933,9 @@ export async function updateContentDevRow(sno, rowData) {
   });
 }
 
-export async function deleteContentDevRow(sno) {
-  return callContentDevFlow('delete', { sno });
+export async function deleteContentDevRow(sno, engagementKey) {
+  const key = requireKey(engagementKey, `Content Dev row ${sno ?? ''}`.trim());
+  return callContentDevFlow('delete', { sno: key, [ENGAGEMENT_KEY_COL]: key });
 }
 
 // ─── SOLUTION TRACKER (BD + Solution combined) ───────────────────────────────
@@ -913,13 +960,14 @@ async function fetchSolutionTracker() {
     dateOfDiscussion:    formatDate(getField(r, 'Date of Discussion', 'Date_of_Discusssion', 'dateOfDiscussion')),
     internalTat:         getField(r, 'Internal TAT', 'Internal_TAT', 'internalTat') ?? '',
     clientExpectedDate:  formatDate(getField(r, 'Client Expt', 'Client_Expt', 'clientExpectedDate')),
-    bdMonth:             getField(r, 'BD Month', 'BD_Month', 'bdMonth') ?? '',
+    // Excel turns typed text like "Oct 2026" into a date serial (46296) — show it as "Oct 2026" again
+    bdMonth:             monthLabel(getField(r, 'BD Month', 'BD_Month', 'bdMonth'), getField(r, 'Date of Discussion', 'Date_of_Discusssion', 'Date of Discusssion')),
     programTopic:        getField(r, 'Program Topic', 'Program_Topic', 'programTopic') ?? '',
     proposalVersion:     getField(r, 'Proposal Version', 'Proposal_Version', 'proposalVersion') ?? '',
     bdStatus:            getField(r, 'BD Status', 'BD_Status', 'bdStatus') ?? '',
     bdProposalValue:     getField(r, 'BD Proposal Value', 'BD_Proposal_Value', 'bdProposalValue') ?? '',
     solutionTopic:       getField(r, 'Solution Topic', 'Solution_Topic', 'solutionTopic') ?? '',
-    solutionMonth:       getField(r, 'Solution Month', 'Solution_Month', 'solutionMonth') ?? '',
+    solutionMonth:       monthLabel(getField(r, 'Solution Month', 'Solution_Month', 'solutionMonth')),
     programType:         getField(r, 'Program Type', 'Program_Type', 'programType') ?? '',
     engagementType:      getField(r, 'Engagement Type', 'Engagement_Type', 'engagementType') ?? '',
     lineOfService:       getField(r, 'Line of Service', 'Line_of_Service', 'lineOfService') ?? '',
@@ -1006,6 +1054,31 @@ export async function deleteSolutionRow(sno) {
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
+const MON3 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+/**
+ * Month column value → "Oct 2026".
+ *  - Excel date serial (46296, or "46296")  → "Oct 2026"
+ *  - ISO date ("2026-10-01…")               → "Oct 2026"
+ *  - text without a year ("Sept") + a discussion date in the same month → "Sep 2026"
+ *  - anything else                          → unchanged text
+ */
+export function monthLabel(raw, fallbackDate) {
+  if (raw === null || raw === undefined) return '';
+  const s = String(raw).trim();
+  if (!s) return '';
+  const iso = formatDate(s);                      // handles serials and ISO strings
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso) && (/^\d+(\.\d+)?$/.test(s) || /^\d{4}-\d{2}/.test(s))) {
+    return `${MON3[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}`;
+  }
+  if (!/(19|20)\d{2}/.test(s) && fallbackDate) {
+    const d = formatDate(fallbackDate);
+    const mi = MON3.findIndex(m => s.toLowerCase().startsWith(m.toLowerCase()));
+    if (/^\d{4}-\d{2}/.test(d) && mi >= 0 && Number(d.slice(5, 7)) === mi + 1) return `${MON3[mi]} ${d.slice(0, 4)}`;
+  }
+  return s;
+}
+
 /**
  * Convert any date value from Power Automate "List rows" to a YYYY-MM-DD string.
  *

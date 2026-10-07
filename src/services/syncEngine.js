@@ -3,6 +3,9 @@
  * SYNC ENGINE (all-or-nothing, incremental) — runs only from the Sync buttons
  *
  * How one run works
+ *   Rows are linked by ENGAGEMENT KEY (a permanent ID the CRM creates once).
+ *   S No is display-only (=ROW()-1 in Excel) and is never used for linking.
+ *
  *   1. PLAN   – read Engagement Calendar rows from the 1st of LAST month onward
  *               (current + all future months), plus the Ops Checklist and the
  *               Content Dev Tracker. Compare field-by-field and list ONLY the
@@ -34,7 +37,6 @@ import { logEvent, withAuditContext } from './auditLogger.js';
 /** EC row → Ops Checklist camelCase keys (only these columns are ever changed). */
 export function ecToOC(ec) {
   const p = {
-    sno:            ec.sno,
     egId:           ec.egId        || '',
     company:        ec.company     || '',
     startDate:      ec.startDate   || '',
@@ -79,7 +81,8 @@ export function syncScopeFrom(now = new Date()) {
 const SCOPE_TO = '2099-12-31';            // "all future months"
 
 // ─── Browser storage: journal, lock, last-run state ──────────────────────────
-const JOURNAL_KEY = 'ercrm.sync.journal.v1';
+const JOURNAL_KEY = 'ercrm.sync.journal.v2';   // v2 = ops keyed by Index
+try { localStorage.removeItem('ercrm.sync.journal.v1'); } catch { /* old S No based journal — no longer valid */ }
 const STATE_KEY   = 'ercrm.sync.state.v1';
 const LOCK_KEY    = 'ercrm.sync.lock.v1';
 const LOCK_TTL_MS = 90 * 1000;
@@ -131,8 +134,34 @@ export class SyncRolledBackError extends Error {
 
 // ─── Plan ────────────────────────────────────────────────────────────────────
 const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim();
+const normLow = v => norm(v).toLowerCase();
 const differs = (existing, payload) =>
-  Object.keys(payload).some(k => k !== 'sno' && norm(existing[k]) !== norm(payload[k]));
+  Object.keys(payload).some(k => k !== 'sno' && k !== 'engagementKey' && norm(existing[k]) !== norm(payload[k]));
+
+/** Same engagement by content (used only to spot tracker rows that are missing their key). */
+const sameContent = (ec, row, companyField) =>
+  normLow(ec.company) === normLow(row[companyField]) &&
+  norm(ec.startDate) === norm(row.startDate) &&
+  normLow(ec.topic) === normLow(row.topic);
+
+export class SyncSetupError extends Error {
+  constructor(message) { super(message); this.name = 'SyncSetupError'; }
+}
+
+/** Map tracker rows by Index; refuse to run on duplicate keys. */
+function indexByKey(rows, label) {
+  const byKey = new Map(); const dups = new Set();
+  for (const r of rows) {
+    const k = norm(r.engagementKey);
+    if (!k) continue;
+    if (byKey.has(k)) dups.add(k); else byKey.set(k, r);
+  }
+  if (dups.size) {
+    throw new SyncSetupError(`${label} has the same Index on more than one row (${[...dups].slice(0, 5).join(', ')}). ` +
+      'Remove the duplicate rows in Excel, then sync again. Nothing was changed.');
+  }
+  return byKey;
+}
 
 async function buildPlan(targets, scope = 'recent') {
   const from = scope === 'all' ? '' : syncScopeFrom();
@@ -144,56 +173,70 @@ async function buildPlan(targets, scope = 'recent') {
     targets.includes('cdt') ? getContentDevTracker() : Promise.resolve(null),
   ]);
 
-  // In-scope EC rows with a start date and an S No (last duplicate S No wins)
-  const ecBySno = new Map();
+  // In-scope EC rows with a start date and an Index
+  const ecByKey = new Map(); const ecDup = new Set(); const noKey = [];
   ecAll.forEach(e => {
-    const key = norm(e.sno);
-    if (!key || !e.startDate) return;
+    if (!e.startDate) return;
     // include engagements that started earlier but are still running into scope
     const end = e.endDate && e.endDate >= e.startDate ? e.endDate : e.startDate;
     if (end < from) return;
-    ecBySno.set(key, e);
+    const key = norm(e.engagementKey);
+    if (!key) { noKey.push(e); return; }
+    if (ecByKey.has(key)) ecDup.add(key);
+    ecByKey.set(key, e);
   });
+  if (ecDup.size) {
+    throw new SyncSetupError(`The Engagement Calendar has the same Index on more than one row (${[...ecDup].slice(0, 5).join(', ')}). ` +
+      'Fix it in Excel, then sync again. Nothing was changed.');
+  }
 
   const ops = [];
-  if (ocRows) {
-    const ocBySno = new Map(ocRows.map(r => [norm(r.sno), r]));
-    for (const [key, ec] of ecBySno) {
-      const payload  = ecToOC(ec);
-      const existing = ocBySno.get(key);
-      if (!existing)                     ops.push({ target: 'ops', type: 'add',    key, after: payload });
-      else if (differs(existing, payload)) ops.push({ target: 'ops', type: 'update', key, before: existing, after: { ...existing, ...payload } });
+  const plan = (target, rows, toPayload, companyField, label) => {
+    const byKey = indexByKey(rows, label);
+    const keyless = rows.filter(r => !norm(r.engagementKey));
+    const blocked = [];
+    for (const [key, ec] of ecByKey) {
+      const payload  = toPayload(ec);
+      const existing = byKey.get(key);
+      if (!existing) {
+        // A row for this engagement that has no key yet → adding would create a duplicate
+        if (keyless.some(r => sameContent(ec, r, companyField))) { blocked.push(ec); continue; }
+        ops.push({ target, type: 'add', key, after: { ...payload, engagementKey: ec.engagementKey } });
+      } else if (differs(existing, payload)) {
+        // Ops Checklist: send only the EC-owned columns (smaller flow call, never touches tracker-only columns).
+        // Content Dev: its update writes every column, so the whole row is carried.
+        const before = target === 'ops' ? Object.fromEntries(Object.keys(payload).map(k => [k, existing[k] ?? ''])) : existing;
+        const after  = target === 'ops' ? payload : { ...existing, ...payload };
+        ops.push({ target, type: 'update', key, sno: existing.sno, before, after });
+      }
     }
-  }
-  if (cdtRows) {
-    const cdtBySno = new Map(cdtRows.map(r => [norm(r.sno), r]));
-    for (const [key, ec] of ecBySno) {
-      const payload  = ecToCDT(ec);
-      const existing = cdtBySno.get(key);
-      if (!existing)                     ops.push({ target: 'cdt', type: 'add',    key, after: { sno: ec.sno, ...payload } });
-      else if (differs(existing, payload)) ops.push({ target: 'cdt', type: 'update', key, before: existing, after: { ...existing, ...payload } });
+    if (blocked.length) {
+      throw new SyncSetupError(`${blocked.length} ${label} row(s) have no Index but match engagements in the calendar ` +
+        `(e.g. ${blocked[0].company} · ${blocked[0].startDate}). Add their Index values first so the sync doesn't create duplicates. Nothing was changed.`);
     }
-  }
-  return { from, inScope: ecBySno.size, ops };
+  };
+  if (ocRows)  plan('ops', ocRows,  ecToOC,  'company', 'Ops Checklist');
+  if (cdtRows) plan('cdt', cdtRows, ecToCDT, 'client',  'Content Dev Tracker');
+  return { from, inScope: ecByKey.size, noKey: noKey.map(e => ({ egId: e.egId, company: e.company, startDate: e.startDate, topic: e.topic })), ops };
 }
 
 // ─── Apply / undo a single change ────────────────────────────────────────────
 async function applyOp(op) {
   if (op.target === 'ops') {
-    if (op.type === 'update') return updateOpsRow(op.key, op.after);
-    return addOpsRow({ 'S No': op.after.sno, ...op.after });
+    if (op.type === 'update') return updateOpsRow(op.sno, op.after, op.key);
+    return addOpsRow(op.after);
   }
-  if (op.type === 'update') return updateContentDevRow(op.key, op.after);
+  if (op.type === 'update') return updateContentDevRow(op.sno, op.after, op.key);
   return addContentDevRow(op.after);
 }
 
 async function revertOp(op) {
   if (op.target === 'ops') {
-    if (op.type === 'update') return updateOpsRow(op.key, op.before);
-    return deleteOpsRow(op.key);
+    if (op.type === 'update') return updateOpsRow(op.sno, op.before, op.key);
+    return deleteOpsRow(null, op.key);
   }
-  if (op.type === 'update') return updateContentDevRow(op.key, op.before);
-  return deleteContentDevRow(op.key);
+  if (op.type === 'update') return updateContentDevRow(op.sno, op.before, op.key);
+  return deleteContentDevRow(null, op.key);
 }
 
 /** Undo every applied change of a journal, newest first. Keeps the journal if an undo fails. */
@@ -265,7 +308,7 @@ export async function runEcSync(options = {}) {
 }
 
 async function runEcSyncCore({ targets = ['ops', 'cdt'], scope = 'recent', onProgress } = {}) {
-  const empty = { updated: 0, added: 0, planned: 0, inScope: 0, byTarget: {} };
+  const empty = { updated: 0, added: 0, planned: 0, inScope: 0, byTarget: {}, noKey: [] };
   if (!targets.length) return { ...empty, skipped: 'no-targets' };
   if (!acquireLock())  return { ...empty, skipped: 'locked' };
 
@@ -288,9 +331,9 @@ async function runEcSyncCore({ targets = ['ops', 'cdt'], scope = 'recent', onPro
     });
 
     if (!plan.ops.length) {
-      saveSyncState({ lastSuccessAt: Date.now(), lastResult: { ok: true, updated: 0, added: 0, inScope: plan.inScope, from: plan.from } });
+      saveSyncState({ lastSuccessAt: Date.now(), lastResult: { ok: true, updated: 0, added: 0, inScope: plan.inScope, from: plan.from, noKey: plan.noKey.length } });
       onProgress?.({ phase: 'done', done: 0, total: 0, updated: 0, added: 0 });
-      return { ...empty, inScope: plan.inScope };
+      return { ...empty, inScope: plan.inScope, noKey: plan.noKey };
     }
 
     const journal = {
@@ -315,11 +358,11 @@ async function runEcSyncCore({ targets = ['ops', 'cdt'], scope = 'recent', onPro
           await rollback(journal, onProgress);
         } catch (undoErr) {
           saveSyncState({ lastResult: { ok: false, rolledBack: false, reason: `Undo will be retried automatically: ${undoErr.message}` } });
-          throw new SyncRolledBackError(`Sync failed at S No ${op.key} and the undo could not finish yet — it will be retried automatically. (${err.message})`, err);
+          throw new SyncRolledBackError(`Sync failed at ${op.after?.company || ''} ${op.after?.startDate || ''} (${op.key}) and the undo could not finish yet — it will be retried automatically. (${err.message})`, err);
         }
         saveSyncState({ lastResult: { ok: false, rolledBack: true, reason: err.message, failedAt: op.key } });
         emit('ercrm:sync-complete', { targets, rolledBack: true });
-        throw new SyncRolledBackError(`Sync failed at S No ${op.key} — all changes from this run were undone. (${err.message})`, err);
+        throw new SyncRolledBackError(`Sync failed at ${op.after?.company || ''} ${op.after?.startDate || ''} (${op.key}) — all changes from this run were undone. (${err.message})`, err);
       }
       op.state = 'done';
       writeJSON(JOURNAL_KEY, journal);
@@ -328,10 +371,10 @@ async function runEcSyncCore({ targets = ['ops', 'cdt'], scope = 'recent', onPro
 
     // ── Commit ──
     removeKey(JOURNAL_KEY);
-    saveSyncState({ lastSuccessAt: Date.now(), lastResult: { ok: true, updated, added, inScope: plan.inScope, from: plan.from } });
+    saveSyncState({ lastSuccessAt: Date.now(), lastResult: { ok: true, updated, added, inScope: plan.inScope, from: plan.from, noKey: plan.noKey.length } });
     onProgress?.({ phase: 'done', done: journal.ops.length, total: journal.ops.length, updated, added });
     emit('ercrm:sync-complete', { targets: Object.keys(byTarget), updated, added, byTarget });
-    return { updated, added, planned: plan.ops.length, inScope: plan.inScope, byTarget };
+    return { updated, added, planned: plan.ops.length, inScope: plan.inScope, byTarget, noKey: plan.noKey };
   } finally {
     window.removeEventListener('beforeunload', warnOnLeave);
     clearInterval(hb);

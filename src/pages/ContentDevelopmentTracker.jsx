@@ -374,6 +374,11 @@ function DetailPanel({ row, canEdit, onUpdate, onDelete, saving }) {
       <div style={{ flex:1, overflowY:'auto', padding:16 }}>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
 
+          {/* Index — view only */}
+          <div style={{ gridColumn:'1 / -1', fontSize:12, color:'var(--muted)' }}>
+            Index 🔒 <span style={{ fontWeight:600, color:'#475569' }}>{row.engagementKey || 'Not set'}</span>
+          </div>
+
           {/* Client — full width */}
           <div style={{ gridColumn:'1 / -1' }}>
             <EditField label="Client" value={row.client} field="client" row={row} onSave={onUpdate} canEdit={canEdit} />
@@ -454,7 +459,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
   };
 
   useEffect(() => { load(); }, []);
-  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), String(msg).includes('⚠') ? 9000 : 3000); };
 
   const filtered = useMemo(() =>
     data.filter(r => {
@@ -471,7 +476,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
 
   const handleUpdate = async (row, changes) => {
     try {
-      await updateContentDevRow(row.sno, { ...row, ...changes });
+      await updateContentDevRow(row.sno, { ...row, ...changes }, row.engagementKey);
       setData(prev => prev.map(r => r.sno===row.sno ? { ...r, ...changes } : r));
       showToast('✓ Saved');
     } catch(e) { showToast('❌ ' + e.message); }
@@ -487,7 +492,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
   const handleDelete = async () => {
     if (!deleteRow) return; setSaving(true);
     try {
-      await deleteContentDevRow(deleteRow.sno);
+      await deleteContentDevRow(deleteRow.sno, deleteRow.engagementKey);
       if (selected === deleteRow.sno) setSelected(null);
       showToast('✓ Entry deleted'); setDeleteRow(null); await load();
     } catch(e) { showToast('❌ ' + e.message); }
@@ -498,7 +503,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
     setSyncing(true); setSyncProg({ done:0, total:0 });
     try {
       const { updated, added, errors } = await syncCDTWithEC(p => setSyncProg(p), scope);
-      const errPart = errors.length ? ` · ${errors.length} error${errors.length>1?'s':''}` : '';
+      const errPart = errors.length ? ` · ⚠ ${errors.join(' ')}` : '';
       showToast(`✓ Synced: ${updated} updated, ${added} added${errPart}`);
       await new Promise(r => setTimeout(r, 1500));
       await load();

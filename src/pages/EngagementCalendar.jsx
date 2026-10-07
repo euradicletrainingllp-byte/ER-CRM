@@ -4,7 +4,7 @@ import { ErrorState } from '../components/LoadingState.jsx';
 import {
   getEngagementsForRange, getAllEngagementsCached, buildMonthRange,
   peekEngagementsForRange, prefetchEngagementsForRange, patchEngagementCaches,
-  addEngagementRow, updateEngagementRow, deleteEngagementRow,
+  addEngagementRow, updateEngagementRow, deleteEngagementRow, nextEngagementIndex,
 } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
@@ -286,6 +286,15 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
             );
           })}
 
+          {/* ── Permanent link to Ops Checklist / Content Dev — view only ── */}
+          {isEdit && (
+            <div className="form-field full">
+              <label className="form-label">Index 🔒 (set by the CRM — can't be edited)</label>
+              <input className="form-input" value={initial?.engagementKey || 'Not set — add it in Excel'} readOnly disabled
+                style={{ background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }} />
+            </div>
+          )}
+
           {/* ── Carried from the Solution / BD Tracker ── */}
           <div className="form-field full">
             <label className="form-label">Proposal Link{prefill?.proposalLink && !isEdit ? ' (from Solution Tracker)' : ''}</label>
@@ -360,9 +369,11 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }
   const sc = STATUS_COLORS[eng.status] || { bg: '#f1f5f9', color: '#475569' };
 
   const startFmt = fmtDt(eng.startDate);
-  const endFmt   = (eng.endDate && eng.endDate !== eng.startDate) ? fmtDt(eng.endDate) : '—';
+  // Always show the End Date when Excel has one (single-day sessions show the same date as Start)
+  const endFmt   = eng.endDate ? fmtDt(eng.endDate) : '—';
 
   const details = [
+    ['Index 🔒', eng.engagementKey || '—'],
     ['Sector',           eng.sector      || '—'],
     ['Service Type',     eng.serviceType || '—'],
     ['Offering',         eng.offering    || '—'],
@@ -955,20 +966,22 @@ export default function EngagementCalendar({ onRefreshed }) {
   const handleAdd = async (form) => {
     setSaving(true);
     try {
-      await addEngagementRow(rowFromForm(form));
+      // The CRM gives every new engagement its permanent Index (highest Index + 1)
+      const newRow = { ...rowFromForm(form), engagementKey: await nextEngagementIndex() };
+      await addEngagementRow(newRow);
       setShowAdd(false);
       setAddPrefill(null);
       setAllRows(null);
-      const row = { ...rowFromForm(form), sno: '—', pending: true };
+      const row = { ...newRow, sno: '—', pending: true };
       if (!row.startDate || (row.startDate <= win.to && (row.endDate || row.startDate) >= win.from)) {
         setData(d => [...d, row]);
       }
       showToast('✓ Engagement added to Excel! Creating its Ops Checklist row…');
       revalidateSoon();
       // Carry the engagement (and the BD checklist) to the Ops Checklist straight away
-      pushNewEngagementToOps(rowFromForm(form))
+      pushNewEngagementToOps(newRow)
         .then(res => showToast(res.ok
-          ? `✓ Ops Checklist ${res.created ? 'row created' : 'row updated'} (S No ${res.sno})`
+          ? `✓ Ops Checklist ${res.created ? 'row created' : 'row updated'} (${res.key})`
           : `⚠ Ops Checklist not updated: ${res.reason}`))
         .catch(err => showToast('⚠ Ops Checklist not updated: ' + err.message + ' — use "Sync with EC" in the Ops Checklist.'));
     } catch (e) { showToast('❌ ' + e.message); }
@@ -986,7 +999,7 @@ export default function EngagementCalendar({ onRefreshed }) {
     setEditRow(null);
     setData(d => d.map(r => (rowKey(r) === oldKey ? { ...updated, pending: true } : r)));
     try {
-      await updateEngagementRow(original.egId, original.sno, formToExcel(form));
+      await updateEngagementRow(original.egId, original.sno, formToExcel(form), original.engagementKey);
       setData(d => d.map(r => (rowKey(r) === newKey ? { ...r, pending: false } : r)));
       patchEngagementCaches(rows => rows.map(r => (rowKey(r) === oldKey ? { ...r, ...rowFromForm(form) } : r)));
       showToast('✓ Engagement updated!');
@@ -1006,7 +1019,7 @@ export default function EngagementCalendar({ onRefreshed }) {
     setDeleteRow(null);
     setData(d => d.filter(r => rowKey(r) !== vKey));
     try {
-      await deleteEngagementRow(victim.egId, victim.sno);
+      await deleteEngagementRow(victim.egId, victim.sno, victim.engagementKey);
       patchEngagementCaches(rows => rows.filter(r => rowKey(r) !== vKey));
       setAllRows(null);
       showToast('✓ Engagement deleted!');
