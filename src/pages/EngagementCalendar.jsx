@@ -12,7 +12,7 @@ import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.j
 import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
-import { pushNewEngagementToOps } from '../services/syncWithEC.js';
+import { addEngagementToOps, addEngagementToCDT, isInTracker } from '../services/addToTrackers.js';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -364,13 +364,43 @@ function DeleteEngagementModal({ eng, onConfirm, onClose, saving }) {
 }
 
 /* ─── Engagement Card (accordion) ───────────────────────────────────────── */
-function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }) {
+/* "Add to Ops Checklist" / "Add to Content Dev Tracker" button on a card */
+function AddToTrackerButton({ label, inTracker, busy, onClick }) {
+  if (inTracker) {
+    return (
+      <span title={`This engagement already has a row in the ${label}`}
+        style={{ fontSize: 12, fontWeight: 700, color: '#065f46', background: '#d1fae5', borderRadius: 7, padding: '6px 12px', whiteSpace: 'nowrap' }}>
+        ✓ In {label}
+      </span>
+    );
+  }
+  return (
+    <button type="button" className="btn btn-outline btn-sm" disabled={busy}
+      title={`Create a row for this engagement in the ${label} (linked by Index)`}
+      onClick={e => { e.stopPropagation(); onClick(); }}
+      style={{ color: 'var(--accent)', borderColor: 'var(--accent)', whiteSpace: 'nowrap' }}>
+      {busy ? '⏳ Adding…' : `➕ Add to ${label}`}
+    </button>
+  );
+}
+
+// Compact date for the card preview row: "Wednesday, 28 October 2026" -> "Wed, 28 Oct 2026"
+const fmtDtShort = d => {
+  const full = fmtDt(d);
+  const m = /^([A-Za-z]{3})[A-Za-z]*,\s*(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s+(\d{4})$/.exec(full);
+  return m ? `${m[1]}, ${m[2]} ${m[3]} ${m[4]}` : full;
+};
+
+function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false,
+  canAddOps = false, canAddCdt = false, inOps = false, inCdt = false, addingOps = false, addingCdt = false, onAddTo }) {
   const [open, setOpen] = useState(false);
   const sc = STATUS_COLORS[eng.status] || { bg: '#f1f5f9', color: '#475569' };
 
-  const startFmt = fmtDt(eng.startDate);
+  const startFmt  = fmtDtShort(eng.startDate);
+  const startFull = fmtDt(eng.startDate);
   // Always show the End Date when Excel has one (single-day sessions show the same date as Start)
-  const endFmt   = eng.endDate ? fmtDt(eng.endDate) : '—';
+  const endFmt    = eng.endDate ? fmtDtShort(eng.endDate) : '—';
+  const endFull   = eng.endDate ? fmtDt(eng.endDate) : '—';
 
   const details = [
     ['Index 🔒', eng.engagementKey || '—'],
@@ -416,9 +446,9 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }
         onClick={() => setOpen(o => !o)}
         style={{
           display: 'grid',
-          gridTemplateColumns: '100px 58px 1fr 190px 190px 108px 22px',
+          gridTemplateColumns: '100px 50px minmax(0,1fr) 120px 120px 160px 120px 108px 22px',
           alignItems: 'center',
-          gap: '0 10px',
+          gap: '0 16px',
           padding: '11px 16px 11px 14px',
           cursor: 'pointer',
           userSelect: 'none',
@@ -436,13 +466,13 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }
           {eng.sno}
         </div>
 
-        {/* Company + Topic */}
+        {/* Engagement name (topic) + Company */}
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, color: '#1a3a5c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {eng.company}
+          <div title={eng.topic} style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.3, color: '#1a3a5c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {eng.topic || '—'}
           </div>
-          <div style={{ fontSize: 11, color: '#64748b', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {eng.topic}
+          <div title={eng.company} style={{ fontSize: 12, fontWeight: 500, color: '#64748b', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {eng.company}
           </div>
           {highlight && (
             <span style={{ display: 'inline-block', marginTop: 4, fontSize: 10, fontWeight: 800, color: '#fff', background: '#e8760a', borderRadius: 20, padding: '2px 8px' }}>
@@ -457,13 +487,30 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }
         </div>
 
         {/* Start Date */}
-        <div style={{ fontSize: 12, fontWeight: 600, color: '#1a3a5c', whiteSpace: 'nowrap' }}>
+        <div title={startFull} style={{ fontSize: 12, fontWeight: 600, color: '#1a3a5c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
           {startFmt}
         </div>
 
         {/* End Date */}
-        <div style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap' }}>
+        <div title={endFull} style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
           {endFmt}
+        </div>
+
+        {/* Consultant */}
+        <div style={{ minWidth: 0 }} title={[eng.consultant1, eng.consultant2].filter(Boolean).join(', ')}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#1a3a5c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {eng.consultant1 || '—'}
+          </div>
+          {eng.consultant2 && (
+            <div style={{ fontSize: 11, color: '#64748b', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              + {eng.consultant2}
+            </div>
+          )}
+        </div>
+
+        {/* Location */}
+        <div title={eng.location || ''} style={{ fontSize: 12, fontWeight: 600, color: '#1a3a5c', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {eng.location ? `📍 ${eng.location}` : '—'}
         </div>
 
         {/* Status */}
@@ -521,8 +568,15 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }
                 💰 Revenue: {fmtINR(eng.price)}
               </div>
             )}
-            {canEditEng && !eng.pending && (
-              <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+            {(canEditEng || canAddOps || canAddCdt) && !eng.pending && (
+              <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', alignItems: 'center', flexWrap: 'wrap' }}>
+                {canAddOps && (
+                  <AddToTrackerButton label="Ops Checklist" inTracker={inOps} busy={addingOps} onClick={() => onAddTo?.('ops', eng)} />
+                )}
+                {canAddCdt && (
+                  <AddToTrackerButton label="Content Dev Tracker" inTracker={inCdt} busy={addingCdt} onClick={() => onAddTo?.('cdt', eng)} />
+                )}
+                {canEditEng && <>
                 <EditButton
                   title="Edit Engagement"
                   onClick={e => { e.stopPropagation(); onEdit(eng); }}
@@ -531,6 +585,7 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false }
                   title="Delete Engagement"
                   onClick={e => { e.stopPropagation(); onDelete(eng); }}
                 />
+                </>}
               </div>
             )}
           </div>
@@ -780,6 +835,28 @@ export default function EngagementCalendar({ onRefreshed }) {
   const [scrollNonce, setScrollNonce] = useState(0);       // bump to re-run auto-scroll
 
   const { canEdit } = usePermissions();
+
+  // "Add to Ops Checklist" / "Add to Content Dev Tracker" (one engagement at a time)
+  const [adding,    setAdding]    = useState({});              // 'ops|<Index>' → true while saving
+  const [addedKeys, setAddedKeys] = useState(() => new Set()); // added in this session
+  const trackerLabel = t => (t === 'ops' ? 'Ops Checklist' : 'Content Dev Tracker');
+  const isIn = (t, eng) => addedKeys.has(`${t}|${eng.engagementKey}`) || isInTracker(t, eng) === true;
+  const handleAddTo = async (target, eng) => {
+    const id = `${target}|${eng.engagementKey}`;
+    if (adding[id]) return;
+    setAdding(a => ({ ...a, [id]: true }));
+    try {
+      const res = target === 'ops' ? await addEngagementToOps(eng) : await addEngagementToCDT(eng);
+      setAddedKeys(s => new Set(s).add(id));
+      showToast(res.added
+        ? `✓ Added to ${trackerLabel(target)} (Index ${res.index})`
+        : `ℹ Already in ${trackerLabel(target)} (Index ${res.index}) — nothing added`);
+    } catch (e) {
+      showToast(`❌ Could not add to ${trackerLabel(target)}: ${e.message}`);
+    } finally {
+      setAdding(a => { const n = { ...a }; delete n[id]; return n; });
+    }
+  };
   const requestId    = useRef(0);
   const cardRefs     = useRef({});
   const monthRefs    = useRef({});
@@ -976,14 +1053,8 @@ export default function EngagementCalendar({ onRefreshed }) {
       if (!row.startDate || (row.startDate <= win.to && (row.endDate || row.startDate) >= win.from)) {
         setData(d => [...d, row]);
       }
-      showToast('✓ Engagement added to Excel! Creating its Ops Checklist row…');
+      showToast(`✓ Engagement added to Excel (Index ${newRow.engagementKey}). Use "Add to Ops Checklist" / "Add to Content Dev Tracker" on its card when needed.`);
       revalidateSoon();
-      // Carry the engagement (and the BD checklist) to the Ops Checklist straight away
-      pushNewEngagementToOps(newRow)
-        .then(res => showToast(res.ok
-          ? `✓ Ops Checklist ${res.created ? 'row created' : 'row updated'} (${res.key})`
-          : `⚠ Ops Checklist not updated: ${res.reason}`))
-        .catch(err => showToast('⚠ Ops Checklist not updated: ' + err.message + ' — use "Sync with EC" in the Ops Checklist.'));
     } catch (e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
   };
@@ -1134,12 +1205,12 @@ export default function EngagementCalendar({ onRefreshed }) {
       {/* ── Column header labels ── */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: '100px 58px 1fr 190px 190px 108px 22px',
-        gap: '0 10px',
+        gridTemplateColumns: '100px 50px minmax(0,1fr) 120px 120px 160px 120px 108px 22px',
+        gap: '0 16px',
         padding: '5px 20px 5px 18px',
         marginBottom: 5,
       }}>
-        {['EG.ID', 'S.No', 'Company / Topic', 'Start Date', 'End Date', 'Status', ''].map((h, i) => (
+        {['EG.ID', 'S.No', 'Engagement / Company', 'Start Date', 'End Date', 'Consultant', 'Location', 'Status', ''].map((h, i) => (
           <div key={i} style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.7 }}>
             {h}
           </div>
@@ -1194,6 +1265,13 @@ export default function EngagementCalendar({ onRefreshed }) {
                     canEditEng={canEdit('engagement')}
                     onEdit={setEditRow}
                     onDelete={setDeleteRow}
+                    canAddOps={canEdit('ops')}
+                    canAddCdt={canEdit('content-dev')}
+                    inOps={isIn('ops', eng)}
+                    inCdt={isIn('cdt', eng)}
+                    addingOps={!!adding[`ops|${eng.engagementKey}`]}
+                    addingCdt={!!adding[`cdt|${eng.engagementKey}`]}
+                    onAddTo={handleAddTo}
                   />
                 </div>
               ))}
