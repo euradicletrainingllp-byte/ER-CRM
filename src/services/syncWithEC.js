@@ -1,50 +1,13 @@
 /**
- * EURADICLE CRM — Engagement Calendar Sync Utility
+ * EURADICLE CRM — Ops Checklist finance → Engagement Calendar
  *
- * syncOpsWithEC() / syncCDTWithEC() — manual "Sync with EC" buttons; both
- * delegate to the all-or-nothing engine in syncEngine.js (rows are linked
- * by Index; only EC-owned columns are written).
- *
- * Columns that live only in the tracker (e.g. Contract Status, Pax List,
- * POC, completion dates) are NEVER touched — even on updates.
+ * When Invoice / Payment fields are edited in the Ops Checklist, the matching
+ * Engagement Calendar row (same Index) gets the Invoice date, Payment status
+ * and Received date. This is the only automatic link left — the bulk
+ * "Sync with EC" was removed on 2026-10-07 (see addToTrackers.js).
  */
 
-import {
-  getEngagements, updateEngagementRow,
-  getEngagementsForRange, getAllEngagementsCached,
-  getOpsChecklist, addOpsRow, updateOpsRow,
-} from './api.js';
-import { runEcSync, ecToOC } from './syncEngine.js';
-
-// ─── Manual "Sync with EC" buttons ────────────────────────────────────────────
-// Both buttons use the all-or-nothing, incremental engine (syncEngine.js).
-// scope 'recent' = engagements from last month onward, 'all' = whole calendar;
-// only rows that are missing or different, and everything is undone if any
-// write fails. Return shape is unchanged: { updated, added, errors[] }.
-
-async function manualSync(target, onProgress, scope = 'recent') {
-  const res = await runEcSync({
-    targets: [target],
-    scope,
-    onProgress: p => onProgress?.({ done: p.done, total: p.total, updated: p.updated, added: p.added, errors: 0 }),
-  });
-  if (res.skipped === 'locked') {
-    throw new Error('Another sync is already running (maybe in another CRM tab) — please try again in a minute.');
-  }
-  const errors = [];
-  if (res.noKey?.length) {
-    const ex = res.noKey[0];
-    errors.push(`${res.noKey.length} engagement(s) in the Engagement Calendar have no Index and were skipped ` +
-      `(e.g. ${ex.company} · ${ex.startDate}) — add their keys in Excel.`);
-  }
-  return { updated: res.updated, added: res.added, errors };
-}
-
-/** Engagement Calendar → Ops Checklist (all-or-nothing). */
-export function syncOpsWithEC(onProgress, scope = 'recent') { return manualSync('ops', onProgress, scope); }
-
-/** Engagement Calendar → Content Dev Tracker (all-or-nothing). */
-export function syncCDTWithEC(onProgress, scope = 'recent') { return manualSync('cdt', onProgress, scope); }
+import { getEngagements, updateEngagementRow } from './api.js';
 
 // ─── Ops Checklist Finance → Engagement Calendar (live, per edit) ────────────
 
@@ -146,42 +109,4 @@ export async function syncOpsFinanceToEC(sno, changes, fullRow) {
 
   await updateEngagementRow(ec.egId, ec.sno, ecUpdateBody({ ...ec, ...ecChanges }), key);
   return { synced: true };
-}
-
-// ─── New engagement → Ops Checklist (immediately after "Save Engagement") ────
-
-const wait = ms => new Promise(res => setTimeout(res, ms));
-
-/**
- * Finds the engagement that was just added (by the Index the CRM gave
- * it) and creates the matching Ops Checklist row straight away — carrying the
- * BD checklist. Same field mapping as "Sync with EC", so a later sync sees no change.
- *
- * @param {object} added  the engagement that was saved (must carry engagementKey)
- * @returns {{ ok: boolean, key?: string, created?: boolean, reason?: string }}
- */
-export async function pushNewEngagementToOps(added) {
-  const key = String(added?.engagementKey ?? '').trim();
-  if (!key) return { ok: false, reason: 'the new engagement has no Index — use "Sync with EC" in the Ops Checklist' };
-  let match = null;
-  // Excel Online needs a moment before the new row is readable
-  for (const delay of [2500, 4000, 6000]) {
-    await wait(delay);
-    const rows = added.startDate
-      ? await getEngagementsForRange(added.startDate, added.endDate && added.endDate >= added.startDate ? added.endDate : added.startDate, { force: true })
-      : await getAllEngagementsCached({ force: true });
-    match = rows.find(r => String(r.engagementKey).trim() === key) || null;
-    if (match) break;
-  }
-  if (!match) return { ok: false, reason: 'the new engagement could not be found in Excel yet — use "Sync with EC" in the Ops Checklist' };
-
-  const payload = ecToOC(match);
-  const ocRows = await getOpsChecklist();
-  const existing = ocRows.find(r => String(r.engagementKey ?? '').trim() === key);
-  if (existing) {
-    await updateOpsRow(existing.sno, payload, key);
-    return { ok: true, key, created: false };
-  }
-  await addOpsRow({ ...payload, engagementKey: key });
-  return { ok: true, key, created: true };
 }

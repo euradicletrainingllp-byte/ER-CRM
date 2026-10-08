@@ -2,9 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { peekList, getOpsChecklist, addOpsRow, updateOpsRow, deleteOpsRow } from '../services/api.js';
-import { syncOpsWithEC, syncOpsFinanceToEC, OPS_FINANCE_TO_EC } from '../services/syncWithEC.js';
+import { syncOpsFinanceToEC, OPS_FINANCE_TO_EC } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
-import SyncScopeModal from '../components/SyncScopeModal.jsx';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
@@ -607,7 +606,6 @@ export default function OpsChecklist({ onRefreshed }) {
   const [data,      setData]      = useState(() => peekList('ops') || []);
   const [loading,   setLoading]   = useState(() => !peekList('ops'));   // full loader only on the very first visit
   const [refreshing, setRefreshing] = useState(false);                  // quiet background refresh
-  const [scopeOpen, setScopeOpen] = useState(false);
   const [error,     setError]     = useState(null);
   const [search,    setSearch]    = useState('');
   const [statusF,   setStatusF]   = useState('All');
@@ -616,8 +614,6 @@ export default function OpsChecklist({ onRefreshed }) {
   const [editRow,   setEditRow]   = useState(null);
   const [deleteRow, setDeleteRow] = useState(null);
   const [saving,    setSaving]    = useState(false);
-  const [syncing,   setSyncing]   = useState(false);
-  const [syncProg,  setSyncProg]  = useState(null); // { done, total }
   const [toast,     setToast]     = useState('');
 
   const { canEdit } = usePermissions();
@@ -712,23 +708,6 @@ export default function OpsChecklist({ onRefreshed }) {
     finally { setSaving(false); }
   };
 
-  const handleSyncWithEC = async (scope = 'recent') => {
-    setSyncing(true);
-    setSyncProg({ done: 0, total: 0 });
-    try {
-      const { updated, added, errors } = await syncOpsWithEC(p => setSyncProg(p), scope);
-      const errPart = errors.length ? ` · ⚠ ${errors.join(' ')}` : '';
-      showToast(`✓ Synced: ${updated} updated, ${added} added${errPart}`);
-      // Wait briefly for Excel Online to settle, then reload
-      await new Promise(r => setTimeout(r, 1500));
-      await load();
-    } catch(e) {
-      showToast('❌ Sync failed: ' + e.message);
-    } finally {
-      setSyncing(false);
-      setSyncProg(null);
-    }
-  };
 
   if (loading) return <LoadingState message="Loading Ops Checklist from OneDrive…" />;
   if (error)   return <ErrorState error={error} onRetry={load} />;
@@ -744,7 +723,6 @@ export default function OpsChecklist({ onRefreshed }) {
       {showAdd   && <AddEditModal initial={null}    onSave={handleAdd}  onClose={() => setShowAdd(false)} saving={saving} />}
       {editRow   && <AddEditModal initial={editRow} onSave={handleEdit} onClose={() => setEditRow(null)}  saving={saving} />}
       {deleteRow && <DeleteConfirmModal row={deleteRow} onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
-      {scopeOpen && <SyncScopeModal target="Ops Checklist" onClose={() => setScopeOpen(false)} onConfirm={scope => { setScopeOpen(false); handleSyncWithEC(scope); }} />}
 
       {/* KPIs */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:16, flexShrink:0 }}>
@@ -764,21 +742,8 @@ export default function OpsChecklist({ onRefreshed }) {
             <select className="form-input" value={statusF} onChange={e => setStatusF(e.target.value)}>
               {['All','Scheduled','Delivered','Tentative','Cancelled'].map(s => <option key={s}>{s}</option>)}
             </select>
-            <button className="btn btn-outline btn-sm" onClick={load} disabled={syncing || refreshing} title={refreshing ? 'Refreshing from Excel…' : 'Refresh'}>{refreshing ? '⟳' : '↺'}</button>
-            <button
-              className="btn btn-outline btn-sm"
-              onClick={() => setScopeOpen(true)}
-              disabled={syncing || saving}
-              title="Pull matching rows from Engagement Calendar and update / add them here"
-              style={{ color: syncing ? 'var(--muted)' : 'var(--accent)', borderColor: 'var(--accent)' }}
-            >
-              {syncing
-                ? syncProg?.total > 0
-                  ? `⏳ ${syncProg.done}/${syncProg.total}`
-                  : '⏳ Syncing…'
-                : '🔄 Sync with EC'}
-            </button>
-            {canEdit('ops') && <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)} disabled={syncing}>+ Add</button>}
+            <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing} title={refreshing ? 'Refreshing from Excel…' : 'Refresh'}>{refreshing ? '⟳' : '↺'}</button>
+            {canEdit('ops') && <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add</button>}
           </div>
 
           <div className="card" style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
