@@ -172,7 +172,7 @@ body {
 .topbar-title { font-size: 16px; font-weight: 700; color: var(--navy); letter-spacing: 0.2px; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 
-.page-content { padding: 28px 32px; flex: 1; min-height: 0; overflow-y: auto; }
+.page-content { padding: 16px 24px; flex: 1; min-height: 0; overflow-y: auto; }
 
 /* Tracker pages: fill the viewport; header/filters stay fixed, only the list scrolls */
 .tracker-page { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; }
@@ -463,3 +463,37 @@ select.form-input   { cursor: pointer; }
   .grid-2, .grid-3, .grid-sidebar { grid-template-columns: 1fr; }
   .page-content { padding: 18px 16px; }
 }
+
+/* ─── Compact tracker header (records get the screen) ─── */
+.kpi-compact { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; flex-shrink: 0; }
+.kpi-compact .kpi-card {
+  padding: 8px 14px; border-radius: 10px;
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px;
+}
+.kpi-compact .kpi-label { flex-basis: 100%; margin-bottom: 0; font-size: 10px; letter-spacing: 0.5px; }
+.kpi-compact .kpi-value { font-size: 20px; margin-bottom: 0; }
+.kpi-compact .kpi-sub   { font-size: 11px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tracker-title { margin: 0 0 8px; font-size: 17px; font-weight: 800; display: flex; align-items: baseline; gap: 10px; }
+.tracker-title small { font-size: 12px; font-weight: 500; color: var(--muted); }
+
+.fbar {
+  background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 6px 10px; margin-bottom: 10px; flex-shrink: 0;
+}
+.fbar-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fbar-toggle {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+  border-radius: 7px; border: 1px solid #cbd5e1; background: #f8fafc; color: #1a3a5c;
+  font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.fbar-toggle.open { background: #1a3a5c; border-color: #1a3a5c; color: #fff; }
+.fbar-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e8760a; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+.fbar-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 14px;
+  background: #eef2ff; color: #3730a3; font-size: 11.5px; font-weight: 600; border: 1px solid #c7d2fe; cursor: pointer; white-space: nowrap;
+}
+.fbar-clear { font-size: 11.5px; padding: 3px 10px; border: 1px solid #fca5a5; border-radius: 14px; background: #fee2e2; color: #dc2626; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.fbar-panel { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 2px 4px; margin-top: 6px; border-top: 1px dashed #e2e8f0; animation: fbarIn .15s ease; }
+.fbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+@keyframes fbarIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (max-width: 900px) { .kpi-compact { grid-template-columns: 1fr 1fr; } }

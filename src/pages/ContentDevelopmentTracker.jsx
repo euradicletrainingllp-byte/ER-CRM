@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { peekList, getContentDevTracker, addContentDevRow, updateContentDevRow, deleteContentDevRow } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import ExportButton from '../components/ExportButton.jsx';
+import { autoColumns } from '../utils/exportExcel.js';
 import { DeleteButton } from '../components/ActionButtons.jsx';
 import { LinkButton } from '../components/LinkButton.jsx';
 
@@ -513,7 +515,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
       {deleteRow && <DeleteConfirmModal row={deleteRow} onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
 
       {/* KPIs */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:16, flexShrink:0 }}>
+      <div className="kpi-compact">
         <div className="kpi-card accent"><div className="kpi-label">Total Entries</div><div className="kpi-value">{data.length}</div></div>
         <div className="kpi-card green"><div className="kpi-label">Completed</div><div className="kpi-value">{completed}</div></div>
         <div className="kpi-card blue"><div className="kpi-label">Pending</div><div className="kpi-value">{pending}</div></div>
@@ -533,6 +535,15 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
               {['All','Completed','Pending'].map(s => <option key={s}>{s}</option>)}
             </select>
             <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing} title={refreshing ? 'Refreshing from Excel…' : 'Refresh'}>{refreshing ? '⟳' : '↺'}</button>
+            <ExportButton
+              page="content-dev" filename="Content Development Tracker" sheetName="Content Dev"
+              rows={() => filtered}
+              columns={data => autoColumns(data, {
+                order: ['sno', 'engagementKey', 'client', 'topic', 'startDate', 'programType', 'poc', 'dueDate', 'completionDate'],
+                labels: { sno: 'S No', preWorkItems: 'Pre-Work', postWorkItems: 'Post-Work' },
+              })}
+              disabled={loading}
+            />
             {editable && <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add</button>}
           </div>
 

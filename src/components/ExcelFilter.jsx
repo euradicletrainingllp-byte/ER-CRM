@@ -342,3 +342,75 @@ export function ExcelFilterButtons({ state, sortable = true }) {
     </>
   );
 }
+
+/* ─── CollapsibleFilterBar — one slim toolbar; the column filters open on demand ───
+ * Closed (default): [Filters ▾ (n)] [active filter chips] [Clear] … right-side children
+ * Open: the Excel-style column filter buttons appear in a second row.
+ */
+export function CollapsibleFilterBar({ state, sortable = true, children, storageKey }) {
+  const [open, setOpen] = useState(false);
+  const { columns, filters, sort, activeFilters, clearAll } = state;
+  const active = columns.filter(c => filters[c.key]);
+  const sortCol = sort ? columns.find(c => c.key === sort.key) : null;
+
+  // Esc closes the filter row
+  useEffect(() => {
+    if (!open) return;
+    const onKey = e => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  return (
+    <div className="fbar" data-key={storageKey}>
+      <div className="fbar-row">
+        <button type="button" className={`fbar-toggle${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)}
+          title={open ? 'Hide filters' : 'Show filters'} aria-expanded={open}>
+          <span>⚲ Filters</span>
+          {activeFilters > 0 && <span className="fbar-badge">{activeFilters}</span>}
+          <span style={{ fontSize: 10 }}>{open ? '▲' : '▼'}</span>
+        </button>
+
+        {!open && active.map(c => (
+          <span key={c.key} className="fbar-chip" onClick={() => setOpen(true)} title={`Filtered: ${c.label}`}>
+            {c.label}
+            {Array.isArray(filters[c.key]) || filters[c.key] instanceof Set
+              ? <span style={{ opacity: 0.7 }}>({(filters[c.key].size ?? filters[c.key].length)})</span>
+              : null}
+          </span>
+        ))}
+        {!open && sortCol && (
+          <span className="fbar-chip" onClick={() => setOpen(true)} title="Sorted">
+            Sort: {sortCol.label} {sort.dir === 'desc' ? '↓' : '↑'}
+          </span>
+        )}
+        {(activeFilters > 0 || sort) && (
+          <button type="button" className="fbar-clear" onClick={clearAll}>✕ Clear</button>
+        )}
+
+        <div className="fbar-right">{children}</div>
+      </div>
+
+      {open && (
+        <div className="fbar-panel">
+          {columns.map(c => (
+            <ExcelFilter
+              key={c.key}
+              label={c.label}
+              options={state.filterOptions[c.key] || []}
+              universe={state.universes[c.key] || []}
+              selected={filters[c.key]}
+              onChange={next => state.setColumnFilter(c.key, next)}
+              sortDir={sortable && sort?.key === c.key ? sort.dir : null}
+              onSort={sortable ? (dir => state.setSort(dir ? { key: c.key, dir } : null)) : undefined}
+            />
+          ))}
+          <button type="button" onClick={() => setOpen(false)}
+            style={{ marginLeft: 'auto', fontSize: 12, padding: '4px 10px', border: '1px solid #cbd5e1', borderRadius: 7, background: '#fff', color: '#475569', cursor: 'pointer', fontWeight: 600 }}>
+            Done ▲
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

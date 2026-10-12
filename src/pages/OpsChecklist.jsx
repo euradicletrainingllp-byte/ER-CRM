@@ -4,6 +4,8 @@ import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { peekList, getOpsChecklist, addOpsRow, updateOpsRow, deleteOpsRow } from '../services/api.js';
 import { syncOpsFinanceToEC, OPS_FINANCE_TO_EC } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import ExportButton from '../components/ExportButton.jsx';
+import { autoColumns } from '../utils/exportExcel.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
@@ -725,7 +727,7 @@ export default function OpsChecklist({ onRefreshed }) {
       {deleteRow && <DeleteConfirmModal row={deleteRow} onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
 
       {/* KPIs */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:16, flexShrink:0 }}>
+      <div className="kpi-compact">
         <div className="kpi-card accent"><div className="kpi-label">Total Sessions</div><div className="kpi-value">{data.length}</div></div>
         <div className="kpi-card green"><div className="kpi-label">100% Ready</div><div className="kpi-value">{data.filter(r=>clScore(r)===100).length}</div></div>
         <div className="kpi-card blue"><div className="kpi-label">In Progress</div><div className="kpi-value">{data.filter(r=>{const s=clScore(r);return s>0&&s<100;}).length}</div></div>
@@ -743,6 +745,15 @@ export default function OpsChecklist({ onRefreshed }) {
               {['All','Scheduled','Delivered','Tentative','Cancelled'].map(s => <option key={s}>{s}</option>)}
             </select>
             <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing} title={refreshing ? 'Refreshing from Excel…' : 'Refresh'}>{refreshing ? '⟳' : '↺'}</button>
+            <ExportButton
+              page="ops" filename="Operations Checklist" sheetName="Ops Checklist"
+              rows={() => filtered}
+              columns={data => autoColumns(data, {
+                order: ['sno', 'egId', 'engagementKey', 'company', 'clientSpoc', 'startDate', 'endDate', 'topic'],
+                labels: { sno: 'S No', egId: 'EG ID', calendarBlock: 'Facilitator Calendar Block', calendarBlockDone: 'Calendar Block - Date of Completion' },
+              })}
+              disabled={loading}
+            />
             {canEdit('ops') && <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add</button>}
           </div>
 

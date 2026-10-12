@@ -7,8 +7,10 @@ import {
   addEngagementRow, updateEngagementRow, deleteEngagementRow, nextEngagementIndex,
 } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import ExportButton from '../components/ExportButton.jsx';
+import { autoColumns } from '../utils/exportExcel.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
-import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.jsx';
+import { useExcelFilters, CollapsibleFilterBar } from '../components/ExcelFilter.jsx';
 import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
@@ -646,9 +648,9 @@ function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan,
   return (
     <div style={{
       background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-      padding: '10px 16px', marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 10,
+      padding: '6px 12px', marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 6,
     }}>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <span style={lbl}>📅 View:</span>
         <div style={{ display: 'inline-flex', border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
           <button type="button" style={seg(viewMode === 'months')} onClick={() => onMode('months')} disabled={loading}>Months</button>
@@ -707,27 +709,8 @@ function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan,
           </>
         )}
 
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(-1)} disabled={loading}>
-            ◀ Previous {unit}
-          </button>
-          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={onToday} disabled={loading}
-                  title="Go to the current period and scroll to the next upcoming delivery">
-            ● Today
-          </button>
-          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(1)} disabled={loading}>
-            Next {unit} ▶
-          </button>
-        </div>
-      </div>
-
-      {/* Month chips — click to jump to that month in the list */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{ ...lbl, fontWeight: 600, marginRight: 4 }}>
-          {first.key === last.key ? first.label : `${first.label} – ${last.label}`}
-          {win.months.length > 1 && ` · ${win.months.length} months`}
-          {!containsToday && ' · (current month not in view)'}
-        </span>
+        {/* Month chips — click to jump to that month in the list */}
+        <span style={{ width: 1, height: 20, background: '#e2e8f0', margin: '0 2px' }} />
         {win.months.map(m => {
           const isNow = m.key === currentKey;
           return (
@@ -747,6 +730,20 @@ function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan,
             </button>
           );
         })}
+        {!containsToday && <span style={{ fontSize: 11, color: '#94a3b8' }}>(current month not in view)</span>}
+
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(-1)} disabled={loading} title={`Previous ${unit}`}>
+            ◀ Prev
+          </button>
+          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={onToday} disabled={loading}
+                  title="Go to the current period and scroll to the next upcoming delivery">
+            ● Today
+          </button>
+          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(1)} disabled={loading} title={`Next ${unit}`}>
+            Next ▶
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1149,7 +1146,7 @@ export default function EngagementCalendar({ onRefreshed }) {
       />
 
       {/* ── KPI Row ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 18 }}>
+      <div className="kpi-compact">
         <div className="kpi-card accent">
           <div className="kpi-label">Filtered Sessions</div>
           <div className="kpi-value">{rangeLoading ? '…' : filtered.length}</div>
@@ -1171,18 +1168,7 @@ export default function EngagementCalendar({ onRefreshed }) {
       </div>
 
       {/* ── Excel-style Filter Bar ── */}
-      <div style={{
-        background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-        padding: '12px 16px', marginBottom: 14,
-        display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-      }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginRight: 4 }}>
-          🔽 Filter by:
-        </span>
-
-        <ExcelFilterButtons state={filterState} />
-
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+      <CollapsibleFilterBar state={filterState}>
           {syncing && !rangeLoading && (
             <span style={{ fontSize: 11, fontWeight: 600, color: '#e8760a' }}>⟳ Syncing with Excel…</span>
           )}
@@ -1194,13 +1180,22 @@ export default function EngagementCalendar({ onRefreshed }) {
           <button className="btn btn-outline btn-sm" onClick={() => load({ force: true, keepCurrent: !rangeLoading })} disabled={syncing}>
             ↺ Refresh
           </button>
+          <ExportButton
+            page="engagement" filename={`Engagement Calendar ${rangeLabel || ''}`.trim()} sheetName="Engagements"
+            rows={() => filtered}
+            columns={data => autoColumns(data, {
+              exclude: ['locationRaw'],
+              order: ['sno', 'egId', 'engagementKey', 'company', 'startDate', 'endDate', 'topic', 'sector', 'serviceType', 'offering', 'day', 'location'],
+              labels: { sno: 'S No', egId: 'EG ID', price: 'Price (INR)', travelExpenses: 'Travel, Stay and Misc Expenses', invoice: 'Invoice', opsChecklist: 'Ops Checklist' },
+            })}
+            disabled={rangeLoading}
+          />
           {canEdit('engagement') && (
             <button className="btn btn-primary btn-sm" onClick={() => openAdd()} disabled={preparingAdd}>
               {preparingAdd ? '⏳ Preparing…' : '+ Add Engagement'}
             </button>
           )}
-        </div>
-      </div>
+      </CollapsibleFilterBar>
 
       {/* ── Column header labels ── */}
       <div style={{

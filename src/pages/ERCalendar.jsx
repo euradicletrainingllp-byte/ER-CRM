@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { LinkButton } from '../components/LinkButton.jsx';
 import { getEngagements } from '../services/api.js';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
-import { useExcelFilters, ExcelFilterButtons, FILTER_COLUMNS } from '../components/ExcelFilter.jsx';
+import { useExcelFilters, CollapsibleFilterBar, FILTER_COLUMNS } from '../components/ExcelFilter.jsx';
 
 // Year / Month are handled by the calendar's own month navigation
 const ER_FILTER_COLUMNS = FILTER_COLUMNS.filter(c => c.key !== 'year' && c.key !== 'month');
@@ -413,14 +413,14 @@ export default function ERCalendar({ onRefreshed }) {
       {selected && <SessionModal eng={selected} onClose={() => setSelected(null)} />}
 
       {/* KPI row */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:18 }}>
+      <div className="kpi-compact">
         {[
           { label:'Sessions This Month', value:thisMonthEngs.length, sub:'engagements' },
           { label:'Delivered',  value:thisMonthEngs.filter(e=>e.status==='Delivered').length,  sub:'completed' },
           { label:'Scheduled',  value:thisMonthEngs.filter(e=>e.status==='Scheduled').length,  sub:'confirmed' },
           { label:'Tentative',  value:thisMonthEngs.filter(e=>e.status==='Tentative').length,  sub:'pending' },
         ].map(({ label, value, sub }) => (
-          <div key={label} className="kpi-card accent" style={{ padding:'14px 18px' }}>
+          <div key={label} className="kpi-card accent">
             <div className="kpi-label">{label}</div>
             <div className="kpi-value">{value}</div>
             <div className="kpi-sub">{sub}</div>
@@ -429,16 +429,16 @@ export default function ERCalendar({ onRefreshed }) {
       </div>
 
       {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:12, flexWrap:'wrap' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8, flexWrap:'wrap' }}>
         {['‹','›'].map((ch, i) => (
           <button key={ch} onClick={i===0 ? prevMonth : nextMonth} style={{
-            width:34, height:34, borderRadius:8, border:'1px solid #e2e8f0',
+            width:30, height:30, borderRadius:8, border:'1px solid #e2e8f0',
             background:'#fff', cursor:'pointer', fontSize:18, display:'flex',
             alignItems:'center', justifyContent:'center', color:'#1a3a5c', fontWeight:700,
           }}>{ch}</button>
         ))}
         <div style={{ flex:1 }}>
-          <span style={{ fontSize:20, fontWeight:800, color:'#1a3a5c' }}>
+          <span style={{ fontSize:17, fontWeight:800, color:'#1a3a5c' }}>
             {MONTH_NAMES[month]} {year}
           </span>
           <span style={{ fontSize:12, color:'#94a3b8', marginLeft:10 }}>
@@ -453,19 +453,13 @@ export default function ERCalendar({ onRefreshed }) {
       </div>
 
       {/* Excel-style Filter Bar */}
-      <div style={{
-        background:'#fff', border:'1px solid #e2e8f0', borderRadius:10,
-        padding:'12px 16px', marginBottom:14,
-        display:'flex', flexWrap:'wrap', gap:8, alignItems:'center',
-      }}>
-        <span style={{ fontSize:12, fontWeight:700, color:'#64748b', marginRight:4 }}>🔽 Filter by:</span>
-        <ExcelFilterButtons state={filterState} sortable={false} />
+      <CollapsibleFilterBar state={filterState} sortable={false}>
         {filterState.activeFilters > 0 && (
-          <span style={{ marginLeft:'auto', fontSize:12, color:'#64748b' }}>
+          <span style={{ fontSize:12, color:'#64748b' }}>
             Showing <strong>{shown.length}</strong> of {data.length} engagements
           </span>
         )}
-      </div>
+      </CollapsibleFilterBar>
 
       {/* Legends */}
       <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:14 }}>

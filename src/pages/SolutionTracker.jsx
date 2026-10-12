@@ -9,16 +9,91 @@ import {
 import { usePermissions } from '../hooks/usePermissions.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { Trash2 } from 'lucide-react';
-import { useExcelFilters, ExcelFilterButtons } from '../components/ExcelFilter.jsx';
+import { useExcelFilters, CollapsibleFilterBar } from '../components/ExcelFilter.jsx';
 import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
 import ChecklistPicker, { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
+import ExportButton from '../components/ExportButton.jsx';
 
 // A Won proposal must carry the Operations checklist ticked by the BD person
 const needsChecklist = r => r?.bdStatus === 'Won' && parseChecklist(r.opsChecklist).length === 0;
 // Proposal link for a solution item: its own link, else any link saved under the same Proposal ID
 const proposalLinkFor = (rows, pid, own) =>
   own || (rows.find(x => x.proposalId === pid && String(x.proposalV1Link || '').trim()) || {}).proposalV1Link || '';
+
+// ── Proposal versions (V1, V2 …) ─────────────────────────────────────────────
+// Each revised version of a proposal is its own Excel row with the same Proposal ID.
+const versionNo = v => { const m = String(v ?? '').match(/(\d+)/); return m ? Number(m[1]) : 1; };
+// The row that represents the latest version of a proposal (prefers the BD anchor row of that version)
+function latestRowFor(rows, pid) {
+  let best = null, bestI = -1;
+  rows.forEach((r, i) => {
+    if (r.proposalId !== pid) return;
+    if (!best) { best = r; bestI = i; return; }
+    const a = versionNo(r.proposalVersion), b = versionNo(best.proposalVersion);
+    if (a > b || (a === b && !best.bdSNo && r.bdSNo)) { best = r; bestI = i; }
+  });
+  return best;
+}
+// One row per version of a proposal, oldest first
+function versionsFor(rows, pid) {
+  const byV = new Map();
+  rows.filter(r => r.proposalId === pid).forEach(r => {
+    const k = versionNo(r.proposalVersion);
+    const prev = byV.get(k);
+    if (!prev || (!prev.bdSNo && r.bdSNo)) byV.set(k, r);
+  });
+  return [...byV.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]);
+}
+// Next version label for a proposal: highest existing version + 1 (keeps the "V" style)
+function nextVersionLabel(rows, pid, current) {
+  const nums = rows.filter(r => r.proposalId === pid).map(r => versionNo(r.proposalVersion));
+  const n = Math.max(versionNo(current), ...nums, 0) + 1;
+  return /^\s*\d+\s*$/.test(String(current || '')) ? String(n) : `V${n}`;
+}
+// Solution-item fields — never copied onto a revised BD version row
+const SOL_FIELDS = ['solutionTopic', 'solutionMonth', 'programType', 'engagementType', 'lineOfService',
+  'typeOfService', 'developmentCategory', 'solutionValue', 'status', 'remarks', 'proposalV1Link'];
+
+// ── Excel export columns ──────────────────────────────────────────────────────
+const BD_EXPORT_COLUMNS = [
+  { label: 'BD S No',              get: r => r.bdSNo || r.sno },
+  { label: 'Proposal ID',          get: r => r.proposalId },
+  { label: 'Proposal Version',     get: r => r.proposalVersion },
+  { label: 'Client Name',          get: r => r.clientName },
+  { label: 'Client POC',           get: r => r.clientPoc },
+  { label: 'Contact Number',       get: r => r.contactNumber },
+  { label: 'Date of Discussion',   get: r => r.dateOfDiscussion },
+  { label: 'Client Expected Date', get: r => r.clientExpectedDate },
+  { label: 'BD Month',             get: r => r.bdMonth },
+  { label: 'Program Topic',        get: r => r.programTopic },
+  { label: 'BD Status',            get: r => r.bdStatus },
+  { label: 'BD Proposal Value',    get: r => (toNum(r.bdProposalValue) || r.bdProposalValue || '') },
+  { label: 'Date of Submission to Client', get: r => r.submissionToClient },
+  { label: 'Ops Checklist',        get: r => parseChecklist(r.opsChecklist).join(', ') },
+];
+const SOL_EXPORT_COLUMNS = [
+  { label: 'Proposal ID',          get: r => r.proposalId },
+  { label: 'Proposal Version',     get: r => r.proposalVersion },
+  { label: 'Client Name',          get: r => r.clientName },
+  { label: 'Program Topic',        get: r => r.programTopic },
+  { label: 'BD Status',            get: r => r.bdStatus },
+  { label: 'BD Proposal Value',    get: r => (toNum(r.bdProposalValue) || r.bdProposalValue || '') },
+  { label: 'Sol S No',             get: r => r.solSNo },
+  { label: 'Solution Month',       get: r => r.solutionMonth },
+  { label: 'Solution Topic',       get: r => r.solutionTopic },
+  { label: 'Program Type',         get: r => r.programType },
+  { label: 'Engagement Type',      get: r => r.engagementType },
+  { label: 'Line of Service',      get: r => r.lineOfService },
+  { label: 'Type of Service',      get: r => r.typeOfService },
+  { label: 'Development Category', get: r => r.developmentCategory },
+  { label: 'Solution Value',       get: r => (toNum(r.solutionValue) || r.solutionValue || '') },
+  { label: 'Status',               get: r => r.status },
+  { label: 'Remarks',              get: r => r.remarks },
+  { label: 'Proposal Link',        get: r => r.proposalV1Link },
+  { label: 'Date of Submission by Sol team', get: r => r.submissionBySolTeam },
+  { label: 'Date of Submission to Client',   get: r => r.submissionToClient },
+];
 
 // ── Excel-style filter columns (same behaviour as the Engagement Calendar) ────
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -187,8 +262,10 @@ function generateNextPid(existingPids) {
 }
 
 // ── BD Modal ──────────────────────────────────────────────────────────────────
-function BDModal({ initial, onSave, onClose, saving, bdRows }) {
+function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
   const isEdit = !!initial?.sno;
+  // Revised mode: the edit form turns into "add next version" with every value copied
+  const [revision, setRevision] = useState(false);
 
   // Compute existing PIDs and auto-generated next PID (add mode only)
   const existingPids = isEdit
@@ -206,6 +283,18 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
   const [pidSelect, setPidSelect] = useState('__new__');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const nextVersion = isEdit ? nextVersionLabel(allRows || [], initial.proposalId, initial.proposalVersion) : '';
+
+  function startRevision() {
+    // Copy every value of the current version; the user edits what changed before saving
+    setForm({ ...initial, proposalVersion: nextVersion, _revision: true, _revisedFrom: initial.proposalVersion || 'V1' });
+    setRevision(true);
+  }
+  function cancelRevision() {
+    setForm({ ...initial });
+    setRevision(false);
+  }
+
   const checklistMissing = needsChecklist(form);
   const blocked = saving || !form.proposalId.trim() || !form.clientName.trim() || checklistMissing;
 
@@ -224,15 +313,24 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
       <div style={{ background: 'var(--card)', borderRadius: 12, padding: 28, width: '100%', maxWidth: 680, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>{isEdit ? 'Edit BD Entry' : 'Add BD Entry'}</h2>
+          <h2 style={{ margin: 0, fontSize: 18 }}>
+            {revision ? `Add Revised Version — ${form.proposalVersion || nextVersion}` : isEdit ? 'Edit BD Entry' : 'Add BD Entry'}
+          </h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--muted)' }}>✕</button>
         </div>
+        {revision && (
+          <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: '#eef2ff', border: '1px solid #c7d2fe', fontSize: 12.5, color: '#3730a3', lineHeight: 1.5 }}>
+            <strong>Revising {form.proposalId}: {form._revisedFrom} → {form.proposalVersion || nextVersion}</strong><br />
+            All values are copied from {form._revisedFrom}. Update anything that changed (value, dates, topic …) and click <strong>Save Revised Version</strong>.
+            {' '}{form._revisedFrom} stays in the tracker as history.
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
 
           {/* ── Proposal ID — smart dropdown in add mode, plain text in edit ── */}
           {isEdit ? (
             <Field label="Proposal ID *" half>
-              <input style={inp} value={form.proposalId} onChange={e => set('proposalId', e.target.value)} placeholder="e.g. P ID 001" />
+              <input style={{ ...inp, ...(revision ? { background: 'var(--border)', cursor: 'not-allowed' } : {}) }} value={form.proposalId} readOnly={revision} title={revision ? 'A revised version keeps the same Proposal ID' : undefined} onChange={e => set('proposalId', e.target.value)} placeholder="e.g. P ID 001" />
             </Field>
           ) : (
             <Field label="Proposal ID *" half>
@@ -317,8 +415,8 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
             />
           </Field>
           <Field label="Program Topic" half><input style={inp} value={form.programTopic} onChange={e => set('programTopic', e.target.value)} /></Field>
-          <Field label="Proposal Version" half>
-            <input style={inp} value={form.proposalVersion} onChange={e => set('proposalVersion', e.target.value)} placeholder="V1" />
+          <Field label={revision ? 'Proposal Version (new)' : 'Proposal Version'} half>
+            <input style={{ ...inp, ...(revision ? { borderColor: '#6366f1', fontWeight: 700 } : {}) }} value={form.proposalVersion} onChange={e => set('proposalVersion', e.target.value)} placeholder="V1" />
           </Field>
           <Field label="BD Status" half>
             <select style={inp} value={form.bdStatus} onChange={e => set('bdStatus', e.target.value)}>
@@ -338,10 +436,31 @@ function BDModal({ initial, onSave, onClose, saving, bdRows }) {
             </Field>
           )}
         </div>
+
+        {/* ── Revised — last option in the edit form: add the next version of this proposal ── */}
+        {isEdit && (
+          <div style={{ marginTop: 20, padding: '12px 14px', borderRadius: 8, border: '1px dashed #6366f1', background: revision ? '#eef2ff' : 'transparent', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--muted)' }}>
+              {revision
+                ? <>Saving will add <strong style={{ color: 'var(--text)' }}>{form.proposalVersion || nextVersion}</strong> as a new version. {form._revisedFrom} is not changed.</>
+                : <>Client asked for changes? Add the next version (<strong style={{ color: 'var(--text)' }}>{nextVersion}</strong>) with all values copied from {initial.proposalVersion || 'V1'} — edit them before saving.</>}
+            </div>
+            {revision ? (
+              <button type="button" onClick={cancelRevision} disabled={saving} style={{ padding: '7px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', fontWeight: 600, fontSize: 12.5 }}>
+                ↩ Back to edit {initial.proposalVersion || 'V1'}
+              </button>
+            ) : (
+              <button type="button" onClick={startRevision} disabled={saving} style={{ padding: '7px 16px', borderRadius: 6, border: 'none', background: '#6366f1', color: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 12.5, whiteSpace: 'nowrap' }}>
+                ⟳ Revised
+              </button>
+            )}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
           <button onClick={onClose} disabled={saving} style={{ padding: '8px 18px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}>Cancel</button>
-          <button onClick={() => onSave(form)} disabled={blocked} style={{ padding: '8px 22px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', fontWeight: 700, cursor: blocked ? 'not-allowed' : 'pointer', opacity: blocked ? 0.5 : 1 }}>
-            {saving ? 'Saving…' : 'Save'}
+          <button onClick={() => onSave(form)} disabled={blocked || (revision && !String(form.proposalVersion || '').trim())} style={{ padding: '8px 22px', borderRadius: 6, border: 'none', background: revision ? '#6366f1' : 'var(--accent)', color: '#fff', fontWeight: 700, cursor: blocked ? 'not-allowed' : 'pointer', opacity: blocked ? 0.5 : 1 }}>
+            {saving ? 'Saving…' : revision ? `Save Revised Version (${form.proposalVersion || nextVersion})` : 'Save'}
           </button>
         </div>
         {(!form.proposalId.trim() || !form.clientName.trim()) && (
@@ -533,6 +652,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
 
   // ── Derived data ──────────────────────────────────────────────────────────
   // One BD anchor row per unique Proposal ID
+  // (latest version wins — older versions are kept in _versions as history)
   const allBdRows = useMemo(() => {
     const seen = new Set();
     return rows
@@ -543,7 +663,14 @@ export default function SolutionTracker({ onRefreshed, view }) {
         seen.add(k);
         return true;
       })
-      .map(r => ({ ...r, _sols: rows.filter(x => x.proposalId === r.proposalId && x.solutionTopic) }));
+      .map(first => {
+        const r = latestRowFor(rows, first.proposalId) || first;
+        return {
+          ...r,
+          _sols: rows.filter(x => x.proposalId === r.proposalId && x.solutionTopic),
+          _versions: versionsFor(rows, r.proposalId),
+        };
+      });
   }, [rows]);
 
   // Excel-style column filters + sorting (shared with Engagement Calendar)
@@ -586,15 +713,16 @@ export default function SolutionTracker({ onRefreshed, view }) {
     const otherRows = rows.filter(
       r => r.proposalId === form.proposalId && String(r.sno) !== String(skipSno)
     );
+    const sameVersion = r => versionNo(r.proposalVersion) === versionNo(form.proposalVersion);
     const changed = otherRows.filter(r =>
-      (form.submissionToClient && r.submissionToClient !== form.submissionToClient) ||
+      (form.submissionToClient && sameVersion(r) && r.submissionToClient !== form.submissionToClient) ||
       (form.bdStatus && r.bdStatus !== form.bdStatus) ||
       (form.bdStatus && r.solutionTopic && r.status !== form.bdStatus) ||
       (form.opsChecklist && r.opsChecklist !== form.opsChecklist)
     );
     await Promise.all(changed.map(r => updateSolutionRow(r.sno, {
       ...r,
-      ...(form.submissionToClient ? { submissionToClient: form.submissionToClient } : {}),
+      ...(form.submissionToClient && sameVersion(r) ? { submissionToClient: form.submissionToClient } : {}),
       ...(form.bdStatus ? { bdStatus: form.bdStatus } : {}),
       ...(form.bdStatus && r.solutionTopic ? { status: form.bdStatus } : {}),
       ...(form.opsChecklist ? { opsChecklist: form.opsChecklist } : {}),
@@ -603,8 +731,25 @@ export default function SolutionTracker({ onRefreshed, view }) {
 
   async function handleSaveBD(form) {
     if (needsChecklist(form)) { alert('Please tick the Operations Checklist for this Won proposal.'); return; }
+    if (form._revision) {
+      const v = String(form.proposalVersion || '').trim();
+      if (rows.some(r => r.proposalId === form.proposalId && versionNo(r.proposalVersion) === versionNo(v))) {
+        alert(`${form.proposalId} already has version ${v}. Choose a new version number.`);
+        return;
+      }
+    }
     setSaving(true);
     try {
+      if (form._revision) {
+        // ── Revised version: a new row with the same Proposal ID, next version ──
+        const payload = { ...form, sno: '', bdSNo: '', solSNo: '' };
+        SOL_FIELDS.forEach(k => { payload[k] = ''; });
+        delete payload._revision; delete payload._revisedFrom; delete payload._sols; delete payload._versions;
+        await addSolutionRow(payload);
+        // Status / checklist apply to the whole proposal — keep every row in step
+        await propagateBdFields({ ...payload, submissionToClient: '' }, null);
+        setExpanded(prev => new Set(prev).add(form.proposalId));
+      } else
       // Use != null so sno=0 is treated as a valid row key (truthy check would fail for 0)
       if (form.sno != null && form.sno !== '') {
         // ── Edit existing BD anchor row ──────────────────────────────────────
@@ -639,11 +784,11 @@ export default function SolutionTracker({ onRefreshed, view }) {
       let payload = { ...form };
 
       // Solution status always follows the proposal's BD Status
-      const bdAnchor = rows.find(r => r.proposalId === form.proposalId);
+      const bdAnchor = latestRowFor(rows, form.proposalId);
       if (bdAnchor?.bdStatus) payload.status = bdAnchor.bdStatus;
 
       if (!form.sno && form.proposalId) {
-        const anchor = rows.find(r => r.proposalId === form.proposalId);
+        const anchor = latestRowFor(rows, form.proposalId);
         if (anchor) {
           payload = {
             ...payload,
@@ -733,17 +878,13 @@ export default function SolutionTracker({ onRefreshed, view }) {
     <div className="tracker-page" style={{ maxWidth: 1400, margin: '0 auto', width: '100%' }}>
       {/* ── Fixed header: title, KPIs, filter bar ── */}
       <div className="tracker-fixed">
-        <div style={{ marginBottom: 14 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>
-            {view === 'bd' ? '🎯 BD Tracker' : '💡 Solution Tracker'}
-          </h1>
-          <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: 13 }}>
-            BD pipeline with linked solution items — click a row to expand
-          </p>
-        </div>
+        <h1 className="tracker-title">
+          {view === 'bd' ? '🎯 BD Tracker' : '💡 Solution Tracker'}
+          <small>click a row to expand</small>
+        </h1>
 
         {/* KPI Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 14 }}>
+        <div className="kpi-compact">
           <div className="kpi-card accent">
             <div className="kpi-label">Filtered Proposals</div>
             <div className="kpi-value">{loading ? '…' : kpi.total}</div>
@@ -775,18 +916,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
         </div>
 
         {/* Excel-style Filter Bar */}
-        <div style={{
-          background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-          padding: '12px 16px', marginBottom: 14,
-          display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-        }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#64748b', marginRight: 4 }}>
-            🔽 Filter by:
-          </span>
-
-          <ExcelFilterButtons state={filterState} />
-
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <CollapsibleFilterBar state={filterState}>
             {refreshing && !loading && (
               <span style={{ fontSize: 11, fontWeight: 600, color: '#e8760a' }}>⟳ Syncing with Excel…</span>
             )}
@@ -799,13 +929,31 @@ export default function SolutionTracker({ onRefreshed, view }) {
             <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing}>
               ↺ Refresh
             </button>
+            {view === 'bd' ? (
+              <ExportButton
+                page="bd" filename="BD Tracker" sheetName="BD Tracker"
+                columns={BD_EXPORT_COLUMNS}
+                // every version of each proposal shown, oldest first
+                rows={() => bdRows.flatMap(r => (r._versions && r._versions.length ? r._versions : [r]))}
+                disabled={loading}
+              />
+            ) : (
+              <ExportButton
+                page="solution" filename="Solution Tracker" sheetName="Solution Tracker"
+                columns={SOL_EXPORT_COLUMNS}
+                // one line per solution item (proposals without items get one line)
+                rows={() => bdRows.flatMap(r => (r._sols && r._sols.length
+                  ? r._sols.map(s => ({ ...s, bdStatus: r.bdStatus, bdProposalValue: r.bdProposalValue, proposalVersion: r.proposalVersion, submissionToClient: r.submissionToClient }))
+                  : [r]))}
+                disabled={loading}
+              />
+            )}
             {view === 'bd' && canCreate('bd') && (
               <button className="btn btn-primary btn-sm" onClick={() => setBdModal('add')} style={{ whiteSpace: 'nowrap' }}>
                 + Add BD Lead
               </button>
             )}
-          </div>
-        </div>
+        </CollapsibleFilterBar>
       </div>
 
       {/* Main Card */}
@@ -951,6 +1099,37 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Proposal Link</div>
                                     <div>{proposalLinkFor(rows, r.proposalId, r.proposalV1Link) ? <LinkButton url={proposalLinkFor(rows, r.proposalId, r.proposalV1Link)} label="Open proposal" compact /> : '—'}</div>
                                   </div>
+                                  {(r._versions || []).length > 1 && (
+                                    <div style={{ gridColumn: '1 / -1' }}>
+                                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Version History</div>
+                                      <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 420 }}>
+                                        <thead>
+                                          <tr>
+                                            {['Version', 'Proposal Value', 'Date of Discussion', 'Submitted to Client', 'Program Topic'].map(h => (
+                                              <th key={h} style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontSize: 10, fontWeight: 700, color: 'var(--muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {r._versions.map(v => {
+                                            const isLatest = v === r._versions[r._versions.length - 1];
+                                            return (
+                                              <tr key={`v-${v.sno}`} style={{ fontWeight: isLatest ? 700 : 400 }}>
+                                                <td style={{ padding: '4px 12px 4px 0' }}>
+                                                  {v.proposalVersion || 'V1'}
+                                                  {isLatest && <span style={{ marginLeft: 6, fontSize: 10, color: '#4f46e5', background: '#eef2ff', borderRadius: 8, padding: '1px 6px' }}>latest</span>}
+                                                </td>
+                                                <td style={{ padding: '4px 12px 4px 0' }}>{v.bdProposalValue ? `₹${v.bdProposalValue}` : '—'}</td>
+                                                <td style={{ padding: '4px 12px 4px 0' }}>{v.dateOfDiscussion || '—'}</td>
+                                                <td style={{ padding: '4px 12px 4px 0' }}>{v.submissionToClient || '—'}</td>
+                                                <td style={{ padding: '4px 12px 4px 0', fontWeight: 400 }}>{v.programTopic || '—'}</td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
                                   {r.bdStatus === 'Won' && (
                                     <div style={{ gridColumn: '1 / -1' }}>
                                       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Operations Checklist</div>
@@ -1064,6 +1243,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
           onClose={() => setBdModal(null)}
           saving={saving}
           bdRows={bdRows}
+          allRows={rows}
         />
       )}
 
