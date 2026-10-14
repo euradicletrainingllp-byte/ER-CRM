@@ -7,6 +7,7 @@ const NAV = [
   { path: '/solution',    page: 'solution',   icon: '💡', label: 'Solution Tracker'    },
   { path: '/engagement',  page: 'engagement', icon: '📅', label: 'Engagement Calendar' },
   { path: '/ops',         page: 'ops',        icon: '✔',  label: 'Ops Checklist'       },
+  { path: '/finance',     page: 'finance',    icon: '💰', label: 'Finance Tracker'     },
   { path: '/content-dev', page: 'content-dev',icon: '📘', label: 'Content Dev Tracker' },
   { path: '/er-calendar',  page: 'engagement',  icon: '🗓️', label: 'ER Calendar'         },
 ];

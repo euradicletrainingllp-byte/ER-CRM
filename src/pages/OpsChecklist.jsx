@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
-import { peekList, getOpsChecklist, addOpsRow, updateOpsRow, deleteOpsRow } from '../services/api.js';
-import { syncOpsFinanceToEC, OPS_FINANCE_TO_EC } from '../services/syncWithEC.js';
+import { peekList, getOpsChecklist, addOpsRow, updateOpsRow, deleteOpsRow, peekAllEngagements, getAllEngagementsCached } from '../services/api.js';
+import { syncOpsFinanceToEC, OPS_FINANCE_TO_EC, ecMatchesOps } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
 import ExportButton from '../components/ExportButton.jsx';
 import { autoColumns } from '../utils/exportExcel.js';
@@ -263,14 +263,6 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
   const [editingDone, setEditingDone] = useState(null);
   // Item waiting for a completion date before 'Yes' is saved
   const [pendingYes, setPendingYes]   = useState(null);
-  const [invForm, setInvForm] = useState({
-    invoiceGenerated:  row.invoiceGenerated  || '',
-    invoicePoc:        row.invoicePoc        || '',
-    invoiceActualDate: toInputDate(row.invoiceActualDate) || '',
-    invoiceComment:    row.invoiceComment    || '',
-    paymentReceived:   row.paymentReceived   || '',
-    paymentActualDate: toInputDate(row.paymentActualDate) || '',
-  });
 
   const startDate = toInputDate(row.startDate);
   const endDate   = toInputDate(row.endDate);
@@ -281,6 +273,22 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
   const bdKeys = new Set(parseChecklist(row.bdChecklist));
   const bdOpen = CL_ITEMS.filter(it => bdKeys.has(it.key) && !['Yes','NA'].includes(row[it.key] ?? '')).length;
   const payDue = row.invoiceActualDate ? addDays(toInputDate(row.invoiceActualDate), 30) : null;
+
+  // Travel, Stay & Misc / GST live in the Engagement Calendar — shown read-only on the Finance tab
+  const findEc = rows => (rows || []).find(e => String(e.engagementKey ?? '').trim() === String(row.engagementKey ?? '').trim() && ecMatchesOps(e, row)) || null;
+  const [ec, setEc] = useState(() => findEc(peekAllEngagements()));
+  const [ecState, setEcState] = useState(() => (peekAllEngagements() ? 'ready' : 'idle'));
+  useEffect(() => {
+    if (tab !== 'finance' || ecState === 'loading') return;
+    let alive = true;
+    setEcState(s => (s === 'ready' ? s : 'loading'));
+    getAllEngagementsCached()
+      .then(rows => { if (alive) { setEc(findEc(rows)); setEcState('ready'); } })
+      .catch(() => { if (alive) setEcState(s => (s === 'ready' ? s : 'error')); });
+    return () => { alive = false; };
+  }, [tab, row.engagementKey]);
+  const inr = v => (v || v === 0) && v !== '' ? '₹ ' + Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : '';
+  const ecTotal = ec ? (Number(ec.price) || 0) + (Number(ec.travelExpenses) || 0) + (Number(ec.gst) || 0) : 0;
 
   return (
     <div className="card" style={{ height:'100%', display:'flex', flexDirection:'column' }}>
@@ -528,75 +536,53 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
           </div>
         )}
 
-        {/* ── Finance Tab ── */}
+        {/* ── Finance Tab (read-only — edited in the Finance Tracker) ── */}
         {tab === 'finance' && (
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px 24px', fontSize:13 }}>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Invoice Status</div>
-              {canEdit ? (
-                <select className="form-input" style={{ fontSize:12 }} value={invForm.invoiceGenerated}
-                  onChange={e => { const v=e.target.value; setInvForm(f=>({...f,invoiceGenerated:v})); onUpdate(row,{invoiceGenerated:v}); }}>
-                  {['','Raised','Not Raised'].map(v => <option key={v} value={v}>{v||'— select —'}</option>)}
-                  {/* keep an older value (e.g. Yes/No/NA) visible until it is changed */}
-                  {invForm.invoiceGenerated && !['Raised','Not Raised'].includes(invForm.invoiceGenerated) && (
-                    <option value={invForm.invoiceGenerated}>{invForm.invoiceGenerated} (old value)</option>
-                  )}
-                </select>
-              ) : <div style={{ fontWeight:500 }}>{row.invoiceGenerated||'—'}</div>}
+          <>
+            <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', marginBottom:12, fontSize:12, color:'#1e3a8a' }}>
+              🔒 View only — invoice and payment details are updated by the finance team in the <strong>Finance Tracker</strong>.
             </div>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Invoice POC</div>
-              {canEdit ? (
-                <input className="form-input" style={{ fontSize:12 }} value={invForm.invoicePoc}
-                  onChange={e => setInvForm(f=>({...f,invoicePoc:e.target.value}))}
-                  onBlur={e => onUpdate(row,{invoicePoc:e.target.value})} />
-              ) : <div style={{ fontWeight:500 }}>{row.invoicePoc||'—'}</div>}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 24px', fontSize:13 }}>
+              {[
+                ['Invoice Status', row.invoiceGenerated],
+                ['Invoice POC', row.invoicePoc],
+                ['Invoice Due Date (TAT)', fmtDate(invDue), dueDateColor(invDue)],
+                ['Actual Invoice Date', row.invoiceActualDate ? fmtDate(row.invoiceActualDate) : ''],
+                ['Payment Due Date (TAT)', payDue ? fmtDate(payDue) : 'Set invoice date first', payDue ? dueDateColor(payDue) : undefined],
+                ['Payment Received', row.paymentReceived],
+                ['Actual Payout Date', row.paymentActualDate ? fmtDate(row.paymentActualDate) : ''],
+              ].map(([label, val, color]) => (
+                <div key={label}>
+                  <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>{label}</div>
+                  <div style={{ fontWeight:500, color }}>{val || '—'}</div>
+                </div>
+              ))}
+              <div style={{ gridColumn:'1 / -1' }}>
+                <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Invoice Comments</div>
+                <div style={{ fontWeight:500, fontStyle:row.invoiceComment?'italic':'normal', color:row.invoiceComment?'inherit':'var(--muted)' }}>{row.invoiceComment||'—'}</div>
+              </div>
+              <div style={{ gridColumn:'1 / -1', fontSize:11, fontWeight:800, letterSpacing:0.5, textTransform:'uppercase', color:'var(--primary)', borderBottom:'1px solid var(--border)', paddingBottom:4, marginTop:4 }}>
+                Commercials
+              </div>
+              {ec ? [
+                ['Price (INR)', ec.price ? inr(ec.price) : ''],
+                ['Travel, Stay & Misc', ec.travelExpenses ? inr(ec.travelExpenses) : ''],
+                ['GST', ec.gst ? inr(ec.gst) : ''],
+                ['Total', ecTotal ? inr(ecTotal) : ''],
+              ].map(([label, val]) => (
+                <div key={label}>
+                  <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>{label}</div>
+                  <div style={{ fontWeight: label === 'Total' ? 700 : 500 }}>{val || '—'}</div>
+                </div>
+              )) : (
+                <div style={{ gridColumn:'1 / -1', fontSize:12, color:'var(--muted)' }}>
+                  {ecState === 'error' ? '⚠ Could not load the Engagement Calendar.'
+                    : ecState === 'ready' ? 'No matching Engagement Calendar row for this Index.'
+                    : '⏳ Loading from the Engagement Calendar…'}
+                </div>
+              )}
             </div>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Invoice Due Date (TAT)</div>
-              <div style={{ fontWeight:500, color:dueDateColor(invDue) }}>{fmtDate(invDue)}</div>
-            </div>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Actual Invoice Date</div>
-              {canEdit ? (
-                <input type="date" className="form-input" style={{ fontSize:12 }} value={invForm.invoiceActualDate}
-                  onChange={e => setInvForm(f=>({...f,invoiceActualDate:e.target.value}))}
-                  onBlur={e => onUpdate(row,{invoiceActualDate:e.target.value})} />
-              ) : <div style={{ fontWeight:500 }}>{fmtDate(row.invoiceActualDate)||'—'}</div>}
-            </div>
-            <div style={{ gridColumn:'1 / -1' }}>
-              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Invoice Comments</div>
-              {canEdit ? (
-                <textarea className="form-input" style={{ fontSize:12, resize:'vertical', minHeight:48 }}
-                  value={invForm.invoiceComment}
-                  onChange={e => setInvForm(f=>({...f,invoiceComment:e.target.value}))}
-                  onBlur={e => onUpdate(row,{invoiceComment:e.target.value})}
-                  placeholder="Add invoice notes…"
-                />
-              ) : <div style={{ fontWeight:500, fontStyle:row.invoiceComment?'italic':'normal', color:row.invoiceComment?'inherit':'var(--muted)' }}>{row.invoiceComment||'—'}</div>}
-            </div>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Payment Due Date (TAT)</div>
-              <div style={{ fontWeight:500, color:dueDateColor(payDue) }}>{fmtDate(payDue)||'Set invoice date first'}</div>
-            </div>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Payment Received</div>
-              {canEdit ? (
-                <select className="form-input" style={{ fontSize:12 }} value={invForm.paymentReceived}
-                  onChange={e => { const v=e.target.value; setInvForm(f=>({...f,paymentReceived:v})); onUpdate(row,{paymentReceived:v}); }}>
-                  {['','Yes','No','NA'].map(v => <option key={v} value={v}>{v||'— select —'}</option>)}
-                </select>
-              ) : <div style={{ fontWeight:500 }}>{row.paymentReceived||'—'}</div>}
-            </div>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Actual Payout Date</div>
-              {canEdit ? (
-                <input type="date" className="form-input" style={{ fontSize:12 }} value={invForm.paymentActualDate}
-                  onChange={e => setInvForm(f=>({...f,paymentActualDate:e.target.value}))}
-                  onBlur={e => onUpdate(row,{paymentActualDate:e.target.value})} />
-              ) : <div style={{ fontWeight:500 }}>{fmtDate(row.paymentActualDate)||'—'}</div>}
-            </div>
-          </div>
+          </>
         )}
       </div>
     </div>
@@ -814,7 +800,7 @@ export default function OpsChecklist({ onRefreshed }) {
         {/* RIGHT — detail panel */}
         <div style={{ height:'100%', overflowY:'auto' }}>
           {sel
-            ? <ChecklistPanel row={sel} canEdit={canEdit('ops')} onUpdate={handleUpdate} saving={saving} />
+            ? <ChecklistPanel key={sel.engagementKey || sel.sno} row={sel} canEdit={canEdit('ops')} onUpdate={handleUpdate} saving={saving} />
             : (
               <div className="card" style={{ textAlign:'center', padding:'60px 20px', color:'var(--muted)' }}>
                 <div style={{ fontSize:40, marginBottom:12 }}>👈</div>

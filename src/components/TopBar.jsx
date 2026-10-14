@@ -6,6 +6,7 @@ const TITLES = {
   '/bd':         'BD Pipeline',
   '/engagement': 'Engagement Calendar',
   '/ops':        'Operations Checklist',
+  '/finance':    'Finance Tracker',
 };
 
 export default function TopBar({ path, lastRefreshed, onRefresh, loading }) {

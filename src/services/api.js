@@ -147,6 +147,15 @@ async function callFlowRaw(flowKey, body = {}) {
 
   if (!response.ok) {
     const text = await response.text();
+    // 502 = the flow ran but one of its steps (usually an Excel step) failed.
+    // Power Automate's own text is vague, so say where to look.
+    if (response.status === 502) {
+      let detail = '';
+      try { detail = JSON.parse(text)?.error?.message || ''; } catch { detail = text.slice(0, 200); }
+      throw new Error(`Power Automate flow ${flowKey} failed inside one of its steps (502, action "${body?.action || '?'}")` +
+        (detail ? ` — ${detail}` : '') +
+        `. Open the flow in Power Automate → Run history → the failed run to see which Excel step broke.`);
+    }
     throw new Error(`Flow ${flowKey} failed (${response.status}): ${text}`);
   }
 
@@ -155,6 +164,20 @@ async function callFlowRaw(flowKey, body = {}) {
     return { success: true };
   }
   return response.json();
+}
+
+// Power Automate encodes some characters in Excel headers, e.g. '.' → '_x002e_'
+// ('Actual Gen. Date' arrives as 'Actual Gen_x002e_ Date'). Add the decoded
+// name next to every encoded one so lookups by the real header always work.
+function withDecodedKeys(r) {
+  if (!r || typeof r !== 'object') return r;
+  const out = { ...r };
+  for (const k of Object.keys(r)) {
+    if (!/_x[0-9a-f]{4}_/i.test(k)) continue;
+    const dec = k.replace(/_x([0-9a-f]{4})_/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    if (!(dec in out)) out[dec] = r[k];
+  }
+  return out;
 }
 
 // Helper: get a field trying multiple key variants (PA renames special chars)
@@ -310,9 +333,9 @@ async function callEngagementFlow(action, payload = {}) {
 
 export async function getEngagements(filters = {}) {
   const data = await callEngagementFlow('get', filters);
-  const rows = Array.isArray(data?.value) ? data.value
+  const rows = (Array.isArray(data?.value) ? data.value
              : Array.isArray(data)        ? data
-             : [];
+             : []).map(withDecodedKeys);
 
   return rows.map((r, i) => {
     // PA renames columns — try every known variant (column is now 'EG ID' with a space)
@@ -632,9 +655,18 @@ const fmtDtField = d => {
   return s;
 };
 
+// Raw rows from the last Ops Checklist read — used only to explain a failed save
+let _lastOpsRaw = [];
+/** Raw Excel row (column names exactly as Power Automate returns them) for this Index, or null. */
+export function rawOpsRowFor(index) {
+  const k = String(index ?? '').trim();
+  return _lastOpsRaw.find(r => String(r?.Index ?? r?.index ?? '').trim() === k) || null;
+}
+
 async function fetchOpsChecklist() {
   const data = await callOpsFlow('get');
-  const rows = Array.isArray(data?.value) ? data.value : Array.isArray(data) ? data : [];
+  const rows = (Array.isArray(data?.value) ? data.value : Array.isArray(data) ? data : []).map(withDecodedKeys);
+  _lastOpsRaw = rows;
   return rows.map((r, i) => ({
     sno:             getField(r,'S No','S.No','S_No','sno') ?? i + 1,
     engagementKey:   readKey(r),
@@ -806,7 +838,9 @@ export async function addOpsRow(form) {
 
 export async function deleteOpsRow(sno, engagementKey) {
   const key = requireKey(engagementKey, `Ops Checklist row ${sno ?? ''}`.trim());
-  return callOpsFlow('delete', { rowId: key, [ENGAGEMENT_KEY_COL]: key });
+  const res = await callOpsFlow('delete', { rowId: key, [ENGAGEMENT_KEY_COL]: key });
+  forgetListRow('ops', key);
+  return res;
 }
 
 
@@ -935,19 +969,53 @@ export async function updateContentDevRow(sno, rowData, engagementKey) {
 
 export async function deleteContentDevRow(sno, engagementKey) {
   const key = requireKey(engagementKey, `Content Dev row ${sno ?? ''}`.trim());
-  return callContentDevFlow('delete', { sno: key, [ENGAGEMENT_KEY_COL]: key });
+  const res = await callContentDevFlow('delete', { sno: key, [ENGAGEMENT_KEY_COL]: key });
+  forgetListRow('cdt', key);
+  return res;
 }
 
 // ─── SOLUTION TRACKER (BD + Solution combined) ───────────────────────────────
+// The Excel headers are 'Date of Discusssion' (typo, 3 s) and, for the
+// submission date, 'Date of submission ER Team4' in older copies of the file /
+// flow, 'Date of Submission to Client' in newer ones. Power Automate's
+// "List rows" returns the header text as-is (spaces kept), so every spelling is
+// read, and every spelling is sent — the flow maps whichever one it was built
+// with and ignores the rest. (Before this, the 3-s spelling was never read, so
+// the date showed blank and the next save wrote the blank back to Excel.)
+const DISCUSSION_KEYS = ['Date of Discusssion', 'Date of Discussion', 'Date_of_Discusssion', 'Date_of_Discussion'];
+const SUBMISSION_KEYS = ['Date of Submission to Client', 'Date of submission ER Team4', 'Date of submission ER Team',
+                         'Date_of_Submission_to_Client', 'Date_of_submission_ER_Team4'];
+// Header compare that ignores case, spaces, underscores, line breaks and
+// Power Automate's _xHHHH_ codes ('Date of_x000a_Discussion' = 'Date of Discussion').
+const looseKey = k => String(k ?? '')
+  .replace(/_x([0-9a-f]{4})_/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+  .toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// First spelling that holds a value (an empty column must not hide a filled one).
+// Exact header first, then the same header written slightly differently.
+function firstFilled(r, ...keys) {
+  const filled = v => v !== undefined && v !== null && String(v).trim() !== '';
+  for (const k of keys) if (filled(r[k])) return r[k];
+  const wanted = new Set(keys.map(looseKey));
+  for (const [k, v] of Object.entries(r || {})) if (wanted.has(looseKey(k)) && filled(v)) return v;
+  return '';
+}
+// Last raw rows from the Solution Tracker read (only used to explain a date that didn't save)
+let _lastSolutionRaw = [];
+const isDateCol = k => /date|discus|submis|expt/i.test(looseKey(k));
+const discussionFields = v => ({ 'Date of Discusssion': v || '', 'Date of Discussion': v || '' });
+const submissionFields = v => ({ 'Date of Submission to Client': v || '', 'Date of submission ER Team4': v || '' });
+
 async function callSolutionFlow(action, payload = {}) {
   return callFlow('SOLUTION_CRUD', { action, ...payload });
 }
 
 async function fetchSolutionTracker() {
   const data = await callSolutionFlow('get');
-  const rows = Array.isArray(data?.value) ? data.value
+  const rows = (Array.isArray(data?.value) ? data.value
              : Array.isArray(data)        ? data
-             : [];
+             : []).map(withDecodedKeys);
+  _lastSolutionRaw = rows;
   return rows.map((r, i) => ({
     id:                  i + 1,
     sno:                 getField(r, 'S No', 'S_No', 'SNo', 'sno') ?? i + 1,
@@ -957,11 +1025,12 @@ async function fetchSolutionTracker() {
     clientName:          getField(r, 'Client Name', 'Client_Name', 'clientName') ?? '',
     clientPoc:           getField(r, 'Client POC', 'Client_POC', 'clientPoc') ?? '',
     contactNumber:       getField(r, 'Contact Number', 'Contact_Number', 'contactNumber') ?? '',
-    dateOfDiscussion:    formatDate(getField(r, 'Date of Discussion', 'Date_of_Discusssion', 'dateOfDiscussion')),
+    dateOfDiscussion:    formatDate(firstFilled(r, ...DISCUSSION_KEYS, 'dateOfDiscussion') ||
+                           firstFilled(r, ...Object.keys(r).filter(k => looseKey(k).startsWith('dateofdiscu')))),
     internalTat:         getField(r, 'Internal TAT', 'Internal_TAT', 'internalTat') ?? '',
     clientExpectedDate:  formatDate(getField(r, 'Client Expt', 'Client_Expt', 'clientExpectedDate')),
     // Excel turns typed text like "Oct 2026" into a date serial (46296) — show it as "Oct 2026" again
-    bdMonth:             monthLabel(getField(r, 'BD Month', 'BD_Month', 'bdMonth'), getField(r, 'Date of Discussion', 'Date_of_Discusssion', 'Date of Discusssion')),
+    bdMonth:             monthLabel(getField(r, 'BD Month', 'BD_Month', 'bdMonth'), firstFilled(r, ...DISCUSSION_KEYS)),
     programTopic:        getField(r, 'Program Topic', 'Program_Topic', 'programTopic') ?? '',
     proposalVersion:     getField(r, 'Proposal Version', 'Proposal_Version', 'proposalVersion') ?? '',
     bdStatus:            getField(r, 'BD Status', 'BD_Status', 'bdStatus') ?? '',
@@ -979,7 +1048,8 @@ async function fetchSolutionTracker() {
     remarks:             getField(r, 'Remarks', 'remarks') ?? '',
     proposalV1Link:      getField(r, 'Proposal V1 Link2', 'Proposal_V1_Link', 'proposalV1Link') ?? '',
     submissionBySolTeam: formatDate(getField(r, 'Date of Submission by Sol team', 'Date_of_Submission_by_Sol_team', 'submissionBySolTeam')),
-    submissionToClient:  formatDate(getField(r, 'Date of Submission to Client', 'Date of submission ER Team4', 'Date_of_submission_ER_Team4', 'submissionToClient')),
+    submissionToClient:  formatDate(firstFilled(r, ...SUBMISSION_KEYS, 'submissionToClient') ||
+                           firstFilled(r, ...Object.keys(r).filter(k => /^dateofsubmission(toclient|erteam)/.test(looseKey(k))))),
     // Ticked by the BD person when the proposal is Won — what Operations must arrange
     opsChecklist:        getField(r, 'Ops Checklist', 'Ops_Checklist', 'opsChecklist') ?? '',
   })).filter(r => r.proposalId);
@@ -993,7 +1063,7 @@ export async function addSolutionRow(rowData) {
     'Client Name':                      rowData.clientName          || '',
     'Client POC':                       rowData.clientPoc           || '',
     'Contact Number':                   rowData.contactNumber       || '',
-    'Date of Discusssion':              rowData.dateOfDiscussion    || '',
+    ...discussionFields(rowData.dateOfDiscussion),
     'Client Expt':                      rowData.clientExpectedDate  || '',
     'BD Month':                         rowData.bdMonth             || '',
     'Program Topic':                    rowData.programTopic        || '',
@@ -1011,7 +1081,7 @@ export async function addSolutionRow(rowData) {
     'Status':                           rowData.status              || '',
     'Remarks':                          rowData.remarks             || '',
     'Proposal V1 Link2':                rowData.proposalV1Link      || '',
-    'Date of Submission to Client':      rowData.submissionToClient  || '',
+    ...submissionFields(rowData.submissionToClient),
     'Ops Checklist':                    rowData.opsChecklist        || '',
   });
 }
@@ -1026,7 +1096,7 @@ export async function updateSolutionRow(sno, rowData) {
     'Client Name':                      rowData.clientName          || '',
     'Client POC':                       rowData.clientPoc           || '',
     'Contact Number':                   rowData.contactNumber       || '',
-    'Date of Discusssion':              rowData.dateOfDiscussion    || '',
+    ...discussionFields(rowData.dateOfDiscussion),
     'Client Expt':                      rowData.clientExpectedDate  || '',
     'BD Month':                         rowData.bdMonth             || '',
     'Program Topic':                    rowData.programTopic        || '',
@@ -1044,9 +1114,40 @@ export async function updateSolutionRow(sno, rowData) {
     'Status':                           rowData.status              || '',
     'Remarks':                          rowData.remarks             || '',
     'Proposal V1 Link2':                rowData.proposalV1Link      || '',
-    'Date of Submission to Client':      rowData.submissionToClient  || '',
+    ...submissionFields(rowData.submissionToClient),
     'Ops Checklist':                    rowData.opsChecklist        || '',
   });
+}
+
+/**
+ * After a save, reads the Solution Tracker again and returns the date fields
+ * that did NOT come back with the value just saved. The flow answers "OK" even
+ * when it drops a field it doesn't map, so this is the only way to notice.
+ * Excel Online can lag a moment, so one re-check is made before reporting.
+ * @returns {Promise<string[]>} labels of the dates that didn't save ([] = all fine)
+ */
+export async function checkSolutionDates(proposalId, proposalVersion, expected) {
+  const FIELDS = [['dateOfDiscussion', 'Date of Discussion'], ['submissionToClient', 'Date of Submission to Client']];
+  const want = FIELDS.filter(([k]) => String(expected?.[k] || '').trim());
+  if (!want.length || !proposalId) return [];
+  const ver = v => { const m = String(v ?? '').match(/(\d+)/); return m ? Number(m[1]) : 1; };
+  const check = async () => {
+    const rows = await fetchSolutionTracker();
+    const mine = rows.filter(r => r.proposalId === proposalId && ver(r.proposalVersion) === ver(proposalVersion));
+    if (!mine.length) return [];                       // row not visible yet — nothing to compare
+    return want.filter(([k]) => !mine.some(r => r[k] === String(expected[k]).slice(0, 10))).map(([, label]) => label);
+  };
+  let bad = await check();
+  if (bad.length) { await new Promise(res => setTimeout(res, 2500)); bad = await check(); }
+  if (bad.length) {
+    // Show the real date columns Excel returned for this proposal, so a header mismatch is obvious
+    const raw = _lastSolutionRaw.filter(r => String(firstFilled(r, 'Proposal ID', 'Proposal_ID')).trim() === proposalId);
+    const cols = {};
+    raw.forEach(r => Object.entries(r).forEach(([k, v]) => { if (isDateCol(k) && !(k in cols)) cols[k] = v; }));
+    console.warn('[BD Tracker] Date not kept', { proposalId, sent: { dateOfDiscussion: expected.dateOfDiscussion, submissionToClient: expected.submissionToClient }, excelDateColumns: cols });
+    bad.columns = Object.keys(cols);
+  }
+  return bad;
 }
 
 export async function deleteSolutionRow(sno) {
@@ -1126,8 +1227,60 @@ const LIST_STORE_PREFIX = 'ercrm.list.v1.';
 const LIST_MAX_AGE_MS   = 24 * 60 * 60 * 1000;
 const LIST_MAX_CHARS    = 1500000;          // skip the browser copy for very large lists
 
+// Rows deleted / added in this browser in the last minute. Excel Online takes a
+// moment to reflect a write, so a read straight after a delete can still return
+// the deleted row (and one straight after an add can miss the new row). These
+// keep the remembered lists right until Excel catches up.
+const RECENT_WRITE_MS = 60 * 1000;
+const _recentDeletes = new Map();   // list name → Map(Index → ts)
+const _recentAdds    = new Map();   // list name → Map(Index → { ts, row })
+const _normKey = v => String(v ?? '').replace(/\s+/g, ' ').trim();
+function _recent(map, name) {
+  const m = map.get(name) || new Map(); map.set(name, m);
+  const now = Date.now();
+  for (const [k, v] of m) if (now - (typeof v === 'number' ? v : v.ts) > RECENT_WRITE_MS) m.delete(k);
+  return m;
+}
+function applyRecentWrites(name, rows) {
+  const dels = _recent(_recentDeletes, name);
+  const adds = _recent(_recentAdds, name);
+  let out = dels.size ? rows.filter(r => !dels.has(_normKey(r.engagementKey))) : rows;
+  if (adds.size) {
+    const have = new Set(out.map(r => _normKey(r.engagementKey)));
+    for (const [k, v] of adds) {
+      if (have.has(k)) adds.delete(k);          // Excel has caught up
+      else out = [...out, v.row];
+    }
+  }
+  return out;
+}
+const _listListeners = new Set();
+/** Subscribe to changes of the remembered lists. Returns an unsubscribe fn. */
+export function onListChange(fn) { _listListeners.add(fn); return () => _listListeners.delete(fn); }
+
+/** Call after a tracker row is deleted, so it disappears everywhere straight away. */
+export function forgetListRow(name, engagementKey) {
+  const key = _normKey(engagementKey);
+  if (!key) return;
+  _recent(_recentDeletes, name).set(key, Date.now());
+  _recent(_recentAdds, name).delete(key);
+  const cur = peekList(name);
+  if (cur) rememberList(name, cur);
+}
+
+/** Call after a tracker row is added, so it shows as added everywhere straight away. */
+export function rememberListRow(name, row) {
+  const key = _normKey(row?.engagementKey);
+  if (!key) return;
+  _recent(_recentDeletes, name).delete(key);
+  _recent(_recentAdds, name).set(key, { ts: Date.now(), row });
+  rememberList(name, peekList(name) || []);
+}
+
 function rememberList(name, rows) {
+  rows = applyRecentWrites(name, rows);
   _listMem.set(name, rows);
+  _listListeners.forEach(fn => { try { fn(name); } catch { /* ignore */ } });
   try {
     const json = JSON.stringify({ ts: Date.now(), rows });
     if (json.length < LIST_MAX_CHARS) localStorage.setItem(LIST_STORE_PREFIX + name, json);
@@ -1149,5 +1302,9 @@ export function peekList(name) {
 }
 
 export async function getOpsChecklist()      { return rememberList('ops',      await withReadRetry(fetchOpsChecklist)); }
+/** Straight read from Excel — no remembered copy, no recent-write patching. Used to confirm a write landed. */
+export async function readTrackerFresh(name) {
+  return name === 'ops' ? fetchOpsChecklist() : fetchContentDevTracker();
+}
 export async function getContentDevTracker() { return rememberList('cdt',      await withReadRetry(fetchContentDevTracker)); }
 export async function getSolutionTracker()   { return rememberList('solution', await withReadRetry(fetchSolutionTracker)); }

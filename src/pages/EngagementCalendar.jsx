@@ -15,6 +15,7 @@ import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { addEngagementToOps, addEngagementToCDT, isInTracker } from '../services/addToTrackers.js';
+import { onListChange, getOpsChecklist, getContentDevTracker } from '../services/api.js';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -75,8 +76,8 @@ function generateNextEgId(existingIds) {
 }
 
 /* ─── Add / Edit Engagement Modal ──────────────────────────────────────── */
-// Fields synced from Ops Checklist → Finance — read-only in the Engagement Calendar form
-const OPS_MANAGED_FIELDS = ['invoice', 'payment', 'receivedDate'];
+// Finance-owned fields — edited only in the Finance Tracker, read-only in the Engagement Calendar form
+const OPS_MANAGED_FIELDS = ['invoice', 'payment', 'receivedDate', 'travelExpenses', 'gst'];
 
 function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, engagements }) {
   const isEdit = !!initial;
@@ -266,7 +267,7 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
             ['Feedback',                        'feedback',        'full'],
             ['NPS',                             'nps'],
           ].map(([label, key, span, type]) => {
-            // Finance fields are owned by Ops Checklist → Finance tab (synced here automatically)
+            // Finance fields are owned by the Finance Tracker (saved / synced here automatically)
             const locked = OPS_MANAGED_FIELDS.includes(key);
             return (
               <div className={`form-field ${span || ''}`} key={key}>
@@ -278,11 +279,11 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
                   onChange={locked ? undefined : e => set(key, e.target.value)}
                   readOnly={locked}
                   disabled={locked}
-                  title={locked ? 'Updated from Ops Checklist → Finance' : undefined}
+                  title={locked ? 'Updated from the Finance Tracker' : undefined}
                   style={locked ? { background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' } : undefined}
                 />
                 {locked && (
-                  <span style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Edit in Ops Checklist → Finance</span>
+                  <span style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Edit in Finance Tracker</span>
                 )}
               </div>
             );
@@ -835,16 +836,24 @@ export default function EngagementCalendar({ onRefreshed }) {
 
   // "Add to Ops Checklist" / "Add to Content Dev Tracker" (one engagement at a time)
   const [adding,    setAdding]    = useState({});              // 'ops|<Index>' → true while saving
-  const [addedKeys, setAddedKeys] = useState(() => new Set()); // added in this session
+  // Re-render when the Ops Checklist / CDT lists change (add, delete, reload),
+  // so a row deleted from a tracker shows "Add" again on its card.
+  const [, setListTick] = useState(0);
+  useEffect(() => onListChange(n => { if (n === 'ops' || n === 'cdt') setListTick(t => t + 1); }), []);
+  // Fresh copy of both trackers on opening the calendar (catches rows deleted
+  // in the tracker pages or directly in Excel). Quiet — failures are ignored.
+  useEffect(() => {
+    getOpsChecklist().catch(() => {});
+    getContentDevTracker().catch(() => {});
+  }, []);
   const trackerLabel = t => (t === 'ops' ? 'Ops Checklist' : 'Content Dev Tracker');
-  const isIn = (t, eng) => addedKeys.has(`${t}|${eng.engagementKey}`) || isInTracker(t, eng) === true;
+  const isIn = (t, eng) => isInTracker(t, eng) === true;
   const handleAddTo = async (target, eng) => {
     const id = `${target}|${eng.engagementKey}`;
     if (adding[id]) return;
     setAdding(a => ({ ...a, [id]: true }));
     try {
       const res = target === 'ops' ? await addEngagementToOps(eng) : await addEngagementToCDT(eng);
-      setAddedKeys(s => new Set(s).add(id));
       showToast(res.added
         ? `✓ Added to ${trackerLabel(target)} (Index ${res.index})`
         : `ℹ Already in ${trackerLabel(target)} (Index ${res.index}) — nothing added`);
@@ -865,7 +874,7 @@ export default function EngagementCalendar({ onRefreshed }) {
   const showToast = msg => {
     setToast(msg);
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(''), 3500);
+    toastTimer.current = setTimeout(() => setToast(''), String(msg).length > 120 ? 15000 : 3500); // long error messages stay up to be read
   };
   useEffect(() => () => { clearTimeout(toastTimer.current); clearTimeout(revalTimer.current); }, []);
 

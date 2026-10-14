@@ -7,6 +7,7 @@
  *   BDCreate   | BDRead   | BDUpdate   | BDDelete   |
  *   EngCreate  | EngRead  | EngUpdate  | EngDelete  |
  *   OpsCreate  | OpsRead  | OpsUpdate  | OpsDelete  |
+ *   FinCreate  | FinRead  | FinUpdate  | FinDelete  |
  *   ContentDevCreate | ContentDevRead | ContentDevUpdate | ContentDevDelete |
  *   SolCreate  | SolRead  | SolUpdate  | SolDelete
  *
@@ -26,6 +27,7 @@ const PAGE_PREFIX = {
   'bd':          'BD',
   'engagement':  'Eng',
   'ops':         'Ops',
+  'finance':     'Fin',
   'content-dev': 'ContentDev',
   'solution':    'Sol',
 };

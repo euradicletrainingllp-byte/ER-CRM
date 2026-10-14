@@ -5,6 +5,7 @@ import {
   addSolutionRow,
   updateSolutionRow,
   deleteSolutionRow,
+  checkSolutionDates,
 } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
@@ -20,6 +21,15 @@ const needsChecklist = r => r?.bdStatus === 'Won' && parseChecklist(r.opsCheckli
 // Proposal link for a solution item: its own link, else any link saved under the same Proposal ID
 const proposalLinkFor = (rows, pid, own) =>
   own || (rows.find(x => x.proposalId === pid && String(x.proposalV1Link || '').trim()) || {}).proposalV1Link || '';
+// BD-level proposal link for one version of a proposal: the BD anchor row's link first,
+// then any row of that version, then any row of the proposal.
+const hasLink = r => !!String(r?.proposalV1Link || '').trim();
+function bdLinkFor(rows, pid, version) {
+  const same = rows.filter(r => r.proposalId === pid);
+  const ver  = same.filter(r => versionNo(r.proposalVersion) === versionNo(version));
+  const hit  = ver.find(r => r.bdSNo && hasLink(r)) || ver.find(hasLink) || same.find(hasLink);
+  return hit ? String(hit.proposalV1Link).trim() : '';
+}
 
 // ── Proposal versions (V1, V2 …) ─────────────────────────────────────────────
 // Each revised version of a proposal is its own Excel row with the same Proposal ID.
@@ -34,6 +44,12 @@ function latestRowFor(rows, pid) {
     if (a > b || (a === b && !best.bdSNo && r.bdSNo)) { best = r; bestI = i; }
   });
   return best;
+}
+// Date of Discussion for a proposal: from a row of the same version first, else any row
+function proposalDiscussion(rows, pid, version) {
+  const same = rows.filter(r => r.proposalId === pid && r.dateOfDiscussion);
+  const v = same.find(r => versionNo(r.proposalVersion) === versionNo(version));
+  return (v || same[0])?.dateOfDiscussion || '';
 }
 // One row per version of a proposal, oldest first
 function versionsFor(rows, pid) {
@@ -158,7 +174,7 @@ const EMPTY_BD = {
   proposalId: '', clientName: '', clientPoc: '', contactNumber: '',
   dateOfDiscussion: '', clientExpectedDate: '', bdMonth: '',
   programTopic: '', proposalVersion: 'V1', bdStatus: 'In Process', bdProposalValue: '',
-  submissionToClient: '', opsChecklist: '',
+  submissionToClient: '', opsChecklist: '', proposalV1Link: '',
 };
 const EMPTY_SOL = {
   proposalId: '', solutionTopic: '', solutionMonth: '', programType: '',
@@ -277,6 +293,9 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
   const [form, setForm] = useState(() => {
     const base = initial ? { ...initial } : { ...EMPTY_BD };
     if (!isEdit && !base.proposalId) base.proposalId = nextPid;
+    // Show the proposal's link even when it was only saved on a solution item
+    if (isEdit && !String(base.proposalV1Link || '').trim())
+      base.proposalV1Link = bdLinkFor(allRows || [], base.proposalId, base.proposalVersion);
     return base;
   });
   // Tracks which option is selected in the Proposal ID dropdown (add mode only)
@@ -395,7 +414,7 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
           </Field>
 
           {/* ── Date of Discussion — auto-fills BD Month on change ── */}
-          <Field label="Date of Discussion" half>
+          <Field label="Date of Discussion *" half>
             <input
               type="date"
               style={inp}
@@ -424,7 +443,11 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
             </select>
           </Field>
           <Field label="BD Proposal Value"><input style={inp} value={form.bdProposalValue} onChange={e => set('bdProposalValue', e.target.value)} placeholder="₹ Amount" /></Field>
-          <Field label="Date of Submission to Client" half><input type="date" style={inp} value={form.submissionToClient} onChange={e => set('submissionToClient', e.target.value)} /></Field>
+          <Field label="Date of Submission to Client *" half><input type="date" style={inp} value={form.submissionToClient} onChange={e => set('submissionToClient', e.target.value)} /></Field>
+          <Field label="Proposal Link">
+            <LinkInput inputStyle={inp} value={form.proposalV1Link || ''} onChange={v => set('proposalV1Link', v)} placeholder="https://..." />
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Copied automatically to every Solution item of this proposal{revision ? ' version' : ''} — editable per item.</span>
+          </Field>
 
           {/* ── Won → BD ticks what Operations must arrange ── */}
           {form.bdStatus === 'Won' && (
@@ -476,11 +499,13 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
 
 // ── Solution Modal ─────────────────────────────────────────────────────────────
 // proposalId is always known from the BD row context — no picker shown
-function SolModal({ initial, proposalId, programTopic, bdStatus, onSave, onClose, saving }) {
+function SolModal({ initial, proposalId, programTopic, bdStatus, bdLink, onSave, onClose, saving }) {
   // New items: Solution Topic defaults to the proposal's Program Topic (editable).
   // Status always mirrors the BD Status of the parent proposal.
   const [form, setForm] = useState(() => ({
     ...(initial || { ...EMPTY_SOL, solutionTopic: programTopic || '' }),
+    // Proposal link comes from the BD entry; the user can change it for this item
+    proposalV1Link: String(initial?.proposalV1Link || '').trim() || bdLink || '',
     proposalId,
     status: bdStatus || (initial?.status) || 'In Process',
   }));
@@ -531,7 +556,14 @@ function SolModal({ initial, proposalId, programTopic, bdStatus, onSave, onClose
           </Field>
           <Field label="Solution Value" half><input style={inp} value={form.solutionValue} onChange={e => set('solutionValue', e.target.value)} placeholder="₹ Amount" /></Field>
           <Field label="Remarks"><textarea style={{ ...inp, resize: 'vertical', minHeight: 56 }} value={form.remarks} onChange={e => set('remarks', e.target.value)} /></Field>
-          <Field label="Proposal Link"><LinkInput inputStyle={inp} value={form.proposalV1Link} onChange={v => set('proposalV1Link', v)} placeholder="https://..." /></Field>
+          <Field label="Proposal Link">
+            <LinkInput inputStyle={inp} value={form.proposalV1Link || ''} onChange={v => set('proposalV1Link', v)} placeholder="https://..." />
+            {bdLink && (
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                {String(form.proposalV1Link || '').trim() === bdLink ? 'Carried from BD Tracker — edit if this item uses a different link' : 'Different from the BD Tracker link'}
+              </span>
+            )}
+          </Field>
           <Field label="Status (from BD Status)" half>
             <div style={{ ...inp, display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', cursor: 'default' }}>
               {pill(form.status)}
@@ -709,12 +741,22 @@ export default function SolutionTracker({ onRefreshed, view }) {
   }
 
   // Push BD-level fields to every other row sharing this Proposal ID.
-  async function propagateBdFields(form, skipSno) {
+  async function propagateBdFields(form, skipSno, oldLink = '') {
     const otherRows = rows.filter(
       r => r.proposalId === form.proposalId && String(r.sno) !== String(skipSno)
     );
     const sameVersion = r => versionNo(r.proposalVersion) === versionNo(form.proposalVersion);
+    // Proposal link: copy to items of this version that have no link or still hold the
+    // previous BD link — a link edited on a single Solution item is left as it is.
+    const newLink = String(form.proposalV1Link || '').trim();
+    const takesLink = r => newLink && sameVersion(r) &&
+      String(r.proposalV1Link || '').trim() !== newLink &&
+      (!hasLink(r) || String(r.proposalV1Link).trim() === String(oldLink || '').trim());
+    // Discussion date: every line of this version gets it; other versions only if theirs is blank
+    const takesDiscussion = r => form.dateOfDiscussion && r.dateOfDiscussion !== form.dateOfDiscussion &&
+      (sameVersion(r) || !r.dateOfDiscussion);
     const changed = otherRows.filter(r =>
+      takesLink(r) || takesDiscussion(r) ||
       (form.submissionToClient && sameVersion(r) && r.submissionToClient !== form.submissionToClient) ||
       (form.bdStatus && r.bdStatus !== form.bdStatus) ||
       (form.bdStatus && r.solutionTopic && r.status !== form.bdStatus) ||
@@ -723,14 +765,18 @@ export default function SolutionTracker({ onRefreshed, view }) {
     await Promise.all(changed.map(r => updateSolutionRow(r.sno, {
       ...r,
       ...(form.submissionToClient && sameVersion(r) ? { submissionToClient: form.submissionToClient } : {}),
+      ...(takesDiscussion(r) ? { dateOfDiscussion: form.dateOfDiscussion } : {}),
       ...(form.bdStatus ? { bdStatus: form.bdStatus } : {}),
       ...(form.bdStatus && r.solutionTopic ? { status: form.bdStatus } : {}),
       ...(form.opsChecklist ? { opsChecklist: form.opsChecklist } : {}),
+      ...(takesLink(r) ? { proposalV1Link: newLink } : {}),
     })));
   }
 
   async function handleSaveBD(form) {
     if (needsChecklist(form)) { alert('Please tick the Operations Checklist for this Won proposal.'); return; }
+    const missingDates = [!form.dateOfDiscussion && 'Date of Discussion', !form.submissionToClient && 'Date of Submission to Client'].filter(Boolean);
+    if (missingDates.length) { alert(`Please fill ${missingDates.join(' and ')} — every BD line needs both dates.`); return; }
     if (form._revision) {
       const v = String(form.proposalVersion || '').trim();
       if (rows.some(r => r.proposalId === form.proposalId && versionNo(r.proposalVersion) === versionNo(v))) {
@@ -744,33 +790,48 @@ export default function SolutionTracker({ onRefreshed, view }) {
         // ── Revised version: a new row with the same Proposal ID, next version ──
         const payload = { ...form, sno: '', bdSNo: '', solSNo: '' };
         SOL_FIELDS.forEach(k => { payload[k] = ''; });
+        payload.proposalV1Link = String(form.proposalV1Link || '').trim();   // link of the new version
         delete payload._revision; delete payload._revisedFrom; delete payload._sols; delete payload._versions;
         await addSolutionRow(payload);
         // Status / checklist apply to the whole proposal — keep every row in step
-        await propagateBdFields({ ...payload, submissionToClient: '' }, null);
+        await propagateBdFields({ ...payload, submissionToClient: '', proposalV1Link: '' }, null);
         setExpanded(prev => new Set(prev).add(form.proposalId));
       } else
       // Use != null so sno=0 is treated as a valid row key (truthy check would fail for 0)
       if (form.sno != null && form.sno !== '') {
         // ── Edit existing BD anchor row ──────────────────────────────────────
         const self = rows.find(r => String(r.sno) === String(form.sno));
+        const oldLink = bdLinkFor(rows, form.proposalId, self?.proposalVersion ?? form.proposalVersion);
         await updateSolutionRow(form.sno, withSolStatus(form, self));
 
-        // Propagate BD-level fields (submissionToClient + BD Status) to every
-        // other row under this P ID so all Excel rows stay in sync.
-        await propagateBdFields(form, form.sno);
+        // Propagate BD-level fields (discussion + submission dates, BD Status, Proposal Link) to
+        // every other row under this P ID so all Excel rows stay in sync.
+        await propagateBdFields(form, form.sno, oldLink);
       } else {
         // ── New BD entry ─────────────────────────────────────────────────────
         const existingAnchor = rows.find(r => r.proposalId === form.proposalId && r.bdSNo);
         if (existingAnchor) {
+          const oldLink = bdLinkFor(rows, form.proposalId, existingAnchor.proposalVersion);
           await updateSolutionRow(existingAnchor.sno, withSolStatus(form, existingAnchor));
-          await propagateBdFields(form, existingAnchor.sno);
+          await propagateBdFields(form, existingAnchor.sno, oldLink);
         } else {
           await addSolutionRow(form);
         }
       }
+      // The flow says "OK" even when it drops a column it doesn't map, so read
+      // the row back and say so if a date didn't make it into Excel.
+      const notSaved = await checkSolutionDates(form.proposalId, form.proposalVersion, form).catch(() => []);
       setBdModal(null);
       await load();
+      if (notSaved.length) {
+        alert(`Saved, but Excel did not keep: ${notSaved.join(' and ')}.\n\n` +
+          'The SOLUTION_CRUD flow in Power Automate is not writing this column. Open the flow → ' +
+          '"Add a row" and "Update a row" → map the column to ' +
+          notSaved.map(l => l === 'Date of Discussion'
+            ? "triggerBody()?['Date of Discusssion']"
+            : "column \"Date of submission ER Team4\" = triggerBody()?['Date of submission ER Team4']").join(' and ') + '.' +
+          (notSaved.columns?.length ? `\n\nDate columns Excel returned: ${notSaved.columns.map(c => `"${c}"`).join(', ')}` : ''));
+      }
     } catch (e) {
       alert('Error: ' + e.message);
     } finally {
@@ -795,7 +856,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
             clientName:         anchor.clientName         || payload.clientName,
             clientPoc:          anchor.clientPoc          || payload.clientPoc,
             contactNumber:      anchor.contactNumber      || payload.contactNumber,
-            dateOfDiscussion:   anchor.dateOfDiscussion   || payload.dateOfDiscussion,
+            dateOfDiscussion:   anchor.dateOfDiscussion   || proposalDiscussion(rows, form.proposalId, anchor.proposalVersion) || payload.dateOfDiscussion,
             clientExpectedDate: anchor.clientExpectedDate || payload.clientExpectedDate,
             bdMonth:            anchor.bdMonth            || payload.bdMonth,
             programTopic:       anchor.programTopic       || payload.programTopic,
@@ -1097,7 +1158,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                   </div>
                                   <div>
                                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Proposal Link</div>
-                                    <div>{proposalLinkFor(rows, r.proposalId, r.proposalV1Link) ? <LinkButton url={proposalLinkFor(rows, r.proposalId, r.proposalV1Link)} label="Open proposal" compact /> : '—'}</div>
+                                    <div>{bdLinkFor(rows, r.proposalId, r.proposalVersion) ? <LinkButton url={bdLinkFor(rows, r.proposalId, r.proposalVersion)} label="Open proposal" compact /> : '—'}</div>
                                   </div>
                                   {(r._versions || []).length > 1 && (
                                     <div style={{ gridColumn: '1 / -1' }}>
@@ -1173,7 +1234,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                             <td style={{ padding: '8px 10px' }}>{s.solutionValue ? `₹${s.solutionValue}` : '—'}</td>
                                             <td style={{ padding: '8px 10px' }}>{pill(r.bdStatus || s.status)}</td>
                                             <td style={{ padding: '8px 10px' }}>{r.submissionToClient || '—'}</td>
-                                            <td style={{ padding: '8px 10px' }}><LinkButton url={s.proposalV1Link} label="Open" compact /></td>
+                                            <td style={{ padding: '8px 10px' }}><LinkButton url={String(s.proposalV1Link || '').trim() || bdLinkFor(rows, s.proposalId, s.proposalVersion)} label="Open" compact /></td>
                                             <td style={{ padding: '8px 10px' }}>
                                               <div style={{ display: 'flex', gap: 5 }}>
                                                 <EditButton
@@ -1194,7 +1255,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                                           topic:       s.solutionTopic    || '',
                                                           serviceType: s.typeOfService    || '',
                                                           sector:      s.developmentCategory || '',
-                                                          proposalLink: proposalLinkFor(rows, r.proposalId, s.proposalV1Link),
+                                                          proposalLink: String(s.proposalV1Link || '').trim() || bdLinkFor(rows, s.proposalId, s.proposalVersion),
                                                           opsChecklist: r.opsChecklist || s.opsChecklist || '',
                                                         },
                                                       },
@@ -1251,6 +1312,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
         <SolModal
           initial={null}
           proposalId={solModal.lockedPid}
+          bdLink={bdLinkFor(rows, solModal.lockedPid, (latestRowFor(rows, solModal.lockedPid) || {}).proposalVersion)}
           programTopic={solModal.programTopic}
           bdStatus={solModal.bdStatus}
           onSave={handleSaveSol}
@@ -1262,6 +1324,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
         <SolModal
           initial={solModal.row}
           proposalId={solModal.row.proposalId}
+          bdLink={bdLinkFor(rows, solModal.row.proposalId, solModal.row.proposalVersion)}
           programTopic={solModal.programTopic}
           bdStatus={solModal.bdStatus}
           onSave={handleSaveSol}

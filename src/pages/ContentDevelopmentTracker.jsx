@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { peekList, getContentDevTracker, addContentDevRow, updateContentDevRow, deleteContentDevRow } from '../services/api.js';
+import { suggestIndexFor } from '../services/addToTrackers.js';
 import { usePermissions } from '../hooks/usePermissions.js';
 import ExportButton from '../components/ExportButton.jsx';
 import { autoColumns } from '../utils/exportExcel.js';
@@ -376,7 +377,7 @@ function DetailPanel({ row, canEdit, onUpdate, onDelete, saving }) {
 
           {/* Index — view only */}
           <div style={{ gridColumn:'1 / -1', fontSize:12, color:'var(--muted)' }}>
-            Index 🔒 <span style={{ fontWeight:600, color:'#475569' }}>{row.engagementKey || 'Not set'}</span>
+            Index 🔒 <span style={{ fontWeight:600, color: row.engagementKey ? '#475569' : '#b91c1c' }}>{row.engagementKey || 'Missing in Excel — edits to this row can\'t be saved until its Index is filled in'}</span>
           </div>
 
           {/* Client — full width */}
@@ -472,6 +473,15 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
   const sel = selected != null ? data.find(d => d.sno === selected) : null;
 
   const handleUpdate = async (row, changes) => {
+    // A row with an empty Index cell can't be found by the flow, so nothing would save.
+    if (!String(row.engagementKey ?? '').trim()) {
+      const guess = await suggestIndexFor(row);
+      showToast('⚠ Not saved — this row has no Index in Excel, so the CRM can\'t find it to update. ' +
+        (guess ? `Type ${guess} (its Engagement Calendar Index) in this row's Index cell in Excel, then Refresh. `
+               : 'Type its Engagement Calendar Index in this row\'s Index cell in Excel, then Refresh. ') +
+        'This happens when the CONTENT_DEV_CRUD flow\'s "Add a row" step doesn\'t map Index = triggerBody()?[\'Index\'].');
+      return;
+    }
     try {
       await updateContentDevRow(row.sno, { ...row, ...changes }, row.engagementKey);
       setData(prev => prev.map(r => r.sno===row.sno ? { ...r, ...changes } : r));

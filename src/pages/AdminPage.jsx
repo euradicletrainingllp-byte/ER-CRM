@@ -17,6 +17,7 @@ const PAGES = [
   { key: 'bd',          label: 'BD Tracker',          icon: '🎯' },
   { key: 'engagement',  label: 'Engagement',           icon: '📅' },
   { key: 'ops',         label: 'Ops Checklist',        icon: '✔'  },
+  { key: 'finance',     label: 'Finance',              icon: '💰' },
   { key: 'content-dev', label: 'Content Dev',          icon: '📘' },
   { key: 'solution',    label: 'Solution',             icon: '💡' },
 ];

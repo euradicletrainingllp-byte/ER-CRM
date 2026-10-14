@@ -10,6 +10,7 @@ import Dashboard          from './pages/Dashboard.jsx';
 import EngagementCalendar from './pages/EngagementCalendar.jsx';
 import OpsChecklist          from './pages/OpsChecklist.jsx';
 import ContentDevelopmentTracker from './pages/ContentDevelopmentTracker.jsx';
+import FinanceTracker        from './pages/FinanceTracker.jsx';
 import SolutionTracker        from './pages/SolutionTracker.jsx';
 import AdminPage             from './pages/AdminPage.jsx';
 import ERCalendar            from './pages/ERCalendar.jsx';
@@ -40,7 +41,7 @@ function DeniedPage({ page }) {
 
 // Activity log: page key for each route (used for PAGE_VIEW rows)
 const ROUTE_MODULE = {
-  '/': 'dashboard', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops',
+  '/': 'dashboard', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
   '/content-dev': 'content-dev', '/solution': 'solution', '/er-calendar': 'engagement', '/admin': 'permissions',
 };
 
@@ -115,6 +116,11 @@ function Shell() {
             <Route path="/ops" element={
               <PermissionRoute page="ops">
                 <OpsChecklist onRefreshed={setLastRefreshed} />
+              </PermissionRoute>
+            } />
+            <Route path="/finance" element={
+              <PermissionRoute page="finance">
+                <FinanceTracker onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
             <Route path="/content-dev" element={

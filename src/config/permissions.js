@@ -28,6 +28,7 @@ export const PERMISSIONS = {
       bd:            { ...ALL_CRUD },
       engagement:    { ...ALL_CRUD },
       ops:           { ...ALL_CRUD },
+      finance:       { ...ALL_CRUD },
       'content-dev': { ...ALL_CRUD },
       solution:      { ...ALL_CRUD },
     },

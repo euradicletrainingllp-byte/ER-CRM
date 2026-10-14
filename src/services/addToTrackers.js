@@ -5,11 +5,12 @@
  * card. The new tracker row carries the engagement's Index, so the two rows
  * stay linked. If the tracker already has a row with that Index, nothing is
  * added (no duplicates). Nothing is ever updated or deleted here.
+ * If the tracker row is deleted later, the button offers "Add" again.
  *
  * (Replaces the old bulk "Sync with EC", which was removed on 2026-10-07.)
  */
 
-import { getOpsChecklist, addOpsRow, getContentDevTracker, addContentDevRow, peekList } from './api.js';
+import { getOpsChecklist, addOpsRow, getContentDevTracker, addContentDevRow, peekList, rememberListRow, readTrackerFresh, getAllEngagementsCached } from './api.js';
 
 const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim();
 
@@ -73,7 +74,10 @@ export async function addEngagementToOps(eng) {
   const index = requireIndex(eng);
   const rows = await getOpsChecklist();                       // fresh read — duplicate check
   if (rows.some(r => norm(r.engagementKey) === index)) return { added: false, index };
-  await addOpsRow({ ...ecToOC(eng), engagementKey: index });
+  const row = { ...ecToOC(eng), engagementKey: index };
+  await addOpsRow(row);
+  await confirmIndexSaved('ops', row, index);
+  rememberListRow('ops', row);
   return { added: true, index };
 }
 
@@ -85,6 +89,52 @@ export async function addEngagementToCDT(eng) {
   const index = requireIndex(eng);
   const rows = await getContentDevTracker();                  // fresh read — duplicate check
   if (rows.some(r => norm(r.engagementKey) === index)) return { added: false, index };
-  await addContentDevRow({ ...ecToCDT(eng), engagementKey: index });
+  const row = { ...ecToCDT(eng), engagementKey: index };
+  await addContentDevRow(row);
+  await confirmIndexSaved('cdt', row, index);
+  rememberListRow('cdt', row);
   return { added: true, index };
+}
+
+// ─── Did the Index actually reach Excel? ─────────────────────────────────────
+// The flows answer "OK" even when their "Add a row" step doesn't map the Index
+// column — the row is created with an empty Index, can't be edited later
+// ("has no Index") and the duplicate check can't see it. So read the tracker
+// back and stop with a clear message if that happened.
+const FLOW_OF   = { ops: 'OPS_CHECKLIST_CRUD', cdt: 'CONTENT_DEV_CRUD' };
+const TABLE_OF  = { ops: 'Operations Checklist → Table2', cdt: 'Content_Development_Tracker → ContentDevTable' };
+const LABEL_OF  = { ops: 'Ops Checklist', cdt: 'Content Dev Tracker' };
+const low = v => norm(v).toLowerCase();
+const nameOf = r => low(r.client ?? r.company);
+
+async function confirmIndexSaved(target, row, index) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise(res => setTimeout(res, 2000));
+    let rows;
+    try { rows = await readTrackerFresh(target); } catch { return; }   // can't check — don't block
+    if (rows.some(r => norm(r.engagementKey) === index)) return;       // ✓ saved with its Index
+    const orphan = rows.some(r => !norm(r.engagementKey) && nameOf(r) === nameOf(row) && low(r.topic) === low(row.topic));
+    if (orphan) {
+      throw new Error(
+        `The row was added to the ${LABEL_OF[target]}, but Excel did not save its Index (${index}), ` +
+        `so it can't be edited from the CRM. Fix once in Power Automate: ${FLOW_OF[target]} → "Add a row" → ` +
+        `map the Index column = triggerBody()?['Index'] (add an "Index" column to ${TABLE_OF[target]} first if it isn't there). ` +
+        `Then type ${index} in that row's Index cell in Excel — don't click Add again, it would create a duplicate.`);
+    }
+  }
+  // Row not visible yet (Excel lag) — nothing to report.
+}
+
+/**
+ * For a tracker row with no Index: the Engagement Calendar Index it most likely
+ * belongs to (same client + topic, and start date when both have one). '' if unsure.
+ */
+export async function suggestIndexFor(row) {
+  try {
+    const all = await getAllEngagementsCached();
+    const hits = all.filter(e => norm(e.engagementKey) &&
+      low(e.company) === nameOf(row) && low(e.topic) === low(row.topic) &&
+      (!row.startDate || !e.startDate || String(e.startDate).slice(0, 10) === String(row.startDate).slice(0, 10)));
+    return hits.length === 1 ? norm(hits[0].engagementKey) : '';
+  } catch { return ''; }
 }
