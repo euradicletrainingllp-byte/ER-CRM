@@ -540,12 +540,11 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
         {tab === 'finance' && (
           <>
             <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:8, padding:'8px 12px', marginBottom:12, fontSize:12, color:'#1e3a8a' }}>
-              🔒 View only — invoice and payment details are updated by the finance team in the <strong>Finance Tracker</strong>.
+              🔒 Invoice dates and payment status come from the <strong>Finance Tracker</strong>. <strong>Invoice POC</strong> and <strong>Invoice Comments</strong> are edited here.
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 24px', fontSize:13 }}>
               {[
                 ['Invoice Status', row.invoiceGenerated],
-                ['Invoice POC', row.invoicePoc],
                 ['Invoice Due Date (TAT)', fmtDate(invDue), dueDateColor(invDue)],
                 ['Actual Invoice Date', row.invoiceActualDate ? fmtDate(row.invoiceActualDate) : ''],
                 ['Payment Due Date (TAT)', payDue ? fmtDate(payDue) : 'Set invoice date first', payDue ? dueDateColor(payDue) : undefined],
@@ -557,9 +556,21 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
                   <div style={{ fontWeight:500, color }}>{val || '—'}</div>
                 </div>
               ))}
+              <div>
+                <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Invoice POC</div>
+                {canEdit ? (
+                  <input key={'poc-' + (row.invoicePoc || '')} className="form-input" style={{ fontSize:12 }} defaultValue={row.invoicePoc || ''}
+                    onBlur={e => { if (e.target.value !== (row.invoicePoc || '')) onUpdate(row, { invoicePoc: e.target.value }); }}
+                    onKeyDown={e => e.key === 'Enter' && e.target.blur()} placeholder="Who raises the invoice" />
+                ) : <div style={{ fontWeight:500 }}>{row.invoicePoc || '—'}</div>}
+              </div>
               <div style={{ gridColumn:'1 / -1' }}>
                 <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Invoice Comments</div>
-                <div style={{ fontWeight:500, fontStyle:row.invoiceComment?'italic':'normal', color:row.invoiceComment?'inherit':'var(--muted)' }}>{row.invoiceComment||'—'}</div>
+                {canEdit ? (
+                  <textarea key={'cmt-' + (row.invoiceComment || '')} className="form-input" style={{ fontSize:12, resize:'vertical', minHeight:48 }} defaultValue={row.invoiceComment || ''}
+                    onBlur={e => { if (e.target.value !== (row.invoiceComment || '')) onUpdate(row, { invoiceComment: e.target.value }); }}
+                    placeholder="Add invoice notes…" />
+                ) : <div style={{ fontWeight:500, fontStyle:row.invoiceComment?'italic':'normal', color:row.invoiceComment?'inherit':'var(--muted)' }}>{row.invoiceComment||'—'}</div>}
               </div>
               <div style={{ gridColumn:'1 / -1', fontSize:11, fontWeight:800, letterSpacing:0.5, textTransform:'uppercase', color:'var(--primary)', borderBottom:'1px solid var(--border)', paddingBottom:4, marginTop:4 }}>
                 Commercials

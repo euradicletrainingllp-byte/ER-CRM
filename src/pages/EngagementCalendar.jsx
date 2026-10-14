@@ -7,6 +7,7 @@ import {
   addEngagementRow, updateEngagementRow, deleteEngagementRow, nextEngagementIndex,
 } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import { withEcLock, freshEcFinance } from '../services/syncWithEC.js';
 import ExportButton from '../components/ExportButton.jsx';
 import { autoColumns } from '../utils/exportExcel.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
@@ -15,7 +16,7 @@ import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { addEngagementToOps, addEngagementToCDT, isInTracker } from '../services/addToTrackers.js';
-import { onListChange, getOpsChecklist, getContentDevTracker } from '../services/api.js';
+import { onListChange, getOpsChecklist, getContentDevTracker, ecContractFields } from '../services/api.js';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -77,7 +78,7 @@ function generateNextEgId(existingIds) {
 
 /* ─── Add / Edit Engagement Modal ──────────────────────────────────────── */
 // Finance-owned fields — edited only in the Finance Tracker, read-only in the Engagement Calendar form
-const OPS_MANAGED_FIELDS = ['invoice', 'payment', 'receivedDate', 'travelExpenses', 'gst'];
+const OPS_MANAGED_FIELDS = ['invoice', 'payment', 'receivedDate', 'travelExpenses', 'gst', 'amountReceived'];
 
 function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, engagements }) {
   const isEdit = !!initial;
@@ -781,7 +782,7 @@ const formToExcel = form => ({
   'Consultant - 1':                  form.consultant1    || '',
   'Consultant - 2':                  form.consultant2    || '',
   status:                            form.status         || '',
-  contract:                          form.contract       || '',
+  ...ecContractFields(form.contract),
   'PO Status':                       form.poStatus       || '',
   invoice:                           form.invoice        || '',
   'Price (INR)':                     Number(form.price)  || 0,
@@ -1076,7 +1077,13 @@ export default function EngagementCalendar({ onRefreshed }) {
     setEditRow(null);
     setData(d => d.map(r => (rowKey(r) === oldKey ? { ...updated, pending: true } : r)));
     try {
-      await updateEngagementRow(original.egId, original.sno, formToExcel(form), original.engagementKey);
+      // The EC flow rewrites the whole row. Finance columns are owned by the Finance Tracker,
+      // so take them fresh from Excel at the moment of saving (never from this possibly old form),
+      // and run in the same per-engagement queue as finance saves.
+      await withEcLock(original.engagementKey, async () => {
+        const fresh = await freshEcFinance(original.engagementKey, original.startDate).catch(() => null);
+        await updateEngagementRow(original.egId, original.sno, formToExcel(fresh ? { ...form, ...fresh } : form), original.engagementKey);
+      });
       setData(d => d.map(r => (rowKey(r) === newKey ? { ...r, pending: false } : r)));
       patchEngagementCaches(rows => rows.map(r => (rowKey(r) === oldKey ? { ...r, ...rowFromForm(form) } : r)));
       showToast('✓ Engagement updated!');

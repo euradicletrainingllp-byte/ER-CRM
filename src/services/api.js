@@ -331,6 +331,20 @@ async function callEngagementFlow(action, payload = {}) {
   return callFlow('ENGAGEMENT_CRUD', { action, ...payload });
 }
 
+// EC 'Contract' (shown as Contract Type). The header has been written as 'Contract',
+// 'Contract Type' and with stray spaces — read whichever holds a value.
+function ecContract(r) {
+  const v = getField(r, 'Contract', 'Contract Type', 'Contract ', 'Contract_Type', 'contract');
+  if (v !== undefined && String(v).trim() !== '') return v;
+  for (const [k, val] of Object.entries(r || {})) {
+    const lk = String(k).toLowerCase().replace(/[^a-z]/g, '');
+    if ((lk === 'contract' || lk === 'contracttype') && String(val ?? '').trim() !== '') return val;
+  }
+  return v ?? '';
+}
+/** Every key the EC flow may use for the contract column (it maps whichever one it was built with). */
+export const ecContractFields = v => ({ contract: v || '', Contract: v || '', 'Contract Type': v || '' });
+
 export async function getEngagements(filters = {}) {
   const data = await callEngagementFlow('get', filters);
   const rows = (Array.isArray(data?.value) ? data.value
@@ -367,7 +381,7 @@ export async function getEngagements(filters = {}) {
       consultant2: getField(r, 'Consultant - 2', 'Consultant_2', 'Consultant___2', 'consultant2') ?? '',
       consultant3: getField(r, 'Consultant - 3', 'Consultant_3', 'Consultant___3', 'consultant3') ?? '',
       status:      getField(r, 'Status', 'status') ?? '',
-      contract:    getField(r, 'Contract', 'contract') ?? '',
+      contract:    ecContract(r),
       poStatus:    getField(r, 'PO Status', 'PO_Status', 'POStatus', 'poStatus') ?? '',
       invoice:        formatDate(getField(r, 'Invoice ', 'Invoice', 'invoice')),
       price:          Number(getField(r, 'Price (INR)', 'Price__INR_', 'Price_INR_', 'price') ?? 0) || 0,
@@ -605,7 +619,7 @@ export async function addEngagementRow(rowData) {
     'Consultant - 1':                  rowData.consultant1    || '',
     'Consultant - 2':                  rowData.consultant2    || '',
     status:                            rowData.status         || '',
-    contract:                          rowData.contract       || '',
+    ...ecContractFields(rowData.contract),
     'PO Status':                       rowData.poStatus       || '',
     invoice:                           rowData.invoice        || '',
     'Price (INR)':                     rowData.price          || 0,
