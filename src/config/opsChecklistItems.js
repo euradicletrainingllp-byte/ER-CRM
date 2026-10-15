@@ -2,7 +2,7 @@
  * EURADICLE CRM — OPERATIONS CHECKLIST ITEMS (shared)
  *
  * One list used by:
- *   • BD Tracker      – when a proposal is marked Won, the BD person ticks the
+ *   • BD Tracker      – when a proposal is In Process or Won, the BD person ticks the
  *                       items Operations must arrange (saved in the Solution
  *                       Tracker column "Ops Checklist")
  *   • Engagement Cal. – carried over when the engagement is added

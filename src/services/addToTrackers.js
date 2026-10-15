@@ -10,6 +10,7 @@
  * (Replaces the old bulk "Sync with EC", which was removed on 2026-10-07.)
  */
 
+import { checklistForEngagement } from './bdChecklistSync.js';
 import { getOpsChecklist, addOpsRow, getContentDevTracker, addContentDevRow, peekList, rememberListRow, readTrackerFresh, getAllEngagementsCached } from './api.js';
 
 const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim();
@@ -35,7 +36,7 @@ export function ecToOC(ec) {
   };
   // Day: only when the EC value is a real number (e.g. "0.5+0.5" is left untouched)
   if (ec.day > 0) p.day = String(ec.day);
-  // BD checklist (ticked when the proposal was won) → OC 'BD Checklist'.
+  // BD checklist (ticked by BD — In Process or Won) → OC 'BD Checklist'.
   // Only sent when the EC row carries one, so OC values are never blanked.
   if (String(ec.opsChecklist || '').trim()) p.bdChecklist = String(ec.opsChecklist).trim();
   return p;
@@ -75,6 +76,8 @@ export async function addEngagementToOps(eng) {
   const rows = await getOpsChecklist();                       // fresh read — duplicate check
   if (rows.some(r => norm(r.engagementKey) === index)) return { added: false, index };
   const row = { ...ecToOC(eng), engagementKey: index };
+  // BD checklist (In Process or Won) — taken from the proposal when the EC row doesn't carry it
+  if (!row.bdChecklist) { const cl = await checklistForEngagement(eng).catch(() => ''); if (cl) row.bdChecklist = cl; }
   await addOpsRow(row);
   await confirmIndexSaved('ops', row, index);
   rememberListRow('ops', row);

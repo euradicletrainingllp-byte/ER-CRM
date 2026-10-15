@@ -4,12 +4,13 @@
  *
  * A proposal has several rows (the BD line + one per solution item). The latest version is used,
  * and every field is taken from the first row of that version that has it filled.
- *   Date    Date of Submission to Client → by Sol team → Date of Discussion → Solution Month → BD Month
- *   Value   BD Proposal Value (largest across the version's rows), else Solution Values added up
+ *   Date    Date of Discussion → BD Month → Date of Submission to Client → by Sol team → Solution Month
+ *           (same as the BD Tracker page's Year / Month filters); no date at all → current FY
+ *   Value   BD Proposal Value of the BD line, else Solution Values of that version added up
  *   Status  BD Status Won / Closed / Confirmed → closed · Lost / Dropped / Rejected → lost · else process
  */
 import CLIENT_INDUSTRY from '../config/clientIndustry.js';
-import { clean, keyOf, pad2, fyStartOf } from './erdCharts.jsx';
+import { clean, keyOf, pad2, fyStartOf, CURRENT_FY } from './erdCharts.jsx';
 
 export const MONTH_IDX = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 
@@ -76,28 +77,48 @@ export function buildProposals(solutions) {
     byId.get(id).push(r);
   });
   return [...byId.entries()].map(([id, rows]) => {
-    const top = Math.max(...rows.map(r => versionNo(r.proposalVersion)));
-    const vr = rows.filter(r => versionNo(r.proposalVersion) === top).reverse();   // newest row first
-    const f = k => { for (const r of vr) { const v = clean(r[k]); if (v) return r[k]; } for (const r of rows) { const v = clean(r[k]); if (v) return r[k]; } return ''; };
-    const refYear = +(toISODate(f('dateOfDiscussion')) || toISODate(f('submissionToClient')) || '').slice(0, 4) || null;
-    const date = toISODate(f('submissionToClient')) || toISODate(f('submissionBySolTeam')) || toISODate(f('dateOfDiscussion'))
-              || toISODate(f('solutionMonth'), refYear) || toISODate(f('bdMonth'), refYear);
-    const client = clean(f('clientName'));
-    const bdValue = Math.max(0, ...vr.map(r => toRupees(r.bdProposalValue)));
+    // BD anchor row — same rule as the BD Tracker page: highest version, prefer the row with a BD S No
+    let anchor = rows[0];
+    rows.forEach(r => {
+      const a = versionNo(r.proposalVersion), b = versionNo(anchor.proposalVersion);
+      if (a > b || (a === b && !clean(anchor.bdSNo) && clean(r.bdSNo))) anchor = r;
+    });
+    const top = versionNo(anchor.proposalVersion);
+    const vr = [anchor, ...rows.filter(r => r !== anchor && versionNo(r.proposalVersion) === top)];
+    const f = k => { for (const r of vr) { if (clean(r[k])) return r[k]; } for (const r of rows) { if (clean(r[k])) return r[k]; } return ''; };
+
+    // Proposal month — same order as the BD Tracker page's Year / Month filters:
+    // Date of Discussion → BD Month → Date of Submission to Client → by Sol team → Solution Month
+    const disc = toISODate(f('dateOfDiscussion'));
+    const refYear = +(disc || toISODate(f('submissionToClient')) || '').slice(0, 4) || null;
+    const date = disc || toISODate(f('bdMonth'), refYear) || toISODate(f('submissionToClient'))
+              || toISODate(f('submissionBySolTeam')) || toISODate(f('solutionMonth'), refYear);
+
+    const client = clean(anchor.clientName) || clean(f('clientName'));
+    const bdValue = toRupees(anchor.bdProposalValue) || Math.max(0, ...vr.map(r => toRupees(r.bdProposalValue)));
     const solValue = vr.reduce((s, r) => s + toRupees(r.solutionValue), 0);
     return {
       id, client,
-      topic: clean(f('programTopic')) || clean(f('solutionTopic')),
+      topic: clean(anchor.programTopic) || clean(f('programTopic')) || clean(f('solutionTopic')),
       link: clean(f('proposalV1Link')),
-      status: clean(f('bdStatus')),
+      status: clean(anchor.bdStatus) || clean(f('bdStatus')),
       oppKey: clean(f('bdSNo')) ? `bd-${clean(f('bdSNo'))}` : `p-${id}`,
-      date, fy: date ? fyStartOf(date) : null,
+      date,
+      undated: !date,
+      // A proposal with no date at all is counted in the current FY (it is a recent BD line still being filled in)
+      fy: date ? fyStartOf(date) : CURRENT_FY,
       value: bdValue || solValue,
-      pipeline: pipelineOf(f('bdStatus'), f('status')),
+      pipeline: pipelineOf(clean(anchor.bdStatus) || f('bdStatus'), f('status')),
       industry: clean(f('industry')) || industryFromConfig(client),
       developmentCategory: f('developmentCategory'), engagementType: f('engagementType'),
       lineOfService: f('lineOfService'), typeOfService: f('typeOfService'),
       customization: customizationOf(f('programType')),
     };
   });
+}
+
+/** Month slot (Apr = 0 … Mar = 11) of a proposal; undated ones go to the current month. */
+export function monthSlot(p) {
+  const iso = p.date || new Date().toISOString().slice(0, 10);
+  return (+iso.slice(5, 7) + 8) % 12;
 }

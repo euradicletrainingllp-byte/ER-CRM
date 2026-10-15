@@ -15,6 +15,7 @@ import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
 import ChecklistPicker, { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import ExportButton from '../components/ExportButton.jsx';
+import { pushBdChecklist } from '../services/bdChecklistSync.js';
 
 // In Process and Won proposals must carry the Operations checklist ticked by the BD person
 const CHECKLIST_STATUSES = ['In Process', 'Won'];
@@ -825,6 +826,16 @@ export default function SolutionTracker({ onRefreshed, view }) {
       const notSaved = await checkSolutionDates(form.proposalId, form.proposalVersion, form).catch(() => []);
       setBdModal(null);
       await load();
+      // BD checklist (In Process or Won) → this proposal's Engagement Calendar rows + their Ops Checklist rows
+      if (String(form.opsChecklist || '').trim()) {
+        const solNow = [...rows, { ...form, proposalV1Link: form.proposalV1Link || '' }];
+        pushBdChecklist(form.proposalId, form.opsChecklist, solNow)
+          .then(r => {
+            if (r.ec || r.ops) console.info(`[BD checklist] ${form.proposalId}: copied to ${r.ec} Engagement Calendar and ${r.ops} Ops Checklist row(s)`);
+            if (r.failed.length) alert(`Checklist saved, but it could not be copied to:\n${r.failed.join('\n')}`);
+          })
+          .catch(e => alert(`Checklist saved, but copying it to the Engagement Calendar failed: ${e.message}`));
+      }
       if (notSaved.length) {
         alert(`Saved, but Excel did not keep: ${notSaved.join(' and ')}.\n\n` +
           'The SOLUTION_CRUD flow in Power Automate is not writing this column. Open the flow → ' +

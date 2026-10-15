@@ -16,7 +16,7 @@ import {
   ChartBox, Kpi, SourceNote, NV, TL, GD, GN, PU, RD, bOpts, dlInr, dlStack, dlStackInr, dlInrH, fmtInr, fmtShort, inrAxis, heightFor,
   CURRENT_FY, fyStartOf, fyLong, fyTiny, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
-import { buildProposals } from './proposalData.js';
+import { buildProposals, monthSlot } from './proposalData.js';
 import { LIVE_FROM_FY, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
 
 const MONTHS = ['April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
@@ -39,7 +39,7 @@ function topicMatch(a, b) {
 }
 
 export default function SalesLiveDashboard({ solutions, engagements, refreshing }) {
-  const proposals = useMemo(() => buildProposals(solutions).filter(p => p.fy != null && p.fy >= LIVE_FROM_FY), [solutions]);
+  const proposals = useMemo(() => buildProposals(solutions).filter(p => p.fy >= LIVE_FROM_FY), [solutions]);
   const curProps = useMemo(() => proposals.filter(p => p.fy === CURRENT_FY), [proposals]);
 
   // Engagement Calendar sessions that count as revenue
@@ -51,7 +51,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   const propStatus = useMemo(() => {
     const rows = MONTHS.map(month => ({ month, n: 0, wonC: 0, lostC: 0, ipC: 0, wonV: 0, lostV: 0, ipV: 0, wonCl: new Set(), ipCl: new Set() }));
     curProps.forEach(p => {
-      const r = rows[monthIdx(p.date)];
+      const r = rows[monthSlot(p)];
       r.n++;
       if (p.pipeline === 'closed') { r.wonC++; r.wonV += p.value; if (p.client) r.wonCl.add(p.client); }
       else if (p.pipeline === 'lost') { r.lostC++; r.lostV += p.value; }

@@ -6,6 +6,7 @@ import { getAllEngagementsCached, peekAllEngagements, peekList, getOpsChecklist,
 import OpsLiveDashboard from '../components/OpsLiveDashboard.jsx';
 import SolLiveDashboard from '../components/SolLiveDashboard.jsx';
 import SalesLiveDashboard from '../components/SalesLiveDashboard.jsx';
+import FinanceLiveDashboard from '../components/FinanceLiveDashboard.jsx';
 
 // Department dashboards (add more tabs here as departments are added)
 const DASH_TABS = [
@@ -13,6 +14,7 @@ const DASH_TABS = [
   { key: 'operations', label: '⚙️ Operations' },
   { key: 'solutioning', label: '💡 Solutioning' },
   { key: 'sales',       label: '📈 Sales' },
+  { key: 'finance',     label: '💰 Finance' },
 ];
 const TAB_KEY = 'ercrm.dashboard.tab';
 const readTab = () => { try { return localStorage.getItem(TAB_KEY) || 'overview'; } catch { return 'overview'; } };
@@ -132,7 +134,13 @@ export default function Dashboard({ onRefreshed }) {
         {refreshing && !loading && <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>⟳ Updating from Excel…</span>}
       </div>
 
-      {tab === 'sales' ? (
+      {tab === 'finance' ? (
+        loading ? (
+          <LoadingState message="Loading Engagement Calendar finance data…" />
+        ) : (
+          <FinanceLiveDashboard engagements={engData} refreshing={refreshing} />
+        )
+      ) : tab === 'sales' ? (
         !solData || loading ? (
           <LoadingState message="Loading BD Tracker and Engagement Calendar…" />
         ) : (

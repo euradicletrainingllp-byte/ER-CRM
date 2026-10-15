@@ -67,3 +67,6 @@
 .erd .mt tr.cur td{background:rgba(0,128,140,0.06)}
 @media(max-width:900px){.erd .g5{grid-template-columns:1fr 1fr}.erd .c21{grid-template-columns:1fr}}
 .erd .mt.compact th,.erd .mt.compact td{padding:7px 6px;font-size:12px}
+.erd .g3{grid-template-columns:repeat(3,1fr)}
+.erd .tg.warn{background:#FFF3E0;color:#B45309}.erd .tg.bad{background:#FEF0EE;color:#C03A2B}
+@media(max-width:900px){.erd .g3{grid-template-columns:1fr 1fr}}

@@ -126,3 +126,39 @@ export const SALES_CLIENT_ENGAGEMENT = [
 ];
 // New-client counts exactly as recorded in the Excel (the Excel's own figures, kept as-is)
 export const SALES_NEW_CLIENTS = { 2020: 2, 2021: 2, 2022: 7, 2023: 10, 2024: 9, 2025: 8 };
+
+/* ─────────────────────────────── FINANCE ─────────────────────────────── */
+// Earlier years as recorded in the Finance sheet (April → October only). FY 2026-27 onward is live.
+export const FIN_REVENUE_L = {          // Revenue (₹ Lakhs) per month, Apr → Oct
+  2023: [10.78, 10.18, 28.98, 19.24, 10.51, 12.42, 9],
+  2024: [17.8, 16.4, 4.85, 4.16, 6, 8.75, 0],
+  2025: [8.86, 4.52, 11.98, 16.75, 8.94, 13.92, 8.72],
+};
+export const FIN_INVOICES = {           // Invoices / vouchers raised per month, Apr → Oct
+  2023: [11, 10, 24, 14, 10, 10, 9],
+  2024: [8, 8, 2, 2, 6, 8, 0],
+  2025: [7, 7, 6, 9, 11, 12, 9],
+};
+export const FIN_BILLING_DAYS = {       // Billing days per month, Apr → Oct
+  2023: [11, 10, 24, 23, 18.5, 18, 18.5],
+  2024: [14.5, 32.5, 0.75, 5.5, 10.5, 12.5, 7],
+  2025: [7, 9, 6.5, 19, 13.75, 12.5, 10],
+};
+export const FIN_AVG_PER_DAY = [         // Avg. Billing per Day — full financial years
+  { fy: 2023, revenueL: 139.96, days: 231.75 },
+  { fy: 2024, revenueL: 99.12, days: 119 },
+  { fy: 2025, revenueL: 142.61, days: 138.125 },
+];
+// Credit notes have no column in the trackers, so they stay as recorded in the Excel
+export const FIN_CREDIT_NOTES = {
+  2026: [
+    ['DBS', 1, 0.7, '17th Mar 2026'],
+    ['DBS', 1, 9.25, 'Ascend June part invoice re-raised in July'],
+    ['Zscaler', 1, 2.92, '30th July 2026 - Service Excellence (Mohali)'],
+    ['Arcesium', 1, 1.91, 'Re-raise the invoice (Sept)'],
+    ['DBS', 1, 5.22, 'Aug Ascend invoice'],
+    ['DBS', 1, 3.88, 'Aug Ascend invoice'],
+  ],
+};
+// Total Targeted Revenue for the year (₹ Crore)
+export const FIN_TARGET_CR = { 2026: 4.1 };

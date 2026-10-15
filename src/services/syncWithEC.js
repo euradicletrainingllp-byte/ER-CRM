@@ -401,3 +401,6 @@ export function saveEcFinance({ ec: shown, changes, oc }) {
     return { ok: true, row, opsCopied, ocChanges };
   });
 }
+
+// Used by bdChecklistSync.js (BD checklist → Engagement Calendar / Ops Checklist)
+export { ecUpdateBody, runForIndex };

@@ -1064,7 +1064,7 @@ async function fetchSolutionTracker() {
     submissionBySolTeam: formatDate(getField(r, 'Date of Submission by Sol team', 'Date_of_Submission_by_Sol_team', 'submissionBySolTeam')),
     submissionToClient:  formatDate(firstFilled(r, ...SUBMISSION_KEYS, 'submissionToClient') ||
                            firstFilled(r, ...Object.keys(r).filter(k => /^dateofsubmission(toclient|erteam)/.test(looseKey(k))))),
-    // Ticked by the BD person when the proposal is Won — what Operations must arrange
+    // Ticked by the BD person (In Process or Won) — what Operations must arrange
     opsChecklist:        getField(r, 'Ops Checklist', 'Ops_Checklist', 'opsChecklist') ?? '',
   })).filter(r => r.proposalId);
 }

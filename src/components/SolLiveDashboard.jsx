@@ -16,7 +16,7 @@ import {
   ChartBox, Kpi, SourceNote, NV, TL, GD, GN, RD, PU, bOpts, dlNum, dlInr, dlStack, dlStackInr, dlH, dlInrH, fmtInr, fmtShort, inrAxis, heightFor,
   CURRENT_FY, fyStartOf, fyLong, fyTiny, pad2, clean, keyOf,
 } from './erdCharts.jsx';
-import { buildProposals } from './proposalData.js';
+import { buildProposals, monthSlot } from './proposalData.js';
 import { LIVE_FROM_FY, SOL_BASELINE } from '../config/dashboardBaseline.js';
 
 const NR = 'Not recorded';
@@ -96,14 +96,15 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
   // A proposal has several rows in the Solution Tracker (the BD line + one per solution item).
   // Use the latest version, and for every field take the first row of that version that has it filled.
   const allProposals = useMemo(() => buildProposals(solutions), [solutions]);
-  const proposals = useMemo(() => allProposals.filter(p => p.fy != null && p.fy >= LIVE_FROM_FY), [allProposals]);
+  const proposals = useMemo(() => allProposals.filter(p => p.fy >= LIVE_FROM_FY), [allProposals]);
 
   /* Live data check — explains empty charts */
   const check = useMemo(() => {
     const cur = proposals.filter(p => p.fy === CURRENT_FY);
     const miss = k => cur.filter(p => !clean(p[k])).length;
     return {
-      total: allProposals.length, cur: cur.length, undated: allProposals.filter(p => p.fy == null).length,
+      total: allProposals.length, cur: cur.length, undated: allProposals.filter(p => p.undated).length,
+      byFy: Object.entries(allProposals.reduce((m, p) => { m[p.fy] = (m[p.fy] || 0) + 1; return m; }, {})).sort((a, b) => b[0] - a[0]),
       missing: [['Industry', miss('industry')], ['Development Category', miss('developmentCategory')], ['Engagement Type', miss('engagementType')],
         ['Line of Service', miss('lineOfService')], ['Type of Service', miss('typeOfService')], ['Program Type', miss('customization')], ['Value', cur.filter(p => !p.value).length]]
         .filter(([, n]) => n > 0),
@@ -115,7 +116,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
     const cur = proposals.filter(p => p.fy === CURRENT_FY);
     const rows = MONTH_LABELS.map(month => ({ month, n: 0, wonC: 0, lostC: 0, ipC: 0, wonV: 0, lostV: 0, ipV: 0, wonCl: new Set(), ipCl: new Set() }));
     cur.forEach(p => {
-      const r = rows[(+p.date.slice(5, 7) + 8) % 12];
+      const r = rows[monthSlot(p)];
       r.n++;
       if (p.pipeline === 'closed') { r.wonC++; r.wonV += p.value; if (p.client) r.wonCl.add(p.client); }
       else if (p.pipeline === 'lost') { r.lostC++; r.lostV += p.value; }
@@ -138,7 +139,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
         else { o.value = Math.max(o.value, p.value); if (!o.industry) o.industry = p.industry; }
       });
       const monthly = Array(12).fill(0);
-      ps.forEach(p => { const m = +p.date.slice(5, 7); monthly[(m + 8) % 12] += 1; });
+      ps.forEach(p => { monthly[monthSlot(p)] += 1; });
       out[y] = {
         summary: { total: ps.length, closed: ps.filter(p => p.pipeline === 'closed').length,
           lost: ps.filter(p => p.pipeline === 'lost').length, process: ps.filter(p => p.pipeline === 'process').length },
@@ -331,12 +332,15 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
         <div className="card"><h3>Proposal Funnel (YTD)</h3><div className="cs">Won vs Lost vs In-Process by value</div>
           {tot.wonV + tot.lostV + tot.ipV > 0 ? <ChartBox config={funnelCfg} /> : <div className="erd-empty">No proposal values recorded in {curLabel} yet</div>}
         </div>
-        <div className="card"><h3>Live Data Check — Solution Tracker</h3><div className="cs">Why a chart may look empty</div>
+        <div className="card"><h3>Live Data Check — Solution Tracker</h3><div className="cs">How the Solution Tracker rows are counted — month = Date of Discussion, else BD Month (same as the BD Tracker page)</div>
           <table className="mt">
             <tbody>
               <tr><td>Proposals in the Solution Tracker (unique Proposal IDs)</td><td className="nr">{check.total}</td></tr>
               <tr><td>Counted in {curLabel}</td><td className="nr">{check.cur}</td></tr>
-              <tr><td>No usable date (not counted in any FY)</td><td className="nr" style={{ color: check.undated ? RD : undefined }}>{check.undated}</td></tr>
+              <tr><td>No date at all — counted in {curLabel} (fill Date of Discussion)</td><td className="nr" style={{ color: check.undated ? RD : undefined }}>{check.undated}</td></tr>
+              {check.byFy.map(([y, n]) => (
+                <tr key={y}><td>Proposals dated in {fyLong(+y)}{+y < LIVE_FROM_FY ? ' (shown in the fixed Excel figures instead)' : ''}</td><td className="nr">{n}</td></tr>
+              ))}
               {check.missing.map(([k, n]) => (
                 <tr key={k}><td>{curLabel} proposals with blank <strong>{k}</strong> (shown as "Not recorded")</td><td className="nr" style={{ color: RD }}>{n}</td></tr>
               ))}

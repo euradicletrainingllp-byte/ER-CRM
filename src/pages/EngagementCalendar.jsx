@@ -16,6 +16,7 @@ import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { addEngagementToOps, addEngagementToCDT, isInTracker } from '../services/addToTrackers.js';
+import { checklistForEngagement } from '../services/bdChecklistSync.js';
 import { onListChange, getOpsChecklist, getContentDevTracker, ecContractFields } from '../services/api.js';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
@@ -306,7 +307,7 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
           </div>
           <div className="form-field full">
             <label className="form-label">
-              Operations Checklist (set by BD when Won) 🔒
+              Operations Checklist (set by BD — In Process or Won) 🔒
             </label>
             {/* Read-only here — the list can only be changed in the BD Tracker */}
             <div style={{ background: '#f1f5f9', border: '1px solid #e2e8f0', borderRadius: 8, padding: '8px 10px' }}>
@@ -1050,6 +1051,11 @@ export default function EngagementCalendar({ onRefreshed }) {
   const handleAdd = async (form) => {
     setSaving(true);
     try {
+      // BD checklist travels with the program whether the proposal is In Process or Won
+      if (!String(form.opsChecklist || '').trim()) {
+        const cl = await checklistForEngagement(form).catch(() => '');
+        if (cl) form = { ...form, opsChecklist: cl };
+      }
       // The CRM gives every new engagement its permanent Index (highest Index + 1)
       const newRow = { ...rowFromForm(form), engagementKey: await nextEngagementIndex() };
       await addEngagementRow(newRow);
