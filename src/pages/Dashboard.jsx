@@ -3,14 +3,16 @@ import KPICard from '../components/KPICard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { getAllEngagementsCached, peekAllEngagements, peekList, getOpsChecklist, getSolutionTracker } from '../services/api.js';
-import OperationsDashboard from '../components/OperationsDashboard.jsx';
-import SolutioningDashboard from '../components/SolutioningDashboard.jsx';
+import OpsLiveDashboard from '../components/OpsLiveDashboard.jsx';
+import SolLiveDashboard from '../components/SolLiveDashboard.jsx';
+import SalesLiveDashboard from '../components/SalesLiveDashboard.jsx';
 
 // Department dashboards (add more tabs here as departments are added)
 const DASH_TABS = [
   { key: 'overview',   label: '📋 Overview' },
   { key: 'operations', label: '⚙️ Operations' },
   { key: 'solutioning', label: '💡 Solutioning' },
+  { key: 'sales',       label: '📈 Sales' },
 ];
 const TAB_KEY = 'ercrm.dashboard.tab';
 const readTab = () => { try { return localStorage.getItem(TAB_KEY) || 'overview'; } catch { return 'overview'; } };
@@ -130,7 +132,13 @@ export default function Dashboard({ onRefreshed }) {
         {refreshing && !loading && <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>⟳ Updating from Excel…</span>}
       </div>
 
-      {tab === 'solutioning' ? (
+      {tab === 'sales' ? (
+        !solData || loading ? (
+          <LoadingState message="Loading BD Tracker and Engagement Calendar…" />
+        ) : (
+          <SalesLiveDashboard solutions={solData} engagements={engData} refreshing={refreshing} />
+        )
+      ) : tab === 'solutioning' ? (
         !solData ? (
           <LoadingState message="Loading Solution Tracker and BD Tracker…" />
         ) : (
@@ -140,13 +148,13 @@ export default function Dashboard({ onRefreshed }) {
                 ⚠️ Showing the last loaded data — the Solution Tracker could not be refreshed ({errors.solution.message}).
               </div>
             )}
-            <SolutioningDashboard solutions={solData} bd={[]} refreshing={refreshing} />
+            <SolLiveDashboard solutions={solData} refreshing={refreshing} />
           </>
         )
       ) : loading ? (
         <LoadingState message="Loading CRM data from OneDrive Excel…" />
       ) : tab === 'operations' ? (
-        <OperationsDashboard engagements={engData} refreshing={refreshing} />
+        <OpsLiveDashboard engagements={engData} refreshing={refreshing} />
       ) : (
       <>
       {/* KPIs */}
