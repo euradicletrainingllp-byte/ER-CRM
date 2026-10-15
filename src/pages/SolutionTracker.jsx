@@ -16,8 +16,10 @@ import ChecklistPicker, { ChecklistChips } from '../components/ChecklistPicker.j
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import ExportButton from '../components/ExportButton.jsx';
 
-// A Won proposal must carry the Operations checklist ticked by the BD person
-const needsChecklist = r => r?.bdStatus === 'Won' && parseChecklist(r.opsChecklist).length === 0;
+// In Process and Won proposals must carry the Operations checklist ticked by the BD person
+const CHECKLIST_STATUSES = ['In Process', 'Won'];
+const showsChecklist = r => CHECKLIST_STATUSES.includes(r?.bdStatus);
+const needsChecklist = r => showsChecklist(r) && parseChecklist(r.opsChecklist).length === 0;
 // Proposal link for a solution item: its own link, else any link saved under the same Proposal ID
 const proposalLinkFor = (rows, pid, own) =>
   own || (rows.find(x => x.proposalId === pid && String(x.proposalV1Link || '').trim()) || {}).proposalV1Link || '';
@@ -449,11 +451,11 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>Copied automatically to every Solution item of this proposal{revision ? ' version' : ''} — editable per item.</span>
           </Field>
 
-          {/* ── Won → BD ticks what Operations must arrange ── */}
-          {form.bdStatus === 'Won' && (
+          {/* ── In Process / Won → BD ticks what Operations must arrange ── */}
+          {showsChecklist(form) && (
             <Field label="Operations Checklist * — tick everything Operations must arrange">
               <div style={{ fontSize: 12, color: '#9a3412', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, padding: '6px 10px', marginBottom: 6 }}>
-                🎉 Proposal won! This list goes to the Engagement Calendar and the Operations Checklist when the engagement is added.
+                {form.bdStatus === 'Won' ? '🎉 Proposal won! ' : ''}This list goes to the Engagement Calendar and the Operations Checklist when the engagement is added.
               </div>
               <ChecklistPicker value={form.opsChecklist} onChange={v => set('opsChecklist', v)} required />
             </Field>
@@ -490,7 +492,7 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
           <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Proposal ID and Client Name are required</p>
         )}
         {checklistMissing && (
-          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Tick the Operations Checklist before saving a Won proposal</p>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Tick the Operations Checklist before saving an In Process or Won proposal</p>
         )}
       </div>
     </div>
@@ -774,7 +776,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
   }
 
   async function handleSaveBD(form) {
-    if (needsChecklist(form)) { alert('Please tick the Operations Checklist for this Won proposal.'); return; }
+    if (needsChecklist(form)) { alert(`Please tick the Operations Checklist for this ${form.bdStatus} proposal.`); return; }
     const missingDates = [!form.dateOfDiscussion && 'Date of Discussion', !form.submissionToClient && 'Date of Submission to Client'].filter(Boolean);
     if (missingDates.length) { alert(`Please fill ${missingDates.join(' and ')} — every BD line needs both dates.`); return; }
     if (form._revision) {
@@ -1087,7 +1089,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                         <td style={tdStyle}>
                           {pill(r.bdStatus)}
                           {needsChecklist(r) && (
-                            <span title="Won — Operations Checklist not ticked yet. Edit the BD lead to tick it." style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700, color: '#b91c1c' }}>⚠ Checklist pending</span>
+                            <span title="Operations Checklist not ticked yet. Edit the BD lead to tick it." style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700, color: '#b91c1c' }}>⚠ Checklist pending</span>
                           )}
                         </td>
                         <td style={tdStyle}>{r.bdProposalValue ? `₹${r.bdProposalValue}` : '—'}</td>
@@ -1191,7 +1193,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                       </table>
                                     </div>
                                   )}
-                                  {r.bdStatus === 'Won' && (
+                                  {showsChecklist(r) && (
                                     <div style={{ gridColumn: '1 / -1' }}>
                                       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Operations Checklist</div>
                                       <ChecklistChips value={r.opsChecklist} empty="⚠ Not ticked yet — edit this lead to tick it" />
@@ -1248,7 +1250,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                                 {canCreate('engagement') && (
                                                   <button
                                                     title="Add to Engagement Calendar"
-                                                    onClick={() => (needsChecklist(r) ? alert('This proposal is Won but the Operations Checklist has not been ticked yet.\n\nAsk the BD person to tick it in the BD Tracker (edit the lead) before adding the engagement.') : true) && navigate('/engagement', {
+                                                    onClick={() => (needsChecklist(r) ? alert('The Operations Checklist for this proposal has not been ticked yet.\n\nAsk the BD person to tick it in the BD Tracker (edit the lead) before adding the engagement.') : true) && navigate('/engagement', {
                                                       state: {
                                                         prefill: {
                                                           company:     r.clientName       || '',
