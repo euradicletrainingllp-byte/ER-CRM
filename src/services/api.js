@@ -1020,6 +1020,32 @@ const isDateCol = k => /date|discus|submis|expt/i.test(looseKey(k));
 const discussionFields = v => ({ 'Date of Discusssion': v || '', 'Date of Discussion': v || '' });
 const submissionFields = v => ({ 'Date of Submission to Client': v || '', 'Date of submission ER Team4': v || '' });
 
+// ── BD Tracker columns added 2026-10-19 (far right of Table1, after "Ops Checklist") ──
+// CRM field → exact Excel header. Read with loose header matching (spaces / case ignored).
+// "Total Cost of Proposal" is an Excel formula (Price per Batch × Total Expected Batches):
+// it is only READ, never sent — writing to it would replace the formula in that row.
+export const BD_EXTRA_COLUMNS = {
+  expectedHeadcount:    'Total Expected Headcount',
+  expectedBatches:      'Total Expected Batches',
+  pricePerBatch:        'Price per Batch',
+  participantProfile:   'Participant Profile',
+  bdComments:           'BD Comments',
+  clientPocEmail:       'Client POC Email ID',
+  clientPocDesignation: 'Client POC Designation',
+  additionalPocs:       'Additional Client POCs',   // JSON list of { name, email, phone, designation }
+};
+const TOTAL_COST_COL = 'Total Cost of Proposal';
+const bdExtraRead = r => ({
+  ...Object.fromEntries(Object.entries(BD_EXTRA_COLUMNS).map(([k, col]) => [k, String(firstFilled(r, col) ?? '')])),
+  totalCost: String(firstFilled(r, TOTAL_COST_COL) ?? ''),
+});
+// Only the keys the row actually carries are sent. A key that is left out reaches the flow as
+// null, and "Update a row" then leaves that Excel cell unchanged — so no save path can blank
+// these columns by accident. '' is sent only when a value was cleared on purpose.
+const bdExtraSend = d => Object.fromEntries(Object.entries(BD_EXTRA_COLUMNS)
+  .filter(([k]) => d?.[k] !== undefined)
+  .map(([k, col]) => [col, d[k] == null ? '' : String(d[k])]));
+
 async function callSolutionFlow(action, payload = {}) {
   return callFlow('SOLUTION_CRUD', { action, ...payload });
 }
@@ -1066,6 +1092,8 @@ async function fetchSolutionTracker() {
                            firstFilled(r, ...Object.keys(r).filter(k => /^dateofsubmission(toclient|erteam)/.test(looseKey(k))))),
     // Ticked by the BD person (In Process or Won) — what Operations must arrange
     opsChecklist:        getField(r, 'Ops Checklist', 'Ops_Checklist', 'opsChecklist') ?? '',
+    // Headcount, batches, price per batch, total cost, participant profile, comments, POC details
+    ...bdExtraRead(r),
   })).filter(r => r.proposalId);
 }
 
@@ -1097,6 +1125,7 @@ export async function addSolutionRow(rowData) {
     'Proposal V1 Link2':                rowData.proposalV1Link      || '',
     ...submissionFields(rowData.submissionToClient),
     'Ops Checklist':                    rowData.opsChecklist        || '',
+    ...bdExtraSend(rowData),   // new BD columns (never "Total Cost of Proposal" — Excel formula)
   });
 }
 
@@ -1130,6 +1159,7 @@ export async function updateSolutionRow(sno, rowData) {
     'Proposal V1 Link2':                rowData.proposalV1Link      || '',
     ...submissionFields(rowData.submissionToClient),
     'Ops Checklist':                    rowData.opsChecklist        || '',
+    ...bdExtraSend(rowData),   // new BD columns (never "Total Cost of Proposal" — Excel formula)
   });
 }
 

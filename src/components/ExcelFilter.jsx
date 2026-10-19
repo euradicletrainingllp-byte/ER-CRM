@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 
 /* Shared Excel-style column filters for engagement data
    (used by Engagement Calendar and ER Calendar).                          */
@@ -58,14 +59,45 @@ function sortFilterValues(vals, col) {
 export function ExcelFilter({ label, options, universe, selected, onChange, sortDir, onSort }) {
   const [open, setOpen]         = useState(false);
   const [search, setSearch]     = useState('');
-  const [alignRight, setAlignRight] = useState(false);
-  const ref = useRef(null);
+  // Where the menu is drawn. It floats above the page (portal + position: fixed) so a
+  // page or card that hides overflow can never cut it off, and it always fits the screen.
+  const [pos, setPos]           = useState(null);
+  const ref     = useRef(null);
+  const menuRef = useRef(null);
 
+  // Close on a click outside the button AND outside the floating menu
   useEffect(() => {
-    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    if (!open) return;
+    const handler = e => {
+      if (ref.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+    document.addEventListener('keydown', onKey, true);
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('keydown', onKey, true); };
+  }, [open]);
+
+  // Place the menu under the button (or above it when there is more room there),
+  // inside the screen, and keep it there while the page scrolls or resizes.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const btn = ref.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) { setOpen(false); return; }   // button scrolled away
+      const W = 280, M = 8, vw = window.innerWidth, vh = window.innerHeight;
+      const below = vh - r.bottom - M, above = r.top - M;
+      const up = below < 300 && above > below;
+      const left = Math.max(M, Math.min(r.left, vw - W - M));
+      setPos({ left, top: up ? null : r.bottom + 4, bottom: up ? vh - r.top + 4 : null, maxH: Math.max(160, (up ? above : below) - 4) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open]);
 
   const active    = !!selected;
   const isChecked = v => !selected || selected.has(v);
@@ -108,10 +140,6 @@ export function ExcelFilter({ label, options, universe, selected, onChange, sort
   });
 
   const openMenu = () => {
-    if (!open && ref.current) {
-      const r = ref.current.getBoundingClientRect();
-      setAlignRight(r.left + 300 > window.innerWidth);
-    }
     setOpen(o => !o);
     setSearch('');
   };
@@ -148,18 +176,20 @@ export function ExcelFilter({ label, options, universe, selected, onChange, sort
         <span style={{ fontSize: 10, color: active ? '#2563eb' : '#94a3b8' }}>▼</span>
       </button>
 
-      {open && (
-        <div style={{
-          position: 'absolute', top: '100%', [alignRight ? 'right' : 'left']: 0, marginTop: 4,
+      {open && pos && createPortal(
+        <div ref={menuRef} className="xf-menu" style={{
+          position: 'fixed', left: pos.left,
+          ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }),
+          maxHeight: pos.maxH, display: 'flex', flexDirection: 'column',
           background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 600,
-          width: 280, padding: '6px 0 10px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 2000,
+          width: 280, padding: '6px 0 10px', boxSizing: 'border-box',
         }}>
           {/* Sort — like Excel's "Sort A to Z / Z to A" */}
-          {onSort && <button style={menuBtn(sortDir === 'asc')}  onClick={() => onSort(sortDir === 'asc'  ? null : 'asc')}>↑ Sort A → Z</button>}
-          {onSort && <button style={menuBtn(sortDir === 'desc')} onClick={() => onSort(sortDir === 'desc' ? null : 'desc')}>↓ Sort Z → A</button>}
+          {onSort && <button style={{ ...menuBtn(sortDir === 'asc'), flexShrink: 0 }}  onClick={() => onSort(sortDir === 'asc'  ? null : 'asc')}>↑ Sort A → Z</button>}
+          {onSort && <button style={{ ...menuBtn(sortDir === 'desc'), flexShrink: 0 }} onClick={() => onSort(sortDir === 'desc' ? null : 'desc')}>↓ Sort Z → A</button>}
           <button
-            style={{ ...menuBtn(false), color: active ? '#dc2626' : '#cbd5e1', cursor: active ? 'pointer' : 'default' }}
+            style={{ ...menuBtn(false), flexShrink: 0, color: active ? '#dc2626' : '#cbd5e1', cursor: active ? 'pointer' : 'default' }}
             disabled={!active}
             onClick={() => onChange(undefined)}
           >✕ Clear Filter from “{label}”</button>
@@ -167,9 +197,9 @@ export function ExcelFilter({ label, options, universe, selected, onChange, sort
           <div style={{ borderTop: '1px solid #f1f5f9', margin: '6px 0 8px' }} />
 
           {/* Search within filter */}
-          <div style={{ padding: '0 10px 8px' }}>
+          <div style={{ padding: '0 10px 8px', flexShrink: 0 }}>
             <input
-              autoFocus
+              ref={el => { if (el && document.activeElement !== el && !el.dataset.focused) { el.dataset.focused = '1'; el.focus({ preventScroll: true }); } }}
               placeholder="Search…"
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -178,7 +208,7 @@ export function ExcelFilter({ label, options, universe, selected, onChange, sort
           </div>
 
           {/* Value list */}
-          <div style={{ maxHeight: 240, overflowY: 'auto', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', padding: '4px 0' }}>
+          <div style={{ flex: '1 1 auto', minHeight: 60, maxHeight: 280, overflowY: 'auto', borderTop: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', padding: '4px 0' }}>
             {visible.length > 0 && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: '#1a3a5c' }}>
                 <input
@@ -219,7 +249,7 @@ export function ExcelFilter({ label, options, universe, selected, onChange, sort
             })}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px 0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px 0', flexShrink: 0 }}>
             <span style={{ fontSize: 11, color: '#94a3b8' }}>
               {active ? `${selected.size} of ${universe.length} selected` : `All ${universe.length} values`}
             </span>
@@ -228,7 +258,8 @@ export function ExcelFilter({ label, options, universe, selected, onChange, sort
               style={{ fontSize: 12, padding: '4px 16px', border: 'none', borderRadius: 6, background: '#2563eb', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
             >OK</button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -246,28 +277,41 @@ export function useExcelFilters(data, columns = FILTER_COLUMNS) {
       return copy;
     });
 
+  // Drop filters / sort of columns this list doesn't have (e.g. after switching BD ↔ Solution view)
+  const colKeys = columns.map(c => c.key).join('|');
+  useEffect(() => {
+    const keys = new Set(columns.map(c => c.key));
+    setFilters(prev => (Object.keys(prev).every(k => keys.has(k)) ? prev
+      : Object.fromEntries(Object.entries(prev).filter(([k]) => keys.has(k)))));
+    setSort(s => (s && !keys.has(s.key) ? null : s));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [colKeys]);
+
   const rowValues = useMemo(() =>
-    data.map(e => {
+    (data || []).map(e => {
       const m = {};
-      columns.forEach(c => { m[c.key] = cellValues(e, c); });
+      columns.forEach(c => {
+        try { m[c.key] = cellValues(e, c); } catch { m[c.key] = [BLANK]; }
+      });
       return m;
     }),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [data]);
+  [data, colKeys]);
 
   const passes = (vals, exceptKey) =>
-    Object.entries(filters).every(([k, set]) => k === exceptKey || !vals[k] || vals[k].some(v => set.has(v)));
+    Object.entries(filters).every(([k, set]) =>
+      k === exceptKey || !(set instanceof Set) || !vals?.[k] || vals[k].some(v => set.has(v)));
 
   const universes = useMemo(() => {
     const u = {};
     columns.forEach(c => {
       const s = new Set();
-      rowValues.forEach(v => v[c.key].forEach(x => s.add(x)));
+      rowValues.forEach(v => (v[c.key] || [BLANK]).forEach(x => s.add(x)));
       u[c.key] = sortFilterValues(s, c);
     });
     return u;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowValues]);
+  }, [rowValues, colKeys]);
 
   // Values + counts in each dropdown, narrowed by the OTHER active filters (like Excel)
   const filterOptions = useMemo(() => {
@@ -276,17 +320,17 @@ export function useExcelFilters(data, columns = FILTER_COLUMNS) {
       const counts = new Map();
       rowValues.forEach(v => {
         if (!passes(v, c.key)) return;
-        v[c.key].forEach(x => counts.set(x, (counts.get(x) || 0) + 1));
+        (v[c.key] || [BLANK]).forEach(x => counts.set(x, (counts.get(x) || 0) + 1));
       });
       (filters[c.key] ? [...filters[c.key]] : []).forEach(x => { if (!counts.has(x)) counts.set(x, 0); });
       out[c.key] = sortFilterValues([...counts.keys()], c).map(value => ({ value, count: counts.get(value) }));
     });
     return out;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowValues, filters]);
+  }, [rowValues, filters, colKeys]);
 
   const filtered = useMemo(() => {
-    const rows = data.filter((e, i) => passes(rowValues[i]));
+    const rows = (data || []).filter((e, i) => passes(rowValues[i]));
     if (!sort) return rows;
     const col = columns.find(c => c.key === sort.key);
     if (!col) return rows;
@@ -306,9 +350,9 @@ export function useExcelFilters(data, columns = FILTER_COLUMNS) {
       return r * dir;
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, rowValues, filters, sort]);
+  }, [data, rowValues, filters, sort, colKeys]);
 
-  const activeFilters = Object.keys(filters).length;
+  const activeFilters = Object.keys(filters).filter(k => columns.some(c => c.key === k)).length;
   const clearAll = () => { setFilters({}); setSort(null); };
 
   return { columns, filters, setColumnFilter, filterOptions, universes, filtered, sort, setSort, activeFilters, clearAll };

@@ -145,7 +145,7 @@ export default function BDPipeline({ onRefreshed }) {
 
   const filtered = useMemo(() => data.filter(r => {
     const q = search.toLowerCase();
-    const matchQ = !q || r.client.toLowerCase().includes(q) || r.topic.toLowerCase().includes(q) || r.status.toLowerCase().includes(q);
+    const matchQ = !q || [r.client, r.topic, r.status].some(v => String(v ?? '').toLowerCase().includes(q));
     const matchS = stageF === 'All' || r.status === stageF;
     return matchQ && matchS;
   }), [data, search, stageF]);

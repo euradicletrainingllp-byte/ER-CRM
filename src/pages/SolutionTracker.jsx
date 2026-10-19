@@ -5,6 +5,7 @@ import {
   addSolutionRow,
   updateSolutionRow,
   deleteSolutionRow,
+  BD_EXTRA_COLUMNS,
   checkSolutionDates,
 } from '../services/api.js';
 import { usePermissions } from '../hooks/usePermissions.js';
@@ -73,6 +74,19 @@ function nextVersionLabel(rows, pid, current) {
 // Solution-item fields — never copied onto a revised BD version row
 const SOL_FIELDS = ['solutionTopic', 'solutionMonth', 'programType', 'engagementType', 'lineOfService',
   'typeOfService', 'developmentCategory', 'solutionValue', 'status', 'remarks', 'proposalV1Link'];
+// Solution-item fields carried over to a revised version (Solution Month / S Nos are left to Excel)
+const SOL_COPY_FIELDS = ['solutionTopic', 'programType', 'engagementType', 'lineOfService',
+  'typeOfService', 'developmentCategory', 'solutionValue', 'remarks', 'proposalV1Link'];
+const pick = (o, keys) => Object.fromEntries(keys.map(k => [k, o?.[k] ?? '']));
+// Each version of a proposal is its own line in the list: key = Proposal ID + version number
+const groupKey = (pid, v) => `${pid}|${versionNo(v)}`;
+const rowsOfVersion = (rows, pid, v) =>
+  rows.filter(r => r.proposalId === pid && versionNo(r.proposalVersion) === versionNo(v));
+// BD line of one version: the row with a BD S No, else the first row of that version
+function anchorOfVersion(rows, pid, v) {
+  const vr = rowsOfVersion(rows, pid, v);
+  return vr.find(r => r.bdSNo) || vr[0] || null;
+}
 
 // ── Excel export columns ──────────────────────────────────────────────────────
 const BD_EXPORT_COLUMNS = [
@@ -82,6 +96,9 @@ const BD_EXPORT_COLUMNS = [
   { label: 'Client Name',          get: r => r.clientName },
   { label: 'Client POC',           get: r => r.clientPoc },
   { label: 'Contact Number',       get: r => r.contactNumber },
+  { label: 'Client POC Email ID',  get: r => r.clientPocEmail },
+  { label: 'Client POC Designation', get: r => r.clientPocDesignation },
+  { label: 'Additional Client POCs', get: r => parsePocs(r.additionalPocs).map(pocLabel).join(' | ') },
   { label: 'Date of Discussion',   get: r => r.dateOfDiscussion },
   { label: 'Client Expected Date', get: r => r.clientExpectedDate },
   { label: 'BD Month',             get: r => r.bdMonth },
@@ -90,6 +107,12 @@ const BD_EXPORT_COLUMNS = [
   { label: 'BD Proposal Value',    get: r => (toNum(r.bdProposalValue) || r.bdProposalValue || '') },
   { label: 'Date of Submission to Client', get: r => r.submissionToClient },
   { label: 'Ops Checklist',        get: r => parseChecklist(r.opsChecklist).join(', ') },
+  { label: 'Participant Profile',  get: r => splitList(r.participantProfile).join(', ') },
+  { label: 'Total Expected Headcount', get: r => (toNum(r.expectedHeadcount) || r.expectedHeadcount || '') },
+  { label: 'Total Expected Batches',   get: r => (toNum(r.expectedBatches) || r.expectedBatches || '') },
+  { label: 'Price per Batch',      get: r => (toNum(r.pricePerBatch) || '') },
+  { label: 'Total Cost of Proposal', get: r => (totalCostOf(r) || '') },
+  { label: 'BD Comments',          get: r => r.bdComments },
 ];
 const SOL_EXPORT_COLUMNS = [
   { label: 'Proposal ID',          get: r => r.proposalId },
@@ -138,6 +161,7 @@ const BD_FILTER_COLUMNS = [
   { key: 'topic',    label: 'Program Topic', get: r => r.programTopic },
   { key: 'poc',      label: 'Client POC',    get: r => r.clientPoc },
   { key: 'version',  label: 'Version',       get: r => r.proposalVersion },
+  { key: 'profile',  label: 'Participant Profile', get: r => splitList(r.participantProfile) },
   { key: 'value',    label: 'Proposal Value', get: r => (r.bdProposalValue ? String(r.bdProposalValue) : ''), sortBy: r => toNum(r.bdProposalValue) },
 ];
 const SOL_FILTER_COLUMNS = [
@@ -178,6 +202,9 @@ const EMPTY_BD = {
   dateOfDiscussion: '', clientExpectedDate: '', bdMonth: '',
   programTopic: '', proposalVersion: 'V1', bdStatus: 'In Process', bdProposalValue: '',
   submissionToClient: '', opsChecklist: '', proposalV1Link: '',
+  // BD Tracker additions (2026-10-19)
+  expectedHeadcount: '', expectedBatches: '', pricePerBatch: '', participantProfile: '', bdComments: '',
+  clientPocEmail: '', clientPocDesignation: '', additionalPocs: '',
 };
 const EMPTY_SOL = {
   proposalId: '', solutionTopic: '', solutionMonth: '', programType: '',
@@ -215,6 +242,96 @@ const DEV_CATEGORY_OPTS     = [
   'Creative Solutions (CS)',
   'Assessment & Development Centers',
 ];
+
+// ── BD Tracker additions (2026-10-19): headcount, batches, cost, profile, comments, POCs ──
+const BD_EXTRA_KEYS = Object.keys(BD_EXTRA_COLUMNS);
+const PARTICIPANT_PROFILE_OPTS = ['HR', 'Manager', 'Executive'];
+const splitList = v => String(v ?? '').split(/[;\n|]+/).map(x => x.trim()).filter(Boolean);
+const joinList  = a => [...new Set(a.map(x => String(x).trim()).filter(Boolean))].join('; ');
+const isEmail   = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || '').trim());
+// Additional POCs live in one Excel cell as a JSON list of { name, email, phone, designation }
+const blankPoc = () => ({ name: '', email: '', phone: '', designation: '' });
+function parsePocs(v) {
+  const txt = String(v ?? '').trim();
+  if (!txt) return [];
+  try {
+    const a = JSON.parse(txt);
+    if (Array.isArray(a)) return a.map(p => ({ ...blankPoc(), ...Object.fromEntries(Object.entries(p || {}).map(([k, x]) => [k, String(x ?? '')])) }));
+  } catch { /* typed straight into Excel as plain text */ }
+  return [{ ...blankPoc(), name: txt }];
+}
+function serializePocs(list) {
+  const kept = (list || [])
+    .map(p => ({ name: String(p.name || '').trim(), designation: String(p.designation || '').trim(), email: String(p.email || '').trim(), phone: String(p.phone || '').trim() }))
+    .filter(p => p.name || p.designation || p.email || p.phone);
+  return kept.length ? JSON.stringify(kept) : '';
+}
+const pocLabel = p => [p.name, p.designation && `(${p.designation})`, p.email, p.phone].filter(Boolean).join(' · ');
+// Total Cost of Proposal = Price per Batch × Total Expected Batches. Excel calculates it (formula
+// column); the CRM shows the same sum live in the form and falls back to it until Excel answers.
+const calcTotalCost = r => { const p = toNum(r?.pricePerBatch), b = toNum(r?.expectedBatches); return p && b ? p * b : 0; };
+const totalCostOf   = r => toNum(r?.totalCost) || calcTotalCost(r);
+
+function ParticipantProfilePicker({ value, onChange }) {
+  const chosen = splitList(value);
+  const [otherText, setOtherText] = useState(() => chosen.filter(v => !PARTICIPANT_PROFILE_OPTS.includes(v)).join('; '));
+  const toggle = opt => onChange(joinList(chosen.includes(opt) ? chosen.filter(v => v !== opt) : [...chosen, opt]));
+  const setOther = txt => {
+    setOtherText(txt);
+    onChange(joinList([...chosen.filter(v => PARTICIPANT_PROFILE_OPTS.includes(v)), ...splitList(txt)]));
+  };
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      {PARTICIPANT_PROFILE_OPTS.map(opt => {
+        const on = chosen.includes(opt);
+        return (
+          <button key={opt} type="button" onClick={() => toggle(opt)}
+            style={{ padding: '5px 12px', borderRadius: 14, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+              border: on ? '1px solid #6366f1' : '1px solid var(--border)', background: on ? '#6366f1' : 'var(--surface)', color: on ? '#fff' : 'var(--text)' }}>
+            {on ? '✓ ' : ''}{opt}
+          </button>
+        );
+      })}
+      <input style={{ ...inp, flex: 1, minWidth: 180, width: 'auto' }} value={otherText} onChange={e => setOther(e.target.value)}
+        placeholder="Other — e.g. Sales Leaders (separate with ;)" />
+    </div>
+  );
+}
+
+function AdditionalPocsEditor({ value, onChange }) {
+  const [list, setList] = useState(() => parsePocs(value));
+  const update = next => { setList(next); onChange(serializePocs(next)); };
+  const setP = (i, k, v) => update(list.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
+  const small = { ...inp, padding: '6px 8px', fontSize: 12 };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {list.map((p, i) => (
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr 1fr auto', gap: 6, alignItems: 'center' }}>
+          <input style={small} placeholder="Name" value={p.name} onChange={e => setP(i, 'name', e.target.value)} />
+          <input style={small} placeholder="Designation" value={p.designation} onChange={e => setP(i, 'designation', e.target.value)} />
+          <input style={{ ...small, ...(p.email && !isEmail(p.email) ? { borderColor: '#f59e0b' } : {}) }} type="email" placeholder="Email ID"
+            value={p.email} onChange={e => setP(i, 'email', e.target.value.trim())} />
+          <input style={small} type="tel" inputMode="numeric" maxLength={10} placeholder="Contact number"
+            value={p.phone} onChange={e => setP(i, 'phone', e.target.value.replace(/\D/g, '').slice(0, 10))} />
+          <button type="button" title="Remove this POC" onClick={() => update(list.filter((_, j) => j !== i))}
+            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', color: '#b91c1c', padding: '4px 8px' }}>✕</button>
+        </div>
+      ))}
+      <button type="button" className="btn btn-outline btn-sm" style={{ alignSelf: 'flex-start', padding: '4px 10px', fontSize: 12 }}
+        onClick={() => setList([...list, blankPoc()])}>+ Add POC</button>
+    </div>
+  );
+}
+
+// Label + value cell used in the BD Tracker expanded row
+function InfoCell({ label, full, children }) {
+  return (
+    <div style={full ? { gridColumn: '1 / -1' } : undefined}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{label}</div>
+      <div>{children}</div>
+    </div>
+  );
+}
 
 /**
  * ComboSelect — dropdown with fixed options + "Other (type your own)" fallback.
@@ -285,6 +402,8 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
   const isEdit = !!initial?.sno;
   // Revised mode: the edit form turns into "add next version" with every value copied
   const [revision, setRevision] = useState(false);
+  // Revised mode: null = not answered yet, false = copy items as they are, true = edit them here
+  const [editItems, setEditItems] = useState(null);
 
   // Compute existing PIDs and auto-generated next PID (add mode only)
   const existingPids = isEdit
@@ -308,17 +427,29 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
   const nextVersion = isEdit ? nextVersionLabel(allRows || [], initial.proposalId, initial.proposalVersion) : '';
 
   function startRevision() {
-    // Copy every value of the current version; the user edits what changed before saving
-    setForm({ ...initial, proposalVersion: nextVersion, _revision: true, _revisedFrom: initial.proposalVersion || 'V1' });
+    // Copy every value of the current version — BD line AND all its solution items;
+    // the user edits what changed before saving
+    const srcItems = rowsOfVersion(allRows || [], initial.proposalId, initial.proposalVersion).filter(r => r.solutionTopic);
+    setForm({
+      ...initial, proposalVersion: nextVersion, _revision: true, _revisedFrom: initial.proposalVersion || 'V1',
+      _solItems: srcItems.map(r => ({ ...pick(r, SOL_COPY_FIELDS), _src: r.sno, _keep: true })),
+    });
+    setEditItems(srcItems.length ? null : false);
     setRevision(true);
   }
   function cancelRevision() {
     setForm({ ...initial });
     setRevision(false);
+    setEditItems(null);
   }
+  const setItem = (i, k, v) => setForm(f => ({ ...f, _solItems: (f._solItems || []).map((s, j) => (j === i ? { ...s, [k]: v } : s)) }));
+  const revItems = revision ? (form._solItems || []) : [];
+  const keptItems = revItems.filter(s => s._keep !== false);
+  const itemTopicMissing = keptItems.some(s => !String(s.solutionTopic || '').trim());
 
   const checklistMissing = needsChecklist(form);
-  const blocked = saving || !form.proposalId.trim() || !form.clientName.trim() || checklistMissing;
+  const blocked = saving || !form.proposalId.trim() || !form.clientName.trim() || checklistMissing ||
+    (revision && (itemTopicMissing || (revItems.length > 0 && editItems === null)));
 
   // Auto-derive BD Month (e.g. "Sep 2026") whenever Date of Discussion changes
   function handleDateChange(dateVal) {
@@ -343,7 +474,7 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
         {revision && (
           <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: '#eef2ff', border: '1px solid #c7d2fe', fontSize: 12.5, color: '#3730a3', lineHeight: 1.5 }}>
             <strong>Revising {form.proposalId}: {form._revisedFrom} → {form.proposalVersion || nextVersion}</strong><br />
-            All values are copied from {form._revisedFrom}. Update anything that changed (value, dates, topic …) and click <strong>Save Revised Version</strong>.
+            All values are copied from {form._revisedFrom} — the BD line and {revItems.length ? <strong>all {revItems.length} solution item{revItems.length !== 1 ? 's' : ''}</strong> : 'its solution items (none yet)'}. Update anything that changed (value, dates, topic …) and click <strong>Save Revised Version</strong>.
             {' '}{form._revisedFrom} stays in the tracker as history.
           </div>
         )}
@@ -415,6 +546,19 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
               </span>
             )}
           </Field>
+          <Field label="Client POC Email ID" half>
+            <input type="email" style={{ ...inp, ...(form.clientPocEmail && !isEmail(form.clientPocEmail) ? { borderColor: '#f59e0b' } : {}) }}
+              value={form.clientPocEmail || ''} onChange={e => set('clientPocEmail', e.target.value.trim())} placeholder="name@company.com" />
+            {!!form.clientPocEmail && !isEmail(form.clientPocEmail) && (
+              <span style={{ fontSize: 11, color: '#b45309' }}>Check the email format</span>
+            )}
+          </Field>
+          <Field label="Client POC Designation" half>
+            <input style={inp} value={form.clientPocDesignation || ''} onChange={e => set('clientPocDesignation', e.target.value)} placeholder="e.g. L&D Manager" />
+          </Field>
+          <Field label="Additional Client POCs">
+            <AdditionalPocsEditor value={form.additionalPocs} onChange={v => set('additionalPocs', v)} />
+          </Field>
 
           {/* ── Date of Discussion — auto-fills BD Month on change ── */}
           <Field label="Date of Discussion *" half>
@@ -452,6 +596,29 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>Copied automatically to every Solution item of this proposal{revision ? ' version' : ''} — editable per item.</span>
           </Field>
 
+          {/* ── Program size & commercials — Total Cost = Price per Batch × Batches (Excel formula) ── */}
+          <Field label="Participant Profile">
+            <ParticipantProfilePicker value={form.participantProfile} onChange={v => set('participantProfile', v)} />
+          </Field>
+          <Field label="Total Expected Headcount" half>
+            <input type="number" min="0" step="1" style={inp} value={form.expectedHeadcount || ''} onChange={e => set('expectedHeadcount', e.target.value)} placeholder="e.g. 120" />
+          </Field>
+          <Field label="Total Expected Batches" half>
+            <input type="number" min="0" step="1" style={inp} value={form.expectedBatches || ''} onChange={e => set('expectedBatches', e.target.value)} placeholder="e.g. 4" />
+          </Field>
+          <Field label="Price per Batch" half>
+            <input style={inp} inputMode="decimal" value={form.pricePerBatch || ''} onChange={e => set('pricePerBatch', e.target.value.replace(/[^0-9.]/g, ''))} placeholder="₹ Amount" />
+          </Field>
+          <Field label="Total Cost of Proposal" half>
+            <input readOnly style={{ ...inp, background: 'var(--border)', cursor: 'not-allowed', fontWeight: 700 }}
+              value={calcTotalCost(form) ? fmtIN(calcTotalCost(form)) : ''} placeholder="Price per Batch × Batches"
+              title="Calculated by Excel: Price per Batch × Total Expected Batches" />
+          </Field>
+          <Field label="BD Comments">
+            <textarea style={{ ...inp, resize: 'vertical', minHeight: 60 }} value={form.bdComments || ''} onChange={e => set('bdComments', e.target.value)}
+              placeholder="Notes from client discussions, next steps …" />
+          </Field>
+
           {/* ── In Process / Won → BD ticks what Operations must arrange ── */}
           {showsChecklist(form) && (
             <Field label="Operations Checklist * — tick everything Operations must arrange">
@@ -463,12 +630,76 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
           )}
         </div>
 
+        {/* ── Revised: solution items of the old version are copied to the new one ── */}
+        {revision && (
+          <div style={{ marginTop: 20, padding: '12px 14px', borderRadius: 8, border: '1px solid #c7d2fe', background: '#f8faff' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+              Solution Items — {form._revisedFrom} → {form.proposalVersion || nextVersion}
+            </div>
+            {revItems.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: 'var(--muted)' }}>{form._revisedFrom} has no solution items — only the BD line will be added.</div>
+            ) : (
+              <>
+                <div style={{ fontSize: 12.5, color: 'var(--text)', marginBottom: 8 }}>
+                  {revItems.length} solution item{revItems.length !== 1 ? 's' : ''} of {form._revisedFrom} will be added under {form.proposalVersion || nextVersion} with the same Proposal ID.
+                  <strong style={{ display: 'block', marginTop: 6 }}>Do you want to edit solution items also?</strong>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: editItems ? 12 : 0 }}>
+                  {[[false, 'No — copy as they are'], [true, 'Yes — edit solution items']].map(([val, label]) => (
+                    <button key={label} type="button" onClick={() => setEditItems(val)} disabled={saving}
+                      style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                        border: editItems === val ? '1px solid #6366f1' : '1px solid var(--border)',
+                        background: editItems === val ? '#6366f1' : 'var(--surface)', color: editItems === val ? '#fff' : 'var(--text)' }}>
+                      {editItems === val ? '✓ ' : ''}{label}
+                    </button>
+                  ))}
+                </div>
+                {editItems === false && (
+                  <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--muted)' }}>
+                    {revItems.map((s, i) => <li key={`ri-${i}`}>{s.solutionTopic}{s.solutionValue ? ` — ₹${s.solutionValue}` : ''}</li>)}
+                  </ul>
+                )}
+                {editItems && revItems.map((s, i) => {
+                  const off = s._keep === false;
+                  return (
+                    <div key={`ri-${i}`} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10, marginBottom: 10, background: off ? 'transparent' : 'var(--card)', opacity: off ? 0.55 : 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: off ? 0 : 8 }}>
+                        <strong style={{ fontSize: 12.5 }}>Item {i + 1}{off ? ` — ${s.solutionTopic || ''} (not copied)` : ''}</strong>
+                        <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={!off} onChange={e => setItem(i, '_keep', e.target.checked)} />
+                          Copy to {form.proposalVersion || nextVersion}
+                        </label>
+                      </div>
+                      {!off && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                          <Field label="Solution Topic *"><input style={inp} value={s.solutionTopic || ''} onChange={e => setItem(i, 'solutionTopic', e.target.value)} /></Field>
+                          <Field label="Program Type" half><ComboSelect options={PROGRAM_TYPE_OPTS} value={s.programType} onChange={v => setItem(i, 'programType', v)} /></Field>
+                          <Field label="Engagement Type" half><ComboSelect options={ENGAGEMENT_TYPE_OPTS} value={s.engagementType} onChange={v => setItem(i, 'engagementType', v)} /></Field>
+                          <Field label="Line of Service" half><ComboSelect options={LINE_OF_SERVICE_OPTS} value={s.lineOfService} onChange={v => setItem(i, 'lineOfService', v)} /></Field>
+                          <Field label="Type of Service" half><ComboSelect options={TYPE_OF_SERVICE_OPTS} value={s.typeOfService} onChange={v => setItem(i, 'typeOfService', v)} /></Field>
+                          <Field label="Development Category" half><ComboSelect options={DEV_CATEGORY_OPTS} value={s.developmentCategory} onChange={v => setItem(i, 'developmentCategory', v)} /></Field>
+                          <Field label="Solution Value" half><input style={inp} value={s.solutionValue || ''} onChange={e => setItem(i, 'solutionValue', e.target.value)} placeholder="₹ Amount" /></Field>
+                          <Field label="Remarks"><textarea style={{ ...inp, resize: 'vertical', minHeight: 44 }} value={s.remarks || ''} onChange={e => setItem(i, 'remarks', e.target.value)} /></Field>
+                          <Field label="Proposal Link">
+                            <LinkInput inputStyle={inp} value={s.proposalV1Link || ''} onChange={v => setItem(i, 'proposalV1Link', v)} placeholder="https://..." />
+                            <span style={{ fontSize: 11, color: 'var(--muted)' }}>If this still holds the {form._revisedFrom} link, the new BD link above replaces it.</span>
+                          </Field>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        )}
+
         {/* ── Revised — last option in the edit form: add the next version of this proposal ── */}
         {isEdit && (
           <div style={{ marginTop: 20, padding: '12px 14px', borderRadius: 8, border: '1px dashed #6366f1', background: revision ? '#eef2ff' : 'transparent', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--muted)' }}>
               {revision
-                ? <>Saving will add <strong style={{ color: 'var(--text)' }}>{form.proposalVersion || nextVersion}</strong> as a new version. {form._revisedFrom} is not changed.</>
+                ? <>Saving will add <strong style={{ color: 'var(--text)' }}>{form.proposalVersion || nextVersion}</strong> as a new line with {keptItems.length} solution item{keptItems.length !== 1 ? 's' : ''}. {form._revisedFrom} is not changed.</>
                 : <>Client asked for changes? Add the next version (<strong style={{ color: 'var(--text)' }}>{nextVersion}</strong>) with all values copied from {initial.proposalVersion || 'V1'} — edit them before saving.</>}
             </div>
             {revision ? (
@@ -495,6 +726,12 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
         {checklistMissing && (
           <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Tick the Operations Checklist before saving an In Process or Won proposal</p>
         )}
+        {revision && revItems.length > 0 && editItems === null && (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Choose whether to edit the solution items before saving</p>
+        )}
+        {revision && itemTopicMissing && (
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#ef4444', textAlign: 'right' }}>* Every copied solution item needs a Solution Topic</p>
+        )}
       </div>
     </div>
   );
@@ -502,7 +739,7 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
 
 // ── Solution Modal ─────────────────────────────────────────────────────────────
 // proposalId is always known from the BD row context — no picker shown
-function SolModal({ initial, proposalId, programTopic, bdStatus, bdLink, onSave, onClose, saving }) {
+function SolModal({ initial, proposalId, proposalVersion, programTopic, bdStatus, bdLink, onSave, onClose, saving }) {
   // New items: Solution Topic defaults to the proposal's Program Topic (editable).
   // Status always mirrors the BD Status of the parent proposal.
   const [form, setForm] = useState(() => ({
@@ -510,6 +747,7 @@ function SolModal({ initial, proposalId, programTopic, bdStatus, bdLink, onSave,
     // Proposal link comes from the BD entry; the user can change it for this item
     proposalV1Link: String(initial?.proposalV1Link || '').trim() || bdLink || '',
     proposalId,
+    proposalVersion: initial?.proposalVersion || proposalVersion || '',
     status: bdStatus || (initial?.status) || 'In Process',
   }));
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -522,7 +760,7 @@ function SolModal({ initial, proposalId, programTopic, bdStatus, bdLink, onSave,
           <div>
             <h2 style={{ margin: 0, fontSize: 18 }}>{isEdit ? 'Edit Solution Item' : 'Add Solution Item'}</h2>
             <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)' }}>
-              Proposal: <strong style={{ color: 'var(--accent)' }}>{proposalId}</strong>
+              Proposal: <strong style={{ color: 'var(--accent)' }}>{proposalId}</strong>{form.proposalVersion ? <> · Version <strong>{form.proposalVersion}</strong></> : null}
             </p>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--muted)' }}>✕</button>
@@ -686,54 +924,68 @@ export default function SolutionTracker({ onRefreshed, view }) {
   }
 
   // ── Derived data ──────────────────────────────────────────────────────────
-  // One BD anchor row per unique Proposal ID
-  // (latest version wins — older versions are kept in _versions as history)
+  // One line per Proposal ID + version: a revised proposal (V2, V3 …) is its own line with the
+  // same Proposal ID and its own solution items. Lines follow the S No order of the Excel rows,
+  // so a revision appears where it was added — not next to the earlier version.
   const allBdRows = useMemo(() => {
-    const seen = new Set();
-    return rows
-      .filter(r => r.proposalId)
-      .filter(r => {
-        const k = r.proposalId;
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      })
-      .map(first => {
-        const r = latestRowFor(rows, first.proposalId) || first;
-        return {
-          ...r,
-          _sols: rows.filter(x => x.proposalId === r.proposalId && x.solutionTopic),
-          _versions: versionsFor(rows, r.proposalId),
-        };
-      });
+    const sNoOf = r => { const n = Number(r.sno); return Number.isFinite(n) ? n : Infinity; };
+    const groups = new Map();   // key → { pid, n, rows, first }
+    rows.forEach((r, i) => {
+      if (!r.proposalId) return;
+      const n = versionNo(r.proposalVersion);
+      const k = groupKey(r.proposalId, n);
+      if (!groups.has(k)) groups.set(k, { pid: r.proposalId, n, rows: [], first: i });
+      groups.get(k).rows.push(r);
+    });
+    const topVersion = new Map(), countByPid = new Map();
+    groups.forEach(g => {
+      topVersion.set(g.pid, Math.max(topVersion.get(g.pid) || 0, g.n));
+      countByPid.set(g.pid, (countByPid.get(g.pid) || 0) + 1);
+    });
+    return [...groups.entries()].map(([k, g]) => {
+      const anchor = g.rows.find(r => r.bdSNo) || g.rows[0];
+      return {
+        ...anchor,
+        _key: k,
+        _order: Math.min(...g.rows.map(sNoOf)),
+        _first: g.first,
+        _sols: g.rows.filter(x => x.solutionTopic),
+        _isLatest: g.n === topVersion.get(g.pid),
+        _versionCount: countByPid.get(g.pid),
+      };
+    }).sort((a, b) => (a._order - b._order) || (a._first - b._first));
   }, [rows]);
 
   // Excel-style column filters + sorting (shared with Engagement Calendar)
   const filterState = useExcelFilters(allBdRows, view === 'bd' ? BD_FILTER_COLUMNS : SOL_FILTER_COLUMNS);
   const bdRows = filterState.filtered
     .filter(r => !search || [r.proposalId, r.clientName, r.programTopic, r.bdStatus, r.bdMonth, r.clientPoc,
+      r.clientPocEmail, r.clientPocDesignation, r.participantProfile, r.bdComments,
       ...(r._sols || []).map(x => x.solutionTopic)].join(' ').toLowerCase().includes(search.toLowerCase()));
 
-  // KPI figures (follow the active filters)
+  // KPI figures (follow the active filters). A proposal counts once — its highest version
+  // among the shown lines — so revised versions don't double the value.
+  const kpiRows = [...bdRows.reduce((m, r) => {
+    const p = m.get(r.proposalId);
+    if (!p || versionNo(r.proposalVersion) > versionNo(p.proposalVersion)) m.set(r.proposalId, r);
+    return m;
+  }, new Map()).values()];
   const kpi = {
-    total:    bdRows.length,
-    all:      allBdRows.length,
-    value:    bdRows.reduce((t, r) => t + toNum(r.bdProposalValue), 0),
-    wonValue: bdRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + toNum(r.bdProposalValue), 0),
-    clients:  new Set(bdRows.map(r => r.clientName).filter(Boolean)).size,
-    won:      bdRows.filter(r => r.bdStatus === 'Won').length,
-    lost:     bdRows.filter(r => r.bdStatus === 'Lost').length,
-    inProc:   bdRows.filter(r => r.bdStatus === 'In Process').length,
-    solItems: bdRows.reduce((t, r) => t + (r._sols || []).length, 0),
-    solValue: bdRows.reduce((t, r) => t + (r._sols || []).reduce((u, x) => u + toNum(x.solutionValue), 0), 0),
+    total:    kpiRows.length,
+    all:      new Set(allBdRows.map(r => r.proposalId)).size,
+    lines:    bdRows.length,
+    value:    kpiRows.reduce((t, r) => t + toNum(r.bdProposalValue), 0),
+    wonValue: kpiRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + toNum(r.bdProposalValue), 0),
+    clients:  new Set(kpiRows.map(r => r.clientName).filter(Boolean)).size,
+    won:      kpiRows.filter(r => r.bdStatus === 'Won').length,
+    lost:     kpiRows.filter(r => r.bdStatus === 'Lost').length,
+    inProc:   kpiRows.filter(r => r.bdStatus === 'In Process').length,
+    solItems: kpiRows.reduce((t, r) => t + (r._sols || []).length, 0),
+    solValue: kpiRows.reduce((t, r) => t + (r._sols || []).reduce((u, x) => u + toNum(x.solutionValue), 0), 0),
   };
   const decided = kpi.won + kpi.lost;
   const winRate = decided ? Math.round((kpi.won / decided) * 100) : 0;
 
-  // Sol rows grouped by proposalId
-  function getSolRows(pid) {
-    return rows.filter(r => r.proposalId === pid && r.solutionTopic);
-  }
 
 
   // ── CRUD handlers ─────────────────────────────────────────────────────────
@@ -790,15 +1042,44 @@ export default function SolutionTracker({ onRefreshed, view }) {
     setSaving(true);
     try {
       if (form._revision) {
-        // ── Revised version: a new row with the same Proposal ID, next version ──
-        const payload = { ...form, sno: '', bdSNo: '', solSNo: '' };
-        SOL_FIELDS.forEach(k => { payload[k] = ''; });
-        payload.proposalV1Link = String(form.proposalV1Link || '').trim();   // link of the new version
-        delete payload._revision; delete payload._revisedFrom; delete payload._sols; delete payload._versions;
-        await addSolutionRow(payload);
+        // ── Revised version: same Proposal ID, next version — the BD line AND every
+        //    solution item of the old version are added as new rows under the new version ──
+        const srcVersion = form._revisedFrom || 'V1';
+        const srcAnchor  = anchorOfVersion(rows, form.proposalId, srcVersion);
+        const oldLink    = bdLinkFor(rows, form.proposalId, srcVersion);
+        const newLink    = String(form.proposalV1Link || '').trim();   // link of the new version
+        const items      = (form._solItems || []).filter(s => s._keep !== false && String(s.solutionTopic || '').trim());
+
+        const bdLine = { ...form, sno: '', bdSNo: '', solSNo: '' };
+        SOL_FIELDS.forEach(k => { bdLine[k] = ''; });
+        Object.keys(bdLine).filter(k => k.startsWith('_')).forEach(k => { delete bdLine[k]; });
+        bdLine.proposalV1Link = newLink;
+
+        // An item still holding the old version's link (or none) takes the new BD link
+        const itemLink = s => {
+          const own = String(s.proposalV1Link || '').trim();
+          return (!own || own === oldLink) ? (newLink || own) : own;
+        };
+        // BD-only fields (headcount, price per batch, POCs …) stay on the BD line, so Excel's
+        // Total Cost appears once per version. undefined = not sent = cell left empty.
+        const noBdExtras = Object.fromEntries(BD_EXTRA_KEYS.map(k => [k, undefined]));
+        const itemRow = (s, isBdLine = false) => ({
+          ...bdLine,
+          ...(isBdLine ? {} : noBdExtras),
+          ...pick(s, SOL_COPY_FIELDS),
+          solutionTopic: String(s.solutionTopic).trim(),
+          proposalV1Link: itemLink(s),
+          status: form.bdStatus || 'In Process',
+        });
+        // Same layout as the old version: if its BD line also carried the first solution item, so does the new one
+        const newRows = (srcAnchor?.solutionTopic && items.length)
+          ? items.map((s, i) => itemRow(s, i === 0))      // first item shares the BD line's row
+          : [bdLine, ...items.map(s => itemRow(s))];
+        for (const r of newRows) await addSolutionRow(r);   // one by one so Excel keeps the order
+
         // Status / checklist apply to the whole proposal — keep every row in step
-        await propagateBdFields({ ...payload, submissionToClient: '', proposalV1Link: '' }, null);
-        setExpanded(prev => new Set(prev).add(form.proposalId));
+        await propagateBdFields({ ...bdLine, submissionToClient: '', proposalV1Link: '' }, null);
+        setExpanded(prev => new Set(prev).add(groupKey(form.proposalId, form.proposalVersion)));
       } else
       // Use != null so sno=0 is treated as a valid row key (truthy check would fail for 0)
       if (form.sno != null && form.sno !== '') {
@@ -858,11 +1139,14 @@ export default function SolutionTracker({ onRefreshed, view }) {
       let payload = { ...form };
 
       // Solution status always follows the proposal's BD Status
-      const bdAnchor = latestRowFor(rows, form.proposalId);
+      // The item belongs to the version of the line it was added from (latest if unknown)
+      const lineAnchor = (form.proposalVersion && anchorOfVersion(rows, form.proposalId, form.proposalVersion)) ||
+        latestRowFor(rows, form.proposalId);
+      const bdAnchor = lineAnchor;
       if (bdAnchor?.bdStatus) payload.status = bdAnchor.bdStatus;
 
       if (!form.sno && form.proposalId) {
-        const anchor = latestRowFor(rows, form.proposalId);
+        const anchor = lineAnchor;
         if (anchor) {
           payload = {
             ...payload,
@@ -880,9 +1164,9 @@ export default function SolutionTracker({ onRefreshed, view }) {
             opsChecklist:       anchor.opsChecklist       || payload.opsChecklist,
           };
 
-          const hasSolRows = rows.some(r => r.proposalId === form.proposalId && r.solutionTopic);
+          const hasSolRows = rowsOfVersion(rows, form.proposalId, anchor.proposalVersion).some(r => r.solutionTopic);
           if (!hasSolRows) {
-            await updateSolutionRow(anchor.sno, payload);
+            await updateSolutionRow(anchor.sno, { ...pick(anchor, BD_EXTRA_KEYS), ...payload });
             setSolModal(null);
             await load();
             return;
@@ -908,7 +1192,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
   const linkedSolCount = delTarget?.type === 'bd'
     ? rows.filter(r =>
         r.proposalId === delTarget.proposalId &&
-        (r.proposalVersion || '') === (delTarget.proposalVersion || '') &&
+        versionNo(r.proposalVersion) === versionNo(delTarget.proposalVersion) &&
         r.solutionTopic
       ).length
     : 0;
@@ -921,7 +1205,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
         // Cascade delete: remove BD anchor + all Solution items indexed by P ID + Version
         const allRows = rows.filter(r =>
           r.proposalId === delTarget.proposalId &&
-          (r.proposalVersion || '') === (delTarget.proposalVersion || '')
+          versionNo(r.proposalVersion) === versionNo(delTarget.proposalVersion)
         );
         for (const r of allRows) {
           await deleteSolutionRow(r.sno);
@@ -962,7 +1246,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
           <div className="kpi-card accent">
             <div className="kpi-label">Filtered Proposals</div>
             <div className="kpi-value">{loading ? '…' : kpi.total}</div>
-            <div className="kpi-sub">of {kpi.all} total</div>
+            <div className="kpi-sub">of {kpi.all} total{kpi.lines > kpi.total ? ` · ${kpi.lines} lines incl. revisions` : ''}</div>
           </div>
           {view === 'bd' ? (
             <div className="kpi-card green">
@@ -1007,8 +1291,8 @@ export default function SolutionTracker({ onRefreshed, view }) {
               <ExportButton
                 page="bd" filename="BD Tracker" sheetName="BD Tracker"
                 columns={BD_EXPORT_COLUMNS}
-                // every version of each proposal shown, oldest first
-                rows={() => bdRows.flatMap(r => (r._versions && r._versions.length ? r._versions : [r]))}
+                // one line per proposal version, as shown
+                rows={() => bdRows}
                 disabled={loading}
               />
             ) : (
@@ -1063,12 +1347,13 @@ export default function SolutionTracker({ onRefreshed, view }) {
                 )}
 
                 {bdRows.map((r, i) => {
-                  const solItems = getSolRows(r.proposalId);
-                  const isOpen   = expanded.has(r.proposalId);
+                  const solItems = r._sols || [];
+                  const isOpen   = expanded.has(r._key);
                   const hasSols  = solItems.length > 0;
+                  const multi    = r._versionCount > 1;
 
                   return (
-                    <Fragment key={`group-${r.proposalId}-${i}`}>
+                    <Fragment key={`group-${r._key}-${i}`}>
                       {/* ── BD Primary Row ── */}
                       <tr
                         style={{
@@ -1077,7 +1362,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                           transition: 'background 0.15s',
                           cursor: 'pointer',
                         }}
-                        onClick={() => toggleExpand(r.proposalId)}
+                        onClick={() => toggleExpand(r._key)}
                         onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = 'var(--surface)'; }}
                         onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = 'transparent'; }}
                       >
@@ -1093,7 +1378,16 @@ export default function SolutionTracker({ onRefreshed, view }) {
                         <td style={tdStyle}>
                           <span style={{ fontWeight: 700, background: 'var(--border)', borderRadius: 4, padding: '2px 7px', fontSize: 12 }}>#{r.bdSNo || r.sno}</span>
                         </td>
-                        <td style={{ ...tdStyle, fontWeight: 700 }}>{r.proposalId}</td>
+                        <td style={{ ...tdStyle, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                          {r.proposalId}
+                          <span title={multi ? (r._isLatest ? 'Latest version' : 'Earlier version — kept as history') : 'Proposal version'}
+                            style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, borderRadius: 8, padding: '1px 7px',
+                              background: multi && r._isLatest ? '#eef2ff' : 'var(--border)',
+                              color: multi && r._isLatest ? '#4f46e5' : 'var(--muted)' }}>
+                            {r.proposalVersion || 'V1'}
+                          </span>
+                          {multi && !r._isLatest && <span style={{ display: 'block', fontSize: 10, fontWeight: 500, color: 'var(--muted)' }}>earlier version</span>}
+                        </td>
                         <td style={tdStyle}>{r.clientName}</td>
                         <td style={{ ...tdStyle, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.programTopic || '—'}</td>
                         <td style={tdStyle}>{r.bdMonth || '—'}</td>
@@ -1157,6 +1451,10 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Contact Number</div>
                                     <div>{r.contactNumber || '—'}</div>
                                   </div>
+                                  <InfoCell label="Client POC Email ID">
+                                    {r.clientPocEmail ? <a href={`mailto:${r.clientPocEmail}`} style={{ color: 'var(--accent)' }}>{r.clientPocEmail}</a> : '—'}
+                                  </InfoCell>
+                                  <InfoCell label="Client POC Designation">{r.clientPocDesignation || '—'}</InfoCell>
                                   <div>
                                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Date of Discussion</div>
                                     <div>{r.dateOfDiscussion || '—'}</div>
@@ -1173,36 +1471,18 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                     <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>Proposal Link</div>
                                     <div>{bdLinkFor(rows, r.proposalId, r.proposalVersion) ? <LinkButton url={bdLinkFor(rows, r.proposalId, r.proposalVersion)} label="Open proposal" compact /> : '—'}</div>
                                   </div>
-                                  {(r._versions || []).length > 1 && (
-                                    <div style={{ gridColumn: '1 / -1' }}>
-                                      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Version History</div>
-                                      <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 420 }}>
-                                        <thead>
-                                          <tr>
-                                            {['Version', 'Proposal Value', 'Date of Discussion', 'Submitted to Client', 'Program Topic'].map(h => (
-                                              <th key={h} style={{ textAlign: 'left', padding: '4px 12px 4px 0', fontSize: 10, fontWeight: 700, color: 'var(--muted)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
-                                            ))}
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {r._versions.map(v => {
-                                            const isLatest = v === r._versions[r._versions.length - 1];
-                                            return (
-                                              <tr key={`v-${v.sno}`} style={{ fontWeight: isLatest ? 700 : 400 }}>
-                                                <td style={{ padding: '4px 12px 4px 0' }}>
-                                                  {v.proposalVersion || 'V1'}
-                                                  {isLatest && <span style={{ marginLeft: 6, fontSize: 10, color: '#4f46e5', background: '#eef2ff', borderRadius: 8, padding: '1px 6px' }}>latest</span>}
-                                                </td>
-                                                <td style={{ padding: '4px 12px 4px 0' }}>{v.bdProposalValue ? `₹${v.bdProposalValue}` : '—'}</td>
-                                                <td style={{ padding: '4px 12px 4px 0' }}>{v.dateOfDiscussion || '—'}</td>
-                                                <td style={{ padding: '4px 12px 4px 0' }}>{v.submissionToClient || '—'}</td>
-                                                <td style={{ padding: '4px 12px 4px 0', fontWeight: 400 }}>{v.programTopic || '—'}</td>
-                                              </tr>
-                                            );
-                                          })}
-                                        </tbody>
-                                      </table>
-                                    </div>
+                                  <InfoCell label="Participant Profile">{splitList(r.participantProfile).join(', ') || '—'}</InfoCell>
+                                  <InfoCell label="Expected Headcount">{r.expectedHeadcount || '—'}</InfoCell>
+                                  <InfoCell label="Expected Batches">{r.expectedBatches || '—'}</InfoCell>
+                                  <InfoCell label="Price per Batch">{fmtIN(toNum(r.pricePerBatch))}</InfoCell>
+                                  <InfoCell label="Total Cost of Proposal"><strong>{fmtIN(totalCostOf(r))}</strong></InfoCell>
+                                  {parsePocs(r.additionalPocs).length > 0 && (
+                                    <InfoCell label="Additional Client POCs" full>
+                                      {parsePocs(r.additionalPocs).map((p, i) => <div key={i}>{pocLabel(p)}</div>)}
+                                    </InfoCell>
+                                  )}
+                                  {!!String(r.bdComments || '').trim() && (
+                                    <InfoCell label="BD Comments" full><div style={{ whiteSpace: 'pre-wrap' }}>{r.bdComments}</div></InfoCell>
                                   )}
                                   {showsChecklist(r) && (
                                     <div style={{ gridColumn: '1 / -1' }}>
@@ -1217,6 +1497,10 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                   <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', padding: '8px 12px', background: 'rgba(99,102,241,0.06)', borderRadius: 8, marginBottom: 10, fontSize: 12 }}>
                                     {r.clientPoc && <span><span style={{ color: 'var(--muted)' }}>POC:</span> {r.clientPoc}</span>}
                                     {r.contactNumber && <span><span style={{ color: 'var(--muted)' }}>Contact:</span> {r.contactNumber}</span>}
+                                    {r.clientPocEmail && <span><span style={{ color: 'var(--muted)' }}>Email:</span> {r.clientPocEmail}</span>}
+                                    {r.participantProfile && <span><span style={{ color: 'var(--muted)' }}>Profile:</span> {splitList(r.participantProfile).join(', ')}</span>}
+                                    {!!(r.expectedHeadcount || r.expectedBatches) && <span><span style={{ color: 'var(--muted)' }}>Headcount / Batches:</span> {r.expectedHeadcount || '—'} / {r.expectedBatches || '—'}</span>}
+                                    {totalCostOf(r) > 0 && <span><span style={{ color: 'var(--muted)' }}>Total Cost:</span> {fmtIN(totalCostOf(r))}</span>}
                                     {r.dateOfDiscussion && <span><span style={{ color: 'var(--muted)' }}>Discussion:</span> {r.dateOfDiscussion}</span>}
                                     {r.clientExpectedDate && <span><span style={{ color: 'var(--muted)' }}>Client Expt:</span> {r.clientExpectedDate}</span>}
                                     {r.proposalVersion && <span><span style={{ color: 'var(--muted)' }}>Version:</span> {r.proposalVersion}</span>}
@@ -1283,11 +1567,11 @@ export default function SolutionTracker({ onRefreshed, view }) {
                                       </tbody>
                                     </table>
                                   ) : (
-                                    <p style={{ margin: '4px 0 8px', fontSize: 12, color: 'var(--muted)' }}>No solution items yet for this proposal.</p>
+                                    <p style={{ margin: '4px 0 8px', fontSize: 12, color: 'var(--muted)' }}>No solution items yet for this proposal version.</p>
                                   )}
 
                                   <button
-                                    onClick={() => setSolModal({ mode: 'add', lockedPid: r.proposalId, programTopic: r.programTopic, bdStatus: r.bdStatus })}
+                                    onClick={() => setSolModal({ mode: 'add', lockedPid: r.proposalId, lockedVersion: r.proposalVersion, programTopic: r.programTopic, bdStatus: r.bdStatus })}
                                     style={{ padding: '6px 14px', borderRadius: 6, border: '1px dashed var(--accent)', background: 'transparent', color: 'var(--accent)', fontWeight: 700, cursor: 'pointer', fontSize: 12 }}
                                   >+ Add Solution Item</button>
                                 </>
@@ -1303,7 +1587,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
             </table>
           </div>
           <div className="tracker-fixed" style={{ padding: '10px 16px', color: 'var(--muted)', fontSize: 12, borderTop: '1px solid var(--border)' }}>
-            Showing {bdRows.length} of {allBdRows.length} proposal{allBdRows.length !== 1 ? 's' : ''}
+            Showing {bdRows.length} of {allBdRows.length} line{allBdRows.length !== 1 ? 's' : ''} · {kpi.total} of {kpi.all} proposal{kpi.all !== 1 ? 's' : ''} (each revised version is its own line)
           </div>
           </>
         )}
@@ -1325,7 +1609,8 @@ export default function SolutionTracker({ onRefreshed, view }) {
         <SolModal
           initial={null}
           proposalId={solModal.lockedPid}
-          bdLink={bdLinkFor(rows, solModal.lockedPid, (latestRowFor(rows, solModal.lockedPid) || {}).proposalVersion)}
+          proposalVersion={solModal.lockedVersion}
+          bdLink={bdLinkFor(rows, solModal.lockedPid, solModal.lockedVersion ?? (latestRowFor(rows, solModal.lockedPid) || {}).proposalVersion)}
           programTopic={solModal.programTopic}
           bdStatus={solModal.bdStatus}
           onSave={handleSaveSol}

@@ -181,7 +181,7 @@ export default function SolutioningTracker({ onRefreshed }) {
 
   const filtered = data.filter(r => {
     const q = search.toLowerCase();
-    const matchQ = !q || r.client.toLowerCase().includes(q) || r.programType.toLowerCase().includes(q) || r.poc.toLowerCase().includes(q);
+    const matchQ = !q || [r.client, r.programType, r.poc].some(v => String(v ?? '').toLowerCase().includes(q));
     const matchT = typeF === 'All' || r.programType === typeF;
     const isCompleted = !!(r.completionDate && r.completionDate !== '—');
     const matchS = statusF === 'All' || (statusF === 'Completed' && isCompleted) || (statusF === 'Pending' && !isCompleted);

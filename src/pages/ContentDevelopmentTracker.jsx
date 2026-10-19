@@ -459,15 +459,18 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
   useEffect(() => { load(); }, []);
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), String(msg).includes('⚠') ? 9000 : 3000); };
 
-  const filtered = useMemo(() =>
-    data.filter(r => {
-      const q = search.toLowerCase();
-      const matchQ = !q || r.client.toLowerCase().includes(q) || (r.poc||'').toLowerCase().includes(q) || (r.topic||'').toLowerCase().includes(q);
-      const isCompleted = !!(r.completionDate && r.completionDate !== '—');
+  const filtered = useMemo(() => {
+    // Excel cells can be numbers, blank or carry stray spaces — compare as trimmed text
+    const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const q = norm(search);
+    return data.filter(r => {
+      const matchQ = !q || [r.client, r.poc, r.topic, r.programType, r.engagementKey].some(v => norm(v).includes(q));
+      const done = String(r.completionDate ?? '').trim();
+      const isCompleted = !!(done && done !== '—');
       const matchS = statusF==='All' || (statusF==='Completed' && isCompleted) || (statusF==='Pending' && !isCompleted);
       return matchQ && matchS;
-    }).sort((a,b) => Number(a.sno)-Number(b.sno)),
-  [data, search, statusF]);
+    }).sort((a,b) => (Number(a.sno)||0) - (Number(b.sno)||0));
+  }, [data, search, statusF]);
 
   // keep selected in sync when data reloads
   const sel = selected != null ? data.find(d => d.sno === selected) : null;

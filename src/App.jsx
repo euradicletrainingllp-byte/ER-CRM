@@ -105,7 +105,7 @@ function Shell() {
             } />
             <Route path="/bd-tracker" element={
               <PermissionRoute page="bd">
-                <SolutionTracker view="bd" onRefreshed={setLastRefreshed} />
+                <SolutionTracker key="bd" view="bd" onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
             <Route path="/engagement" element={
@@ -130,7 +130,7 @@ function Shell() {
             } />
             <Route path="/solution" element={
               <PermissionRoute page="solution">
-                <SolutionTracker view="sol" onRefreshed={setLastRefreshed} />
+                <SolutionTracker key="sol" view="sol" onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
             <Route path="/er-calendar" element={

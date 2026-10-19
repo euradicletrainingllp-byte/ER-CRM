@@ -11,6 +11,9 @@ import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+// Filters compare text safely: Excel cells can be numbers, blank or carry stray spaces
+const normTxt = v => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+const NO_STATUS = '(No status)';
 const addDays = (dateStr, n) => {
   if (!dateStr) return null;
   const d = new Date(dateStr);
@@ -636,15 +639,25 @@ export default function OpsChecklist({ onRefreshed }) {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = useMemo(() =>
-    data.filter(r => {
-      const q = search.toLowerCase();
-      const mQ = !q || r.company.toLowerCase().includes(q) || r.topic.toLowerCase().includes(q) || r.egId.toLowerCase().includes(q);
-      const mS = statusF === 'All' || r.status === statusF;
+  // Status options: the usual ones plus every status actually used in Excel
+  const statusOptions = useMemo(() => {
+    const seen = new Map(['Scheduled','Delivered','Tentative','Cancelled'].map(s => [normTxt(s), s]));
+    data.forEach(r => { const t = String(r.status ?? '').trim(); if (t && !seen.has(normTxt(t))) seen.set(normTxt(t), t); });
+    const list = [...seen.values()];
+    if (data.some(r => !String(r.status ?? '').trim())) list.push(NO_STATUS);
+    return ['All', ...list];
+  }, [data]);
+
+  const filtered = useMemo(() => {
+    const q = normTxt(search);
+    return data.filter(r => {
+      const mQ = !q || [r.company, r.topic, r.egId, r.engagementKey, r.clientSpoc, r.internalPoc]
+        .some(v => normTxt(v).includes(q));
+      const st = normTxt(r.status);
+      const mS = statusF === 'All' || (statusF === NO_STATUS ? !st : st === normTxt(statusF));
       return mQ && mS;
-    }).sort((a,b) => (Number(a.sno)||0) - (Number(b.sno)||0)),
-    [data, search, statusF]
-  );
+    }).sort((a,b) => (Number(a.sno)||0) - (Number(b.sno)||0));
+  }, [data, search, statusF]);
 
   const sel = selected != null ? data.find(d => d.sno === selected) : null;
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), String(msg).includes('⚠') ? 9000 : 3000); };
@@ -739,7 +752,7 @@ export default function OpsChecklist({ onRefreshed }) {
           <div className="filter-bar" style={{ flexShrink:0 }}>
             <input className="form-input wide" placeholder="🔍 Company, topic, EG.ID…" value={search} onChange={e => setSearch(e.target.value)} />
             <select className="form-input" value={statusF} onChange={e => setStatusF(e.target.value)}>
-              {['All','Scheduled','Delivered','Tentative','Cancelled'].map(s => <option key={s}>{s}</option>)}
+              {statusOptions.map(s => <option key={s}>{s}</option>)}
             </select>
             <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing} title={refreshing ? 'Refreshing from Excel…' : 'Refresh'}>{refreshing ? '⟳' : '↺'}</button>
             <ExportButton
