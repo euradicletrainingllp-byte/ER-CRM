@@ -47,6 +47,12 @@ const FLOW_URLS = {
   // Paste the flow's HTTP POST URL between the quotes. Leave "" to switch logging off.
   AUDIT_LOG: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/15/workflows/f53e8afec01e4ca487ed4081d2e9505d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=qxJNgzrAmUg_KGqXdnMoElKgxwHKRC3Xyb5PP_6J7bo",
 
+  // ── EMAIL NOTIFICATIONS ───────────────────────────────────────────────────
+  // Flow: "CRM Notify"  ·  emails everyone with View access to the tracker
+  // Payload: { to, subject, html, tracker, trackerName, actorEmail, actorName, recordCount }
+  // Paste the flow's HTTP POST URL between the quotes. Leave "" to switch emails off.
+  NOTIFY: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/12/workflows/949bff208325488ba7fc7794cf59a8d5/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=N9xGlVDi3cmT3Pk31iUaaD2Y-58BtuFz8p9uktv5AuM",
+
 };
 
 export default FLOW_URLS;

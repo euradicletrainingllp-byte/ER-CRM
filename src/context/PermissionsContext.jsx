@@ -12,6 +12,7 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import { PERMISSIONS } from '../config/permissions.js';
 import { fetchPermissions, savePermissions } from '../services/permissionsApi.js';
 import { logEvent } from '../services/auditLogger.js';
+import { setNotifyDirectory } from '../services/notifier.js';
 
 // Activity log: one row per user whose access changed
 function logPermissionChanges(oldPerms = {}, newPerms = {}, error) {
@@ -42,6 +43,9 @@ export function PermissionsProvider({ children }) {
   const [permissions, setPermissions] = useState(PERMISSIONS); // seed from hardcoded config
   const [loading,     setLoading]     = useState(true);
   const [saveError,   setSaveError]   = useState('');
+
+  // Email notifications: keep the recipient list (View access per tracker) current
+  useEffect(() => { setNotifyDirectory(permissions); }, [permissions]);
 
   // Load from Excel on mount
   useEffect(() => {

@@ -114,6 +114,12 @@ export async function withAuditContext(extra, fn) {
 }
 export const newCorrelationId = uuid;
 
+// ── Listeners ────────────────────────────────────────────────────────────────
+// Other features can react to each finished event row (email notifications).
+const _listeners = new Set();
+/** Subscribe to every logged event. Returns an unsubscribe function. */
+export function onAuditEvent(fn) { _listeners.add(fn); return () => _listeners.delete(fn); }
+
 // ── Queue ────────────────────────────────────────────────────────────────────
 let queue   = [];
 let timer   = null;
@@ -131,7 +137,7 @@ function schedule(ms) {
  */
 export function logEvent(e = {}) {
   try {
-    if (!FLOW_URLS.AUDIT_LOG) return;
+    if (!FLOW_URLS.AUDIT_LOG && !_listeners.size) return;
     const now = new Date();
     const ev = { ...e };
     if (context) {
@@ -177,6 +183,9 @@ export function logEvent(e = {}) {
         ? s.slice(0, (NOTE_FIELDS.has(k) ? NOTE_MAX : TEXT_MAX) - 1) + '…'
         : s;
     }
+    // Listeners (e.g. email notifications) see every event, logging on or off
+    for (const fn of _listeners) { try { fn(row); } catch { /* ignore */ } }
+    if (!FLOW_URLS.AUDIT_LOG) return;
     queue.push(row);
     if (queue.length >= 20) flush(); else schedule(FLUSH_MS);
   } catch { /* never break the app */ }
