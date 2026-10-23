@@ -45,7 +45,7 @@ const FLOW_URLS = {
   // Excel: "Lead_Tracker.xlsx" → Table: "LeadTable"  ·  key column: "Lead ID"
   // Payload: { action: get | create | update | delete, sno: <Lead ID>, 'Lead ID', ...columns }
   // Build guide: project doc claude/feature-2026-10-23-lead-vendor-trackers.md
-  LEADS_CRUD: "",
+  LEADS_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/11/workflows/66ad7bcaefbd4b7194966db76b3d5a0b/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=m18DmZgelSWzHgL0tRaR1qdYQHHFnC_dTWfy8Jh0l14",
 
   // ── VENDOR SERVICE TRACKER ────────────────────────────────────────────────
   // Excel: "Vendor_Service_Tracker.xlsx" → Table: "VendorServiceTable"  ·  key column: "Service ID"
