@@ -60,7 +60,7 @@ const dueColor = due => {
 };
 const num = v => { const n = Number(String(v ?? '').replace(/[^0-9.-]/g, '')); return isNaN(n) ? 0 : n; };
 const inr = v => (v === '' || v == null ? '—' : '₹ ' + num(v).toLocaleString('en-IN', { maximumFractionDigits: 2 }));
-const totalOf = e => num(e.price) + num(e.travelExpenses) + num(e.gst);
+export const totalOf = e => num(e.price) + num(e.travelExpenses) + num(e.gst);
 const keyOf = r => String(r?.engagementKey ?? '').trim();
 const validYear = v => { const y = Number(String(v).slice(0, 4)); return y >= 2000 && y <= 2099; };
 
@@ -76,12 +76,12 @@ const STAGES = {
   'Not Applicable':   { color: '#6b7280', bg: '#f3f4f6' },
   'Cancelled':        { color: '#6b7280', bg: '#f3f4f6' },
 };
-function financeDates(e) {
+export function financeDates(e) {
   const invDue = addDays(toIso(e.endDate) || toIso(e.startDate), 1);
   const payDue = toIso(e.invoice) ? addDays(toIso(e.invoice), 30) : null;
   return { invDue, payDue };
 }
-function financeStage(e) {
+export function financeStage(e) {
   const { invDue, payDue } = financeDates(e);
   const today = todayIso();
   const p = normPayment(e.payment);
@@ -96,7 +96,7 @@ function financeStage(e) {
   return 'Upcoming';
 }
 /** Days past the payment term (invoice date + 30 days); 0 when not overdue. Paid / NA / Cancelled are never overdue. */
-function overdueDays(e) {
+export function overdueDays(e) {
   const inv = toIso(e.invoice);
   if (!inv) return 0;
   const p = normPayment(e.payment);

@@ -75,7 +75,7 @@ const dueDateLabel = (dueDate) => {
 };
 
 // ─── TAT definitions ─────────────────────────────────────────────────────────
-const CL_ITEMS = [
+export const CL_ITEMS = [
   { key:'calendarBlock',     label:'Facilitator Calendar Block',         pocKey:'calendarBlockPoc',      doneKey:'calendarBlockDone',      commentKey:'calendarBlockComment',      tatFn:(s,e)=>addDays(e,-14) },
   { key:'travelDetails',     label:'Travel Details Finalised',           pocKey:'travelDetailsPoc',      doneKey:'travelDetailsDone',      commentKey:'travelDetailsComment',      tatFn:(s,e)=>addDays(s,-10) },
   { key:'welcomeEmail',      label:'Welcome Email + Pre-Work',           pocKey:'welcomeEmailPoc',       doneKey:'welcomeEmailDone',       commentKey:'welcomeEmailComment',       tatFn:(s,e)=>addDays(e,-7)  },
@@ -94,7 +94,7 @@ const CL_ITEMS = [
   { key:'socialMedia',       label:'Social Media Post',                  pocKey:'socialMediaPoc',        doneKey:'socialMediaDone',        commentKey:'socialMediaComment',        tatFn:(s,e)=>addDays(e,1)   },
 ];
 
-const clScore = (row) => {
+export const clScore = (row) => {
   const vals = CL_ITEMS.map(it => row[it.key]);
   const done = vals.filter(v => v === 'Yes' || v === 'NA').length;
   return Math.round((done / CL_ITEMS.length) * 100);

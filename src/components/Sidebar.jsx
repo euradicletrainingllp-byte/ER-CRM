@@ -3,6 +3,8 @@ import { usePermissions } from '../hooks/usePermissions.js';
 
 const NAV = [
   { path: '/',            page: 'dashboard',  icon: '📊', label: 'Dashboard'           },
+  // Founder's Desk shows money too, so it needs Dashboard AND Finance view access
+  { path: '/founder',     page: 'dashboard',  also: ['finance'], icon: '🧭', label: "Founder's Desk" },
   { path: '/bd-tracker',  page: 'bd',         icon: '🎯', label: 'BD Tracker'          },
   { path: '/solution',    page: 'solution',   icon: '💡', label: 'Solution Tracker'    },
   { path: '/engagement',  page: 'engagement', icon: '📅', label: 'Engagement Calendar' },
@@ -18,7 +20,7 @@ export default function Sidebar() {
   const { isAdmin, canAccess } = usePermissions();
 
   // Only show pages the current user has access to
-  const visibleNav = NAV.filter(n => isAdmin || canAccess(n.page));
+  const visibleNav = NAV.filter(n => isAdmin || (canAccess(n.page) && (n.also || []).every(p => canAccess(p))));
 
   return (
     <aside className="sidebar" style={{ display: 'flex', flexDirection: 'column' }}>

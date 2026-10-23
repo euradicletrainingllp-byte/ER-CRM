@@ -7,6 +7,7 @@ import AuthGuard          from './components/AuthGuard.jsx';
 import Sidebar            from './components/Sidebar.jsx';
 import TopBar             from './components/TopBar.jsx';
 import Dashboard          from './pages/Dashboard.jsx';
+import FounderDashboard   from './pages/FounderDashboard.jsx';
 import EngagementCalendar from './pages/EngagementCalendar.jsx';
 import OpsChecklist          from './pages/OpsChecklist.jsx';
 import ContentDevelopmentTracker from './pages/ContentDevelopmentTracker.jsx';
@@ -25,9 +26,9 @@ import './styles/index.css';
  * Shows NoAccessPage if the signed-in user lacks access to that page key.
  * Admins always pass through.
  */
-function PermissionRoute({ page, children }) {
+function PermissionRoute({ page, also = [], children }) {
   const { isAdmin, canAccess } = usePermissions();
-  if (isAdmin || canAccess(page)) return children;
+  if (isAdmin || (canAccess(page) && also.every(p => canAccess(p)))) return children;
   return <DeniedPage page={page} />;
 }
 
@@ -41,7 +42,7 @@ function DeniedPage({ page }) {
 
 // Activity log: page key for each route (used for PAGE_VIEW rows)
 const ROUTE_MODULE = {
-  '/': 'dashboard', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
+  '/': 'dashboard', '/founder': 'dashboard', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
   '/content-dev': 'content-dev', '/solution': 'solution', '/er-calendar': 'engagement', '/admin': 'permissions',
 };
 
@@ -101,6 +102,11 @@ function Shell() {
             <Route path="/" element={
               <PermissionRoute page="dashboard">
                 <Dashboard onRefreshed={setLastRefreshed} />
+              </PermissionRoute>
+            } />
+            <Route path="/founder" element={
+              <PermissionRoute page="dashboard" also={['finance']}>
+                <FounderDashboard onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
             <Route path="/bd-tracker" element={
