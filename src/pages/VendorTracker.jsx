@@ -21,7 +21,7 @@ import { peekList, peekAllEngagements, getAllEngagementsCached } from '../servic
 import { getVendorServices, addVendorService, updateVendorService, deleteVendorService, nextServiceId, vendorTotals } from '../services/leadsVendorsApi.js';
 import { pendingItems, VENDOR_RULES } from '../config/pendingFields.js';
 import {
-  VENDOR_CATEGORIES, VENDOR_UNITS, BILLABLE_OPTIONS, CLIENT_BILLING, VENDOR_PAYMENT, isBillable,
+  VENDOR_CATEGORIES, BILLABLE_OPTIONS, CLIENT_BILLING, VENDOR_PAYMENT, isBillable,
   VENDOR_INVOICE_EXPECTED_DAYS, CLIENT_BILLING_DAYS, VENDOR_PAYMENT_DAYS,
 } from '../config/leadVendorOptions.js';
 import '../styles/leadsVendors.css';
@@ -62,7 +62,12 @@ const EMPTY = {
 
 function ServiceModal({ initial, prefill, onSave, onClose, saving, engagements, vendors, names, me }) {
   const isEdit = !!initial;
-  const [f, setF] = useState(() => (isEdit ? { ...EMPTY, ...initial } : { ...EMPTY, ...prefill, requestedBy: me, createdBy: me }));
+  const [f, setF] = useState(() => {
+    const base = isEdit ? { ...EMPTY, ...initial } : { ...EMPTY, ...prefill, requestedBy: me, createdBy: me };
+    // One total cost per service (all items, incl. GST). Older rows: start from their saved total.
+    const t = isEdit ? (Number(base.total) || vendorTotals(base).total || '') : '';
+    return { ...base, cost: t === '' ? '' : String(t) };
+  });
   const [engQ, setEngQ] = useState('');
   const set = (k, v) => setF(x => {
     const n = { ...x, [k]: v };
@@ -73,7 +78,6 @@ function ServiceModal({ initial, prefill, onSave, onClose, saving, engagements, 
     if (k === 'clientInvoiceRef' && v && n.clientBilling === 'To bill') n.clientBilling = 'Billed';
     return n;
   });
-  const { amount, total } = vendorTotals(f);
   const engOptions = useMemo(() => {
     const q = norm(engQ);
     return engagements.filter(e => !q || [e.company, e.topic, e.egId, e.engagementKey].some(v => norm(v).includes(q)))
@@ -121,12 +125,9 @@ function ServiceModal({ initial, prefill, onSave, onClose, saving, engagements, 
 
         <div className="lv-form-section">Cost</div>
         <div className="form-grid lv-grid-4">
-          <Field label="Quantity"><input className="form-input" inputMode="decimal" value={f.quantity} onChange={e => set('quantity', e.target.value.replace(/[^0-9.]/g, ''))} /></Field>
-          <Field label="Unit"><Select value={f.unit} options={VENDOR_UNITS} onChange={v => set('unit', v)} /></Field>
-          <Field label="Rate (₹)"><input className="form-input" inputMode="decimal" value={f.rate} onChange={e => set('rate', e.target.value.replace(/[^0-9.]/g, ''))} /></Field>
-          <Field label="Amount (₹)"><input className="form-input" inputMode="decimal" value={f.amount} onChange={e => set('amount', e.target.value.replace(/[^0-9.]/g, ''))} placeholder="Qty × Rate" /></Field>
-          <Field label="GST (₹)"><input className="form-input" inputMode="decimal" value={f.gst} onChange={e => set('gst', e.target.value.replace(/[^0-9.]/g, ''))} /></Field>
-          <Field label="Total (₹)"><input className="form-input" readOnly value={total ? total.toLocaleString('en-IN') : ''} style={{ background: '#F8F9FB', fontWeight: 700 }} /></Field>
+          <div data-pf="total">
+            <Field label="Total Cost (₹)"><input className="form-input" inputMode="decimal" value={f.cost} onChange={e => set('cost', e.target.value.replace(/[^0-9.]/g, ''))} placeholder="All items, incl. GST" style={{ fontWeight: 700 }} /></Field>
+          </div>
         </div>
 
         <div className="lv-form-section">Billing to client</div>
@@ -149,7 +150,7 @@ function ServiceModal({ initial, prefill, onSave, onClose, saving, engagements, 
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 20, alignItems: 'center' }}>
-          <button className="btn btn-cta" disabled={!valid || saving} onClick={() => onSave({ ...f, amount: amount || '', total: total || '' })}>{saving ? 'Saving…' : isEdit ? 'Update Service' : 'Save Service'}</button>
+          <button className="btn btn-cta" disabled={!valid || saving} onClick={() => { const { cost, ...rest } = f; onSave({ ...rest, quantity: '', unit: '', rate: '', gst: '', amount: cost || '', total: cost || '' }); }}>{saving ? 'Saving…' : isEdit ? 'Update Service' : 'Save Service'}</button>
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
           {!valid && <span className="lv-req">* Vendor Name and Service Category are required</span>}
         </div>
@@ -218,11 +219,7 @@ function ServicePanel({ v, canEdit, onEdit, onDelete, onQuick, saving }) {
         </dl>
         <div className="lv-sub">Cost</div>
         <dl className="lv-info">
-          <Info k="quantity" label="Quantity">{v.quantity !== '' && `${v.quantity} ${v.unit || ''}`}</Info>
-          <Info k="rate" label="Rate">{v.rate !== '' && inr(v.rate)}</Info>
-          <Info k="amount" label="Amount">{inr(v.amount)}</Info>
-          <Info k="gst" label="GST">{inr(v.gst)}</Info>
-          <Info k="total" label="Total">{inr(v.total)}</Info>
+          <Info k="total" label="Total cost">{inr(v.total || vendorTotals(v).total)}</Info>
         </dl>
         <div className="lv-sub">Billing &amp; payment</div>
         <dl className="lv-info">
@@ -392,8 +389,8 @@ export default function VendorTracker({ onRefreshed }) {
         <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing}>{refreshing ? '⟳' : '↺'}</button>
         <ExportButton page="vendors" filename="Vendor Service Tracker" sheetName="Vendor Services" rows={() => filtered}
           columns={[['Service ID', 'serviceId'], ['Vendor Name', 'vendorName'], ['Vendor Contact', 'vendorContact'], ['Service Category', 'category'], ['Service Description', 'description'],
-            ['Client', 'client'], ['Program', 'program'], ['EG ID', 'egId'], ['Engagement Index', 'engagementKey'], ['Service Date', 'serviceDate'], ['Quantity', 'quantity'], ['Unit', 'unit'],
-            ['Rate', 'rate'], ['Amount', 'amount'], ['GST', 'gst'], ['Total', 'total'], ['Requested By', 'requestedBy'], ['Billable to Client', 'billable'], ['Client Billing Status', 'clientBilling'],
+            ['Client', 'client'], ['Program', 'program'], ['EG ID', 'egId'], ['Engagement Index', 'engagementKey'], ['Service Date', 'serviceDate'],
+            ['Total Cost', 'total'], ['Requested By', 'requestedBy'], ['Billable to Client', 'billable'], ['Client Billing Status', 'clientBilling'],
             ['Client Invoice Ref', 'clientInvoiceRef'], ['Client Invoice Date', 'clientInvoiceDate'], ['Vendor Invoice No', 'vendorInvoiceNo'], ['Vendor Invoice Date', 'vendorInvoiceDate'],
             ['Vendor Payment Status', 'paymentStatus'], ['Paid Amount', 'paidAmount'], ['Paid Date', 'paidDate'], ['Comments', 'comments']].map(([label, key]) => ({ label, key }))} />
         {canCreate('vendors') && <button className="btn btn-primary btn-sm" onClick={() => setModal('add')}>+ Add Service</button>}

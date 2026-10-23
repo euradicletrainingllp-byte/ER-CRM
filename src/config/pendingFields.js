@@ -156,7 +156,7 @@ export const VENDOR_RULES = {
     { key: 'category',          label: 'Service Category' },
     { key: 'description',       label: 'Service Description' },
     { key: 'serviceDate',       label: 'Service Date' },
-    { key: 'total',             label: 'Amount (₹)', test: blankOrZero },
+    { key: 'total',             label: 'Total Cost (₹)', test: blankOrZero },
     { key: 'billable',          label: 'Billable to Client' },
     { key: 'client',            label: 'Client', when: r => isBillable(r.billable) },
     { key: 'vendorInvoiceNo',   label: 'Vendor Invoice No', when: r => ['To pay', 'Partly paid', 'Paid'].includes(s(r.paymentStatus)) },
