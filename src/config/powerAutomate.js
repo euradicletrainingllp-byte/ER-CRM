@@ -50,7 +50,7 @@ const FLOW_URLS = {
   // ── VENDOR SERVICE TRACKER ────────────────────────────────────────────────
   // Excel: "Vendor_Service_Tracker.xlsx" → Table: "VendorServiceTable"  ·  key column: "Service ID"
   // Payload: { action: get | create | update | delete, sno: <Service ID>, 'Service ID', ...columns }
-  VENDOR_CRUD: "",
+  VENDOR_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/06/workflows/72d09c72ec7240419073340ffb44fae2/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=9_7GRqLMlMcPRc3gSp5HiRRMTntd2Qzx9ofKelseWAI",
 
   // ── ACTIVITY LOG (audit trail) ────────────────────────────────────────────
   // SharePoint list: "CRM ACTIVITY LOG"  ·  Flow: "CRM Activity Log"

@@ -11,7 +11,8 @@
  *   ContentDevCreate | ContentDevRead | ContentDevUpdate | ContentDevDelete |
  *   SolCreate  | SolRead  | SolUpdate  | SolDelete  |
  *   LeadCreate | LeadRead | LeadUpdate | LeadDelete |
- *   VendorCreate | VendorRead | VendorUpdate | VendorDelete
+ *   VendorCreate | VendorRead | VendorUpdate | VendorDelete |
+ *   FounderCreate | FounderRead | FounderUpdate | FounderDelete   (Founder's Desk: only Read is used)
  *
  *  Values are the strings "true" or "false".
  */
@@ -34,6 +35,7 @@ const PAGE_PREFIX = {
   'solution':    'Sol',
   'leads':       'Lead',
   'vendors':     'Vendor',
+  'founder':     'Founder',
 };
 const PAGES = Object.keys(PAGE_PREFIX);
 const OPS   = ['Create', 'Read', 'Update', 'Delete'];

@@ -21,6 +21,7 @@ export default function NoAccessPage({ page }) {
     bd:         'BD Pipeline',
     engagement: 'Engagement Calendar',
     ops:        'Ops Checklist',
+    founder:    "Founder's Desk",
   }[page] || 'this page';
 
   return (

@@ -44,7 +44,7 @@ function DeniedPage({ page }) {
 
 // Activity log: page key for each route (used for PAGE_VIEW rows)
 const ROUTE_MODULE = {
-  '/': 'dashboard', '/founder': 'dashboard', '/leads': 'leads', '/vendors': 'vendors', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
+  '/': 'dashboard', '/founder': 'founder', '/leads': 'leads', '/vendors': 'vendors', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
   '/content-dev': 'content-dev', '/solution': 'solution', '/er-calendar': 'engagement', '/admin': 'permissions',
 };
 
@@ -107,7 +107,7 @@ function Shell() {
               </PermissionRoute>
             } />
             <Route path="/founder" element={
-              <PermissionRoute page="dashboard" also={['finance']}>
+              <PermissionRoute page="founder">
                 <FounderDashboard onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />

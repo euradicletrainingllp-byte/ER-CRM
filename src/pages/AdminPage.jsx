@@ -22,6 +22,7 @@ const PAGES = [
   { key: 'solution',    label: 'Solution',             icon: '💡' },
   { key: 'leads',       label: 'Leads',                icon: '🧲' },
   { key: 'vendors',     label: 'Vendors',              icon: '🧾' },
+  { key: 'founder',     label: "Founder's Desk",       icon: '🧭' },   // read-only page: only Read (R) matters
 ];
 
 const OPS = [

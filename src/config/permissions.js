@@ -33,6 +33,7 @@ export const PERMISSIONS = {
       solution:      { ...ALL_CRUD },
       leads:         { ...ALL_CRUD },
       vendors:       { ...ALL_CRUD },
+      founder:       { ...ALL_CRUD },
     },
   },
   // ── Add team members below (or manage via Admin Panel) ──────────────────
