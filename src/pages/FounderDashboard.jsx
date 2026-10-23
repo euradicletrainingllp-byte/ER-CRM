@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { peekList, peekAllEngagements, getSolutionTracker, getAllEngagementsCached, getOpsChecklist, getContentDevTracker } from '../services/api.js';
+import { getLeads, getVendorServices } from '../services/leadsVendorsApi.js';
 import {
   TRACKERS, PERIODS, periodRange, inRange, todayIso, addDaysIso, openTasks, completedWork, missingByTracker,
   cashSummary, pipelineSummary, upcomingDeliveries, fmtL,
@@ -150,6 +151,8 @@ export default function FounderDashboard({ onRefreshed }) {
   const [eng, setEng] = useState(() => peekAllEngagements() || []);
   const [ops, setOps] = useState(() => peekList('ops') || []);
   const [cdt, setCdt] = useState(() => peekList('cdt') || []);
+  const [leads, setLeads] = useState(() => peekList('leads') || []);
+  const [vendors, setVendors] = useState(() => peekList('vendors') || []);
   const [loading, setLoading] = useState(() => !(peekList('solution') && peekAllEngagements() && peekList('ops') && peekList('cdt')));
   const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState({});
@@ -173,13 +176,16 @@ export default function FounderDashboard({ onRefreshed }) {
       getAllEngagementsCached({ force: true }).then(setEng).catch(e => { errs['Engagement Calendar'] = e; }),
       getOpsChecklist().then(setOps).catch(e => { errs['Ops Checklist'] = e; }),
       getContentDevTracker().then(setCdt).catch(e => { errs['Content Dev'] = e; }),
+      // Lead / Vendor trackers are optional until their flows are set up — skip quietly when not configured
+      getLeads().then(setLeads).catch(e => { if (!/FLOW_NOT_CONFIGURED/.test(e?.message)) errs['Lead Tracker'] = e; }),
+      getVendorServices().then(setVendors).catch(e => { if (!/FLOW_NOT_CONFIGURED/.test(e?.message)) errs['Vendor Services'] = e; }),
     ]);
     setErrors(errs); setLoading(false); setRefreshing(false);
     onRefreshed?.(new Date().toLocaleTimeString());
   };
   useEffect(() => { load(); }, []);
 
-  const data = useMemo(() => ({ sol, eng, ops, cdt }), [sol, eng, ops, cdt]);
+  const data = useMemo(() => ({ sol, eng, ops, cdt, leads, vendors }), [sol, eng, ops, cdt, leads, vendors]);
   const range = useMemo(() => periodRange(layout.period), [layout.period]);
   const tasks = useMemo(() => openTasks(data), [data]);
   const done = useMemo(() => completedWork(data), [data]);
@@ -337,7 +343,7 @@ export default function FounderDashboard({ onRefreshed }) {
       const inP = done.filter(d => inRange(d.date, range));
       const groups = {};
       inP.forEach(d => { const k = d.tracker === 'ops' ? 'Ops checklist items' : d.label.split(':')[0]; groups[k] = groups[k] || { n: 0, amt: 0 }; groups[k].n++; groups[k].amt += d.amount || 0; });
-      const order = ['Session delivered', 'Proposal submitted', 'Invoice raised', 'Payment received', 'Ops checklist items', 'Content completed', 'Content Assets', 'Pre-Work', 'Post-Work'];
+      const order = ['Session delivered', 'Proposal submitted', 'Invoice raised', 'Payment received', 'Lead converted to BD', 'Lead action', 'Vendor cost billed to client', 'Vendor paid', 'Ops checklist items', 'Content completed', 'Content Assets', 'Pre-Work', 'Post-Work'];
       return (
         <Section id="done" {...sp} right={<span className="fd-muted">{periodLabel}</span>} count={inP.length}>
           {inP.length ? (

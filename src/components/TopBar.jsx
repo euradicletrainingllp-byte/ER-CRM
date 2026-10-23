@@ -4,6 +4,8 @@ import { logEvent, flushSoon, endAuditSession } from '../services/auditLogger.js
 const TITLES = {
   '/':           'Dashboard',
   '/founder':    "Founder's Desk",
+  '/leads':      'Lead Tracker',
+  '/vendors':    'Vendor Service Tracker',
   '/bd':         'BD Pipeline',
   '/engagement': 'Engagement Calendar',
   '/ops':        'Operations Checklist',

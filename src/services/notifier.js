@@ -44,6 +44,8 @@ export const NOTIFY_TRACKERS = {
   finance:       { name: 'Finance Tracker',     route: '/finance' },
   ops:           { name: 'Ops Checklist',       route: '/ops' },
   'content-dev': { name: 'Content Dev Tracker', route: '/content-dev' },
+  leads:         { name: 'Lead Tracker',        route: '/leads' },
+  vendors:       { name: 'Vendor Service Tracker', route: '/vendors' },
 };
 
 // Activity-log Module (= Excel store) → trackers that show that store.
@@ -54,11 +56,14 @@ const STORE_TRACKERS = {
   engagement:    ['engagement', 'finance'],
   ops:           ['ops'],
   'content-dev': ['content-dev'],
+  leads:         ['leads'],
+  vendors:       ['vendors'],
 };
 
 const ROUTE_TRACKER = {
   '/bd-tracker': 'bd', '/solution': 'solution', '/engagement': 'engagement',
   '/er-calendar': 'engagement', '/finance': 'finance', '/ops': 'ops', '/content-dev': 'content-dev',
+  '/leads': 'leads', '/vendors': 'vendors',
 };
 
 function trackerFor(module, route) {

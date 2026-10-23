@@ -20,6 +20,8 @@ const PAGES = [
   { key: 'finance',     label: 'Finance',              icon: '💰' },
   { key: 'content-dev', label: 'Content Dev',          icon: '📘' },
   { key: 'solution',    label: 'Solution',             icon: '💡' },
+  { key: 'leads',       label: 'Leads',                icon: '🧲' },
+  { key: 'vendors',     label: 'Vendors',              icon: '🧾' },
 ];
 
 const OPS = [

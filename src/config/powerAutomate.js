@@ -41,6 +41,17 @@ const FLOW_URLS = {
   // Payload: { action, sno, Proposal ID, BD S No, Sol S No, Client Name, ... }
   SOLUTION_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/02/workflows/e512fd82e2e3425d9dbba7d231588e76/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pD3X9t1IvsUzmgTgJ33jtJtYE4lwco3j7g6Lut77LFY",      // ← paste your PA CRUD Router URL here
 
+  // ── LEAD TRACKER ──────────────────────────────────────────────────────────
+  // Excel: "Lead_Tracker.xlsx" → Table: "LeadTable"  ·  key column: "Lead ID"
+  // Payload: { action: get | create | update | delete, sno: <Lead ID>, 'Lead ID', ...columns }
+  // Build guide: project doc claude/feature-2026-10-23-lead-vendor-trackers.md
+  LEADS_CRUD: "",
+
+  // ── VENDOR SERVICE TRACKER ────────────────────────────────────────────────
+  // Excel: "Vendor_Service_Tracker.xlsx" → Table: "VendorServiceTable"  ·  key column: "Service ID"
+  // Payload: { action: get | create | update | delete, sno: <Service ID>, 'Service ID', ...columns }
+  VENDOR_CRUD: "",
+
   // ── ACTIVITY LOG (audit trail) ────────────────────────────────────────────
   // SharePoint list: "CRM ACTIVITY LOG"  ·  Flow: "CRM Activity Log"
   // Payload: { action: 'append', events: [ ...log rows ] }
@@ -66,6 +77,8 @@ export const EXCEL_FILES = {
   OPS_CHECKLIST:       "Operations Checklist.xlsx",
   CONTENT_DEV_TRACKER: "Content_Development_Tracker.xlsx",
   SOLUTION_TRACKER:    "Solutioning_Tracker.xlsx",
+  LEAD_TRACKER:        "Lead_Tracker.xlsx",
+  VENDOR_TRACKER:      "Vendor_Service_Tracker.xlsx",
 };
 
 /**
@@ -78,4 +91,6 @@ export const TABLE_NAMES = {
   ENGAGEMENT:       "EngagementMasterTable",
   CONTENT_DEV:      "ContentDevTable",
   SOLUTION_TRACKER: "Table1",
+  LEAD_TRACKER:     "LeadTable",
+  VENDOR_TRACKER:   "VendorServiceTable",
 };

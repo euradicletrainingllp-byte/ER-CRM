@@ -31,6 +31,8 @@ export const PERMISSIONS = {
       finance:       { ...ALL_CRUD },
       'content-dev': { ...ALL_CRUD },
       solution:      { ...ALL_CRUD },
+      leads:         { ...ALL_CRUD },
+      vendors:       { ...ALL_CRUD },
     },
   },
   // ── Add team members below (or manage via Admin Panel) ──────────────────

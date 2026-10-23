@@ -5,12 +5,14 @@ const NAV = [
   { path: '/',            page: 'dashboard',  icon: '📊', label: 'Dashboard'           },
   // Founder's Desk shows money too, so it needs Dashboard AND Finance view access
   { path: '/founder',     page: 'dashboard',  also: ['finance'], icon: '🧭', label: "Founder's Desk" },
+  { path: '/leads',       page: 'leads',      icon: '🧲', label: 'Lead Tracker'        },
   { path: '/bd-tracker',  page: 'bd',         icon: '🎯', label: 'BD Tracker'          },
   { path: '/solution',    page: 'solution',   icon: '💡', label: 'Solution Tracker'    },
   { path: '/engagement',  page: 'engagement', icon: '📅', label: 'Engagement Calendar' },
   { path: '/ops',         page: 'ops',        icon: '✔',  label: 'Ops Checklist'       },
   { path: '/finance',     page: 'finance',    icon: '💰', label: 'Finance Tracker'     },
   { path: '/content-dev', page: 'content-dev',icon: '📘', label: 'Content Dev Tracker' },
+  { path: '/vendors',     page: 'vendors',    icon: '🧾', label: 'Vendor Services'     },
   { path: '/er-calendar',  page: 'engagement',  icon: '🗓️', label: 'ER Calendar'         },
 ];
 

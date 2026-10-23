@@ -1,0 +1,102 @@
+/* Lead Tracker + Vendor Service Tracker — brand palette, CRM typography */
+.lv-muted { font-size: 12px; color: var(--muted); }
+.lv-req { font-size: 12px; color: #b5503f; }
+.lv-toast { position: fixed; top: 70px; right: 24px; z-index: 999; max-width: 460px; background: var(--navy); color: #fff; padding: 10px 18px;
+  border-radius: 8px; font-size: 13px; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.lv-form-section { font-size: 11px; font-weight: 700; color: var(--purple); text-transform: uppercase; letter-spacing: .5px; margin: 16px 0 8px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.lv-form-section:first-of-type { margin-top: 4px; }
+.form-grid.lv-grid-4 { grid-template-columns: repeat(3, 1fr); }
+
+/* Tabs + quick filters */
+.lv-tabs { display: inline-flex; padding: 3px; gap: 2px; background: #F2F2F2; border-radius: 8px; }
+.lv-tabs button { height: 28px; padding: 0 12px; border: none; border-radius: 6px; background: transparent; color: var(--muted); font-family: inherit;
+  font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.lv-tabs button.on { background: var(--white); color: var(--navy); box-shadow: 0 1px 2px rgba(45,48,71,0.12); }
+.lv-quickfilters { display: flex; gap: 6px; flex-wrap: wrap; margin: -8px 0 10px; flex-shrink: 0; }
+.lv-qf { height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--white); color: var(--text-body);
+  font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.lv-qf b { margin-left: 4px; color: var(--muted); }
+.lv-qf.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+.lv-qf.on b { color: #E5D3E3; }
+
+/* List rows */
+.lv-row { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; border-left: 3px solid transparent; }
+.lv-row:hover { background: #FAFBFD; }
+.lv-row.sel { background: #F7F2F7; border-left-color: var(--mauve); }
+.lv-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lv-id { flex-shrink: 0; font-size: 11px; font-weight: 700; color: var(--muted); background: var(--border); border-radius: 4px; padding: 1px 6px; }
+.lv-row-name { font-weight: 700; font-size: 13px; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lv-row-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.lv-row-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; font-size: 11px; color: var(--muted); align-items: center; }
+
+/* Pills */
+.lv-pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.lv-st-new  { background: #F1F5F9; color: #475569; }
+.lv-st-prog { background: #F3EAF2; color: #7A3F76; }
+.lv-st-won  { background: #E6FFF1; color: #065f46; }
+.lv-st-hold { background: var(--warning-lt); color: #6b4a00; }
+.lv-st-lost { background: var(--error-lt); color: #8b2e20; }
+.lv-prio { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; padding: 0 6px; border-radius: 4px; line-height: 16px; flex-shrink: 0; }
+.lv-prio-hot { background: var(--error-lt); color: #8b2e20; } .lv-prio-warm { background: var(--warning-lt); color: #6b4a00; } .lv-prio-cold { background: #F1F5F9; color: #475569; }
+.lv-due { font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 4px; }
+.lv-due-bad { background: var(--error-lt); color: #8b2e20; } .lv-due-warn { background: var(--warning-lt); color: #6b4a00; }
+.lv-due-ok { background: #E6FFF1; color: #065f46; } .lv-due-none { background: #F1F5F9; color: #475569; }
+.lv-warn-t { color: #b5503f; font-weight: 700; }
+
+/* Detail panel */
+.lv-panel { height: 100%; display: flex; flex-direction: column; margin-bottom: 0; }
+.lv-panel-head { flex-shrink: 0; align-items: flex-start !important; gap: 10px; }
+.lv-panel-title { font-size: 15px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 8px; }
+.lv-panel-body { flex: 1; overflow-y: auto; padding: 4px 18px 18px; }
+.lv-amount { font-size: 18px; font-weight: 800; color: var(--navy); }
+.lv-sub { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin: 14px 0 6px; }
+.lv-sub-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--navy); }
+.lv-info { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
+.lv-info dt { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.lv-info dd { font-size: 13px; color: var(--navy); word-break: break-word; }
+.lv-info a { color: #7A3F76; }
+.lv-info-full { grid-column: 1 / -1; }
+.lv-empty { padding: 16px; text-align: center; font-size: 12.5px; color: var(--muted); background: #FAFBFD; border: 1px dashed var(--border); border-radius: 10px; }
+.lv-placeholder { text-align: center; padding: 60px 20px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.lv-placeholder b { color: var(--navy); }
+.lv-big { font-size: 36px; margin-bottom: 6px; }
+
+/* Action log */
+.lv-action-form { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: #FAFBFD; }
+.lv-sub-row:has(.lv-action-form) { flex-direction: column; align-items: stretch; }
+.lv-af-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.lv-af-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.lv-af-grid .form-input { height: 34px; padding: 4px 8px; font-size: 12.5px; }
+.lv-af-grid textarea.form-input { height: auto; }
+.lv-af-full { grid-column: 1 / -1; }
+.lv-af-btns { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.lv-timeline { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid #E5D3E3; }
+.lv-timeline li { position: relative; padding: 0 0 12px 12px; }
+.lv-timeline li::before { content: ''; position: absolute; left: -21px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--white); border: 2px solid var(--mauve); }
+.lv-tl-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--navy); }
+.lv-tl-type { font-size: 11px; font-weight: 600; color: var(--purple); background: #EDE9F6; border-radius: 4px; padding: 0 6px; }
+.lv-tl-comment { font-size: 13px; color: var(--text-body); margin-top: 2px; white-space: pre-wrap; }
+.lv-x { margin-left: auto; border: none; background: none; color: #9CA3AF; cursor: pointer; font-size: 12px; }
+.lv-x:hover { color: #b5503f; }
+
+/* Quick actions (vendor) */
+.lv-quick { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.lv-quick-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--warning-lt); font-size: 12.5px; color: #6b4a00; font-weight: 600; flex-wrap: wrap; }
+.lv-quick-row .form-input { height: 30px; max-width: 170px; font-size: 12px; }
+
+/* Insights / summary tables */
+.lv-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.lv-ins-block { background: var(--white); border: 1px solid var(--border); border-radius: 12px; padding: 4px 14px 14px; }
+.lv-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.lv-table th { text-align: left; font-size: 11px; font-weight: 700; color: var(--navy); background: #F8F9FB; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.lv-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); color: var(--navy); }
+.lv-table tr:hover td { background: #FAFBFD; }
+
+@media (max-width: 900px) { .lv-af-grid { grid-template-columns: 1fr 1fr; } .lv-info { grid-template-columns: 1fr; } .form-grid.lv-grid-4 { grid-template-columns: 1fr 1fr; } }
+
+/* Compact filter bar (keeps the controls on one line instead of full-width selects) */
+.lv-filters { margin-bottom: 12px; }
+.lv-filters .form-input { width: auto; min-width: 140px; max-width: 220px; height: 36px; padding: 0 10px; font-size: 12.5px; }
+.lv-filters input.form-input.wide { width: 280px; max-width: 100%; }
+.lv-filters .btn-sm { height: 32px; }

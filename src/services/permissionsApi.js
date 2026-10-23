@@ -9,7 +9,9 @@
  *   OpsCreate  | OpsRead  | OpsUpdate  | OpsDelete  |
  *   FinCreate  | FinRead  | FinUpdate  | FinDelete  |
  *   ContentDevCreate | ContentDevRead | ContentDevUpdate | ContentDevDelete |
- *   SolCreate  | SolRead  | SolUpdate  | SolDelete
+ *   SolCreate  | SolRead  | SolUpdate  | SolDelete  |
+ *   LeadCreate | LeadRead | LeadUpdate | LeadDelete |
+ *   VendorCreate | VendorRead | VendorUpdate | VendorDelete
  *
  *  Values are the strings "true" or "false".
  */
@@ -30,6 +32,8 @@ const PAGE_PREFIX = {
   'finance':     'Fin',
   'content-dev': 'ContentDev',
   'solution':    'Sol',
+  'leads':       'Lead',
+  'vendors':     'Vendor',
 };
 const PAGES = Object.keys(PAGE_PREFIX);
 const OPS   = ['Create', 'Read', 'Update', 'Delete'];

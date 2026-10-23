@@ -7,6 +7,7 @@
  * To stop flagging a field, delete its line. To flag a new one, add a line.
  */
 import { parseChecklist } from './opsChecklistItems.js';
+import { leadIsOpen, isBillable } from './leadVendorOptions.js';
 
 const s = v => String(v ?? '').trim();
 export const isBlank = v => { const t = s(v); return !t || t === '—' || t === '-'; };
@@ -133,6 +134,34 @@ export const SOL_RULES = {
     { key: 'typeOfService',       label: 'Type of Service' },
     { key: 'developmentCategory', label: 'Development Category' },
     { key: 'solutionValue',       label: 'Solution Value', test: blankOrZero },
+  ],
+};
+
+// ── Lead Tracker — "Add / Edit Lead" form ───────────────────────────────────
+export const LEAD_RULES = {
+  fields: [
+    { key: 'source',        label: 'Lead Source' },
+    { key: 'sharedBy',      label: 'Shared By' },
+    { key: 'contactName',   label: 'Contact Person' },
+    { key: 'email',         label: 'Email', when: r => isBlank(r.phone) },      // flagged only when there is no phone either
+    { key: 'owner',         label: 'Lead Owner' },
+    { key: 'requirement',   label: 'Requirement' },
+    { key: 'nextFollowUp',  label: 'Next Follow-up', when: r => leadIsOpen(r) },
+  ],
+};
+
+// ── Vendor Service Tracker — "Add / Edit Vendor Service" form ───────────────
+export const VENDOR_RULES = {
+  fields: [
+    { key: 'category',          label: 'Service Category' },
+    { key: 'description',       label: 'Service Description' },
+    { key: 'serviceDate',       label: 'Service Date' },
+    { key: 'total',             label: 'Amount (₹)', test: blankOrZero },
+    { key: 'billable',          label: 'Billable to Client' },
+    { key: 'client',            label: 'Client', when: r => isBillable(r.billable) },
+    { key: 'vendorInvoiceNo',   label: 'Vendor Invoice No', when: r => ['To pay', 'Partly paid', 'Paid'].includes(s(r.paymentStatus)) },
+    { key: 'clientInvoiceRef',  label: 'Client Invoice Ref', when: r => s(r.clientBilling) === 'Billed' },
+    { key: 'paidDate',          label: 'Paid Date', when: r => s(r.paymentStatus) === 'Paid' },
   ],
 };
 

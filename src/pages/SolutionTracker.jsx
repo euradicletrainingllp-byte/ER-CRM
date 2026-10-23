@@ -40,6 +40,8 @@ function bdLinkFor(rows, pid, version) {
 // ── Proposal versions (V1, V2 …) ─────────────────────────────────────────────
 // Each revised version of a proposal is its own Excel row with the same Proposal ID.
 const versionNo = v => { const m = String(v ?? '').match(/(\d+)/); return m ? Number(m[1]) : 1; };
+// Serial shown for a BD line: the proposal's BD S No (shared by all its versions)
+const bdNoOf = r => r?._bdNo ?? (r?.bdSNo || r?.sno);
 // The row that represents the latest version of a proposal (prefers the BD anchor row of that version)
 function latestRowFor(rows, pid) {
   let best = null, bestI = -1;
@@ -92,7 +94,7 @@ function anchorOfVersion(rows, pid, v) {
 
 // ── Excel export columns ──────────────────────────────────────────────────────
 const BD_EXPORT_COLUMNS = [
-  { label: 'BD S No',              get: r => r.bdSNo || r.sno },
+  { label: 'BD S No',              get: r => bdNoOf(r) },
   { label: 'Proposal ID',          get: r => r.proposalId },
   { label: 'Proposal Version',     get: r => r.proposalVersion },
   { label: 'Client Name',          get: r => r.clientName },
@@ -926,15 +928,24 @@ export default function SolutionTracker({ onRefreshed, view }) {
   }
 
   // ── Derived data ──────────────────────────────────────────────────────────
-  // One line per Proposal ID + version: a revised proposal (V2, V3 …) is its own line with the
-  // same Proposal ID and its own solution items. Lines follow the S No order of the Excel rows,
-  // so a revision appears where it was added — not next to the earlier version.
+  // One line per Proposal ID + version. Only the BD row of a proposal carries a BD S No (Excel
+  // formula, first row of each Proposal ID); every other row of that proposal is a solution item
+  // and is shown only in the line's dropdown. Lines are ordered by the proposal's BD S No, then
+  // by version (V1, V2 …), so a revision sits right under its proposal and shows the same number.
+  // A row with a blank Proposal Version belongs to the version of its proposal's BD row.
   const allBdRows = useMemo(() => {
     const sNoOf = r => { const n = Number(r.sno); return Number.isFinite(n) ? n : Infinity; };
+    const bdNoNum = r => { const n = Number(String(r?.bdSNo ?? '').trim()); return String(r?.bdSNo ?? '').trim() !== '' && Number.isFinite(n) ? n : null; };
+    // BD row (row with a BD S No) of each Proposal ID
+    const bdRowOf = new Map();
+    rows.forEach(r => { if (r.proposalId && bdNoNum(r) != null && !bdRowOf.has(r.proposalId)) bdRowOf.set(r.proposalId, r); });
+    const effVersion = r => String(r.proposalVersion ?? '').trim() !== ''
+      ? versionNo(r.proposalVersion)
+      : versionNo(bdRowOf.get(r.proposalId)?.proposalVersion);
     const groups = new Map();   // key → { pid, n, rows, first }
     rows.forEach((r, i) => {
       if (!r.proposalId) return;
-      const n = versionNo(r.proposalVersion);
+      const n = effVersion(r);
       const k = groupKey(r.proposalId, n);
       if (!groups.has(k)) groups.set(k, { pid: r.proposalId, n, rows: [], first: i });
       groups.get(k).rows.push(r);
@@ -945,17 +956,22 @@ export default function SolutionTracker({ onRefreshed, view }) {
       countByPid.set(g.pid, (countByPid.get(g.pid) || 0) + 1);
     });
     return [...groups.entries()].map(([k, g]) => {
-      const anchor = g.rows.find(r => r.bdSNo) || g.rows[0];
+      const sorted = [...g.rows].sort((a, b) => sNoOf(a) - sNoOf(b));
+      const anchor = sorted.find(r => bdNoNum(r) != null) || sorted[0];
+      const pidBd = bdNoNum(bdRowOf.get(g.pid));
       return {
         ...anchor,
         _key: k,
+        _bdNo: pidBd ?? (anchor.bdSNo || anchor.sno),   // number shown: the proposal's BD S No
+        _bdSort: pidBd ?? Infinity,
+        _version: g.n,
         _order: Math.min(...g.rows.map(sNoOf)),
         _first: g.first,
-        _sols: g.rows.filter(x => x.solutionTopic),
+        _sols: sorted.filter(x => x.solutionTopic),       // dropdown: solution items in S No order
         _isLatest: g.n === topVersion.get(g.pid),
         _versionCount: countByPid.get(g.pid),
       };
-    }).sort((a, b) => (a._order - b._order) || (a._first - b._first));
+    }).sort((a, b) => (a._bdSort - b._bdSort) || (a._version - b._version) || (a._order - b._order) || (a._first - b._first));
   }, [rows]);
 
   // Excel-style column filters + sorting (shared with Engagement Calendar)
@@ -994,12 +1010,12 @@ export default function SolutionTracker({ onRefreshed, view }) {
       return pendingItems(
         bdRows.map(r => ({ ...r, proposalV1Link: bdLinkFor(rows, r.proposalId, r.proposalVersion) })),
         BD_RULES,
-        r => ({ id: r._key, serial: r.bdSNo || r.sno, title: `${r.proposalId} ${r.proposalVersion || 'V1'} · ${r.clientName || '(no client)'}`, subtitle: r.programTopic }),
+        r => ({ id: r._key, serial: bdNoOf(r), title: `${r.proposalId} ${r.proposalVersion || 'V1'} · ${r.clientName || '(no client)'}`, subtitle: r.programTopic }),
       ).map(it => ({ ...it, row: bdRows.find(b => b._key === it.id) || it.row }));
     }
     const items = bdRows.flatMap(r => (r._sols || []).map(sol => ({ ...sol, _line: r })));
     return pendingItems(items, SOL_RULES, sol => ({
-      id: `${sol._line._key}|${sol.sno}`, serial: `${sol._line.bdSNo || sol._line.sno}${sol.solSNo ? '·' + sol.solSNo : ''}`,
+      id: `${sol._line._key}|${sol.sno}`, serial: `${bdNoOf(sol._line)}${sol.solSNo ? '·' + sol.solSNo : ''}`,
       title: `${sol.proposalId} ${sol._line.proposalVersion || 'V1'} · ${sol._line.clientName || '(no client)'}`,
       subtitle: sol.solutionTopic,
     }));
@@ -1021,7 +1037,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
     if (r.bdStatus !== 'In Process' || toIso(r.submissionToClient)) return null;
     const due = toIso(r.clientExpectedDate);
     return due ? {
-      id: r._key, serial: r.bdSNo || r.sno, title: `${r.proposalId} ${r.proposalVersion || 'V1'} · ${r.clientName || '(no client)'}`,
+      id: r._key, serial: bdNoOf(r), title: `${r.proposalId} ${r.proposalVersion || 'V1'} · ${r.clientName || '(no client)'}`,
       subtitle: r.programTopic, tasks: [{ key: 'submissionToClient', label: 'Submit proposal to client', due }], row: r,
     } : null;
   }).filter(Boolean), [bdRows]);
@@ -1435,7 +1451,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                           }}>▶</span>
                         </td>
                         <td style={tdStyle}>
-                          <span style={{ fontWeight: 700, background: 'var(--border)', borderRadius: 4, padding: '2px 7px', fontSize: 12 }}>#{r.bdSNo || r.sno}</span>
+                          <span style={{ fontWeight: 700, background: 'var(--border)', borderRadius: 4, padding: '2px 7px', fontSize: 12 }}>#{bdNoOf(r)}</span>
                         </td>
                         <td style={{ ...tdStyle, fontWeight: 700, whiteSpace: 'nowrap' }}>
                           {r.proposalId}

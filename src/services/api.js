@@ -17,6 +17,8 @@ const AUDIT_MODULE = {
   OPS_CHECKLIST_CRUD: 'ops',
   CONTENT_DEV_CRUD:   'content-dev',
   SOLUTION_CRUD:      'solution',
+  LEADS_CRUD:         'leads',
+  VENDOR_CRUD:        'vendors',
 };
 const AUDIT_ACTION = { get: 'READ', create: 'CREATE', update: 'UPDATE', delete: 'DELETE' };
 const AUDIT_META_KEYS = new Set(['action', 'rowId', 'sno', 'SNo', 'newSno']);
@@ -44,9 +46,9 @@ function auditRecordId(body) {
 
 function auditLabel(vals) {
   const pick = (...keys) => { for (const k of keys) { const v = vals[normKey(k)]; if (v) return String(v).trim(); } return ''; };
-  const who  = pick('Client', 'Company', 'Client Name');
-  const what = pick('Topic', 'Program Topic', 'Solution Topic');
-  const eg   = pick('EG ID', 'Proposal ID');
+  const who  = pick('Client', 'Company', 'Client Name', 'Vendor Name');
+  const what = pick('Topic', 'Program Topic', 'Solution Topic', 'Service Description', 'Requirement');
+  const eg   = pick('EG ID', 'Proposal ID', 'Lead ID', 'Service ID');
   return [eg, who, what].filter(Boolean).join(' · ');
 }
 
@@ -1352,3 +1354,6 @@ export async function readTrackerFresh(name) {
 }
 export async function getContentDevTracker() { return rememberList('cdt',      await withReadRetry(fetchContentDevTracker)); }
 export async function getSolutionTracker()   { return rememberList('solution', await withReadRetry(fetchSolutionTracker)); }
+
+// Shared helpers for the Lead and Vendor Service trackers (src/services/leadsVendorsApi.js)
+export { callFlow as _callFlow, getField as _getField, formatDate as _formatDate, withReadRetry as _withReadRetry, rememberList as _rememberList, withDecodedKeys as _withDecodedKeys };

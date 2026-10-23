@@ -8,7 +8,8 @@
  */
 import { CL_ITEMS } from '../pages/OpsChecklist.jsx';
 import { financeDates, financeStage, totalOf } from '../pages/FinanceTracker.jsx';
-import { pendingItems, OPS_RULES, EC_RULES, CDT_RULES, FIN_RULES, BD_RULES, SOL_RULES, toIso } from '../config/pendingFields.js';
+import { pendingItems, OPS_RULES, EC_RULES, CDT_RULES, FIN_RULES, BD_RULES, SOL_RULES, LEAD_RULES, VENDOR_RULES, toIso } from '../config/pendingFields.js';
+import { leadIsOpen, isBillable, VENDOR_INVOICE_EXPECTED_DAYS, CLIENT_BILLING_DAYS, VENDOR_PAYMENT_DAYS } from '../config/leadVendorOptions.js';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { buildProposals, toRupees } from '../components/proposalData.js';
 import { normPayment } from './syncWithEC.js';
@@ -20,7 +21,11 @@ export const TRACKERS = {
   ops:         { label: 'Ops Checklist',       short: 'Ops',      route: '/ops' },
   finance:     { label: 'Finance Tracker',     short: 'Finance',  route: '/finance' },
   'content-dev': { label: 'Content Dev Tracker', short: 'Content', route: '/content-dev' },
+  leads:       { label: 'Lead Tracker',        short: 'Leads',    route: '/leads' },
+  vendors:     { label: 'Vendor Services',     short: 'Vendors',  route: '/vendors' },
 };
+const vToBill = v => isBillable(v.billable) && !['Billed', 'Not applicable'].includes(s(v.clientBilling));
+const vToPay = v => ['To pay', 'Partly paid'].includes(s(v.paymentStatus));
 
 const s = v => String(v ?? '').replace(/\s+/g, ' ').trim();
 const num = v => { const n = Number(String(v ?? '').replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : 0; };
@@ -81,7 +86,7 @@ export function bdLines(solRows) {
 
 /* ─── Open tasks (everything with a due date that is not done) ─────────────── */
 // Task: { id, tracker, record, sub, label, due, owner, amount?, details: [[label, value]], key }
-export function openTasks({ sol = [], eng = [], ops = [], cdt = [] }) {
+export function openTasks({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [] }) {
   const out = [];
   const opsByKey = new Map(ops.map(o => [s(o.engagementKey), o]));
 
@@ -172,12 +177,44 @@ export function openTasks({ sol = [], eng = [], ops = [], cdt = [] }) {
     });
   });
 
+  // Leads — open leads with a follow-up date
+  leads.forEach(l => {
+    if (!leadIsOpen(l) || !toIso(l.nextFollowUp)) return;
+    const last = [...(l.actions || [])].sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
+    out.push({
+      id: `lead|${l.leadId}`, tracker: 'leads', record: s(l.company) || '(no company)', serial: l.leadId,
+      sub: [s(l.status), s(l.source)].filter(Boolean).join(' · '), label: 'Follow up lead', due: toIso(l.nextFollowUp), owner: owner(l.owner),
+      amount: num(l.estValue),
+      details: [['Lead', `${s(l.leadId)} · ${s(l.company)}`], ['Contact', [s(l.contactName), s(l.designation), s(l.email), s(l.phone)].filter(Boolean).join(' · ')],
+        ['Source', [s(l.source), s(l.sourceDetail)].filter(Boolean).join(' — ')], ['Shared by', s(l.sharedBy)], ['Requirement', s(l.requirement)],
+        ['Status', s(l.status)], ['Actions logged', String((l.actions || []).length)],
+        ['Last action', last ? `${s(last.by)} · ${s(last.type)}: ${s(last.comment)}` : '']],
+    });
+  });
+
+  // Vendor services — bill the client, get the vendor invoice, pay the vendor
+  vendors.forEach(v => {
+    const base = {
+      tracker: 'vendors', record: s(v.vendorName) || '(no vendor)', serial: v.serviceId, sub: [s(v.category), s(v.client)].filter(Boolean).join(' · '),
+      owner: owner(v.requestedBy), amount: num(v.total),
+      details: [['Service', `${s(v.serviceId)} · ${s(v.description)}`], ['Engagement', [s(v.client), s(v.program), s(v.egId)].filter(Boolean).join(' · ')],
+        ['Service date', toIso(v.serviceDate)], ['Total', num(v.total) ? '₹ ' + num(v.total).toLocaleString('en-IN') : ''], ['Billable', s(v.billable)],
+        ['Client billing', s(v.clientBilling)], ['Vendor invoice', [s(v.vendorInvoiceNo), toIso(v.vendorInvoiceDate)].filter(Boolean).join(' · ')], ['Vendor payment', s(v.paymentStatus)]],
+    };
+    const sd = toIso(v.serviceDate);
+    if (sd && vToBill(v)) out.push({ ...base, id: `vs|${v.serviceId}|bill`, label: 'Bill vendor cost to client', due: addDaysIso(sd, CLIENT_BILLING_DAYS) });
+    if (sd && s(v.paymentStatus) === 'Invoice awaited') out.push({ ...base, id: `vs|${v.serviceId}|inv`, label: 'Get vendor invoice', due: addDaysIso(sd, VENDOR_INVOICE_EXPECTED_DAYS) });
+    const vid = toIso(v.vendorInvoiceDate);
+    if (vid && vToPay(v)) out.push({ ...base, id: `vs|${v.serviceId}|pay`, label: 'Pay vendor', due: addDaysIso(vid, VENDOR_PAYMENT_DAYS),
+      amount: Math.max(0, num(v.total) - num(v.paidAmount)) });
+  });
+
   return out.map(x => ({ ...x, days: daysBetween(t, x.due) }));
 }
 
 /* ─── Completed work (dated) ───────────────────────────────────────────────── */
 // { id, tracker, record, label, date, amount? }
-export function completedWork({ sol = [], eng = [], ops = [], cdt = [] }) {
+export function completedWork({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [] }) {
   const out = [];
   ops.forEach(r => CL_ITEMS.forEach(it => {
     if (s(r[it.key]) !== 'Yes') return;
@@ -202,13 +239,24 @@ export function completedWork({ sol = [], eng = [], ops = [], cdt = [] }) {
     const sub = toIso(r.submissionToClient);
     if (sub) out.push({ id: `bd|${r.proposalId}|sub`, tracker: 'bd', record: s(r.clientName), sub: `${s(r.proposalId)} · ${s(r.programTopic)}`, label: 'Proposal submitted', date: sub, amount: toRupees(r.bdProposalValue) });
   });
+  leads.forEach(l => (l.actions || []).forEach(a => {
+    const d = toIso(String(a.at || '').slice(0, 10));
+    if (d) out.push({ id: `lead|${l.leadId}|${a.id}`, tracker: 'leads', record: s(l.company), sub: `${s(a.type)}: ${s(a.comment)}`,
+      label: s(a.status) === 'Converted to BD' ? 'Lead converted to BD' : 'Lead action', date: d, who: s(a.by) });
+  }));
+  vendors.forEach(v => {
+    const b = toIso(v.clientInvoiceDate);
+    if (b && s(v.clientBilling) === 'Billed') out.push({ id: `vs|${v.serviceId}|billed`, tracker: 'vendors', record: s(v.vendorName), sub: s(v.client), label: 'Vendor cost billed to client', date: b, amount: num(v.total) });
+    const p = toIso(v.paidDate);
+    if (p) out.push({ id: `vs|${v.serviceId}|paid`, tracker: 'vendors', record: s(v.vendorName), sub: s(v.client), label: 'Vendor paid', date: p, amount: num(v.paidAmount) || num(v.total) });
+  });
   // A future 'done' date is a typo or a plan, not completed work
   const t = todayIso();
   return out.filter(x => x.date <= t).sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /* ─── Missing fields per tracker (same rules as the Reminders popup) ───────── */
-export function missingByTracker({ sol = [], eng = [], ops = [], cdt = [] }) {
+export function missingByTracker({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [] }) {
   const lines = bdLines(sol);
   const sols = lines.flatMap(l => l._sols);
   const make = (tracker, rows, rules, title) => {
@@ -227,7 +275,9 @@ export function missingByTracker({ sol = [], eng = [], ops = [], cdt = [] }) {
     make('ops', ops, OPS_RULES, r => s(r.company)),
     make('finance', eng.filter(e => s(e.engagementKey)), FIN_RULES, r => s(r.company)),
     make('content-dev', cdt, CDT_RULES, r => s(r.client)),
-  ];
+    make('leads', leads, LEAD_RULES, r => `${s(r.leadId)} · ${s(r.company)}`),
+    make('vendors', vendors, VENDOR_RULES, r => `${s(r.serviceId)} · ${s(r.vendorName)}`),
+  ].filter(m => m.tracker !== 'leads' && m.tracker !== 'vendors' || (m.tracker === 'leads' ? leads.length : vendors.length));
 }
 
 /* ─── Money ────────────────────────────────────────────────────────────────── */
