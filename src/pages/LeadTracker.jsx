@@ -8,6 +8,7 @@
  */
 import { useState, useEffect, useMemo } from 'react';
 import { useMsal } from '@azure/msal-react';
+import { useNavigate } from 'react-router-dom';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import ExportButton from '../components/ExportButton.jsx';
@@ -152,7 +153,7 @@ function ActionForm({ lead, names, me, onSave, saving }) {
 }
 
 /* ─── Detail panel ─── */
-function LeadPanel({ lead, canEdit, names, me, onEdit, onDelete, onLogAction, onRemoveAction, saving }) {
+function LeadPanel({ lead, canEdit, names, me, onEdit, onDelete, onLogAction, onRemoveAction, onAddToBd, saving }) {
   const actions = [...(lead.actions || [])].sort((a, b) => String(b.at).localeCompare(String(a.at)));
   const people = [...new Set(actions.map(a => a.by).filter(Boolean))];
   const fi = followInfo(lead);
@@ -193,6 +194,16 @@ function LeadPanel({ lead, canEdit, names, me, onEdit, onDelete, onLogAction, on
           <Info k="programInterest" label="Program interest">{lead.programInterest}</Info>
           <Info k="owner" label="Lead owner">{lead.owner}</Info>
           <Info k="proposalId" label="BD proposal ID">{lead.proposalId}</Info>
+          {(onAddToBd || lead.proposalId) && (
+            <div className="lv-info-full">
+              {lead.proposalId
+                ? <span className="lv-muted">✓ In BD Tracker as <b>{lead.proposalId}</b></span>
+                : <button type="button" className="btn btn-primary btn-sm" onClick={onAddToBd}
+                    title="Open the BD Tracker's Add form with this lead's details. The Proposal ID is created automatically and saved back to this lead.">
+                    ➕ Add to BD Tracker
+                  </button>}
+            </div>
+          )}
           <Info k="createdBy" label="Added by">{lead.createdBy}</Info>
           {lead.comments && <div className="lv-info-full"><dt>Comments</dt><dd>{lead.comments}</dd></div>}
         </dl>
@@ -261,6 +272,14 @@ export default function LeadTracker({ onRefreshed }) {
   const me = accounts[0]?.name || accounts[0]?.username || '';
   const { permissions } = usePermissionsContext();
   const { canEdit, canCreate, canDelete } = usePermissions();
+  const navigate = useNavigate();
+  // Open the BD Tracker's Add form pre-filled from a lead; the BD Tracker saves the new
+  // Proposal ID back to the lead (status "Converted to BD") after the BD line is created.
+  const addToBd = lead => navigate('/bd-tracker', { state: { fromLead: {
+    leadId: lead.leadId, company: lead.company, contactName: lead.contactName, designation: lead.designation,
+    email: lead.email, phone: lead.phone, programInterest: lead.programInterest, requirement: lead.requirement,
+    estValue: lead.estValue, comments: lead.comments,
+  } } });
   const editable = canEdit('leads');
 
   const [data, setData] = useState(() => peekList('leads') || []);
@@ -424,7 +443,8 @@ export default function LeadTracker({ onRefreshed }) {
           <div style={{ height: '100%', overflowY: 'auto' }}>
             {sel ? <LeadPanel lead={sel} canEdit={editable} names={names} me={me} saving={saving}
               onEdit={() => setModal(sel)} onDelete={canDelete('leads') ? remove : undefined}
-              onLogAction={logAction} onRemoveAction={removeAction} />
+              onLogAction={logAction} onRemoveAction={removeAction}
+              onAddToBd={canCreate('bd') && !sel.proposalId ? () => addToBd(sel) : undefined} />
               : <div className="card lv-placeholder"><div className="lv-big">👈</div><b>Select a lead</b><div className="lv-muted">See where it came from, who shared it and every action taken</div></div>}
           </div>
         </div>
