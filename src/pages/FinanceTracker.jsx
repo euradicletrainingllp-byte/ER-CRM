@@ -10,6 +10,8 @@ import {
 } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
 import ExportButton from '../components/ExportButton.jsx';
+import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
+import { pendingItems, FIN_RULES } from '../config/pendingFields.js';
 
 /**
  * Finance Tracker
@@ -149,8 +151,10 @@ const fromRow = e => ({
   receivedDate: toIso(e.receivedDate), travelExpenses: e.travelExpenses ?? '', gst: e.gst ?? '',
 });
 
-function FinancePanel({ ec, link, canEdit, onEdit, saving }) {
+function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
   const [tab, setTab] = useState('finance');
+  // Opened from the pending-fields bar → make sure the Finance tab (with the inputs) is showing
+  useEffect(() => { if (focusN) setTab('finance'); }, [focusN]);
   const [form, setForm] = useState(() => fromRow(ec));
 
   // Keep the boxes in step with the row (e.g. after an undo) — but never the box being typed in
@@ -339,6 +343,7 @@ export default function FinanceTracker({ onRefreshed }) {
   const [selected, setSelected] = useState(null);
   const [toast, setToast] = useState('');
   const [savingKeys, setSavingKeys] = useState(() => new Set());
+  const [focusN, setFocusN] = useState(0);
 
   const { canEdit } = usePermissions();
   const canEditFin = canEdit('finance');
@@ -413,6 +418,26 @@ export default function FinanceTracker({ onRefreshed }) {
   [rows, search, stageF]);
 
   const count = (...st) => rows.filter(r => st.includes(r._stage)).length;
+
+  // Pending-fields bar: engagements with finance details due but empty, in the list order
+  const pendingBar = useMemo(() => pendingItems(filtered.filter(r => keyOf(r)), FIN_RULES, r => ({
+    id: keyOf(r), serial: r.engagementKey, title: r.company || '(no company)',
+    subtitle: [r.egId, r.topic, fmtDate(r.startDate)].filter(Boolean).join(' · '),
+  })), [filtered]);
+  const openPending = (it, f) => { setSelected(it.id); setFocusN(n => n + 1); revealField(f.key, f.label); };
+
+  // Reminders popup: invoice due (end date + 1) until invoiced, payment due (invoice date + 30) until received
+  const dueBar = useMemo(() => filtered.filter(r => keyOf(r)).map(r => {
+    const { invDue, payDue } = financeDates(r);
+    const tasks = [];
+    if (['To Invoice', 'Invoice Overdue', 'Upcoming'].includes(r._stage) && invDue) tasks.push({ key: 'invoice', label: 'Raise invoice', due: invDue });
+    if (['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r._stage) && payDue) tasks.push({ key: 'receivedDate', label: r._stage === 'Partly Received' ? 'Collect balance' : 'Collect payment', due: payDue });
+    return {
+      id: keyOf(r), serial: r.engagementKey, title: r.company || '(no company)',
+      subtitle: [r.egId, r.topic, totalOf(r) ? inr(totalOf(r)) : ''].filter(Boolean).join(' · '), tasks, row: r,
+    };
+  }).filter(x => x.tasks.length), [filtered]);
+  const openDue = (it, t) => { setSelected(it.id); setFocusN(n => n + 1); revealField(t.key, t.key === 'invoice' ? 'Invoice Date' : 'Received Date'); };
   const sel = selected != null ? data.find(e => keyOf(e) === selected) : null;
 
   // ── Saving: one combined save per engagement, 1.2 s after the last change ─
@@ -525,6 +550,10 @@ export default function FinanceTracker({ onRefreshed }) {
         </div>
       </div>
 
+      {!rangeLoading && (
+        <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={canEditFin} storageKey="finance" noun="engagement" />
+      )}
+
       {wrongLinks > 0 && (
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '6px 12px', marginBottom: 8, fontSize: 12, color: '#7f1d1d' }}>
           ⚠ {wrongLinks} engagement{wrongLinks > 1 ? 's' : ''} in this period share an Index with a different Ops Checklist row — finance is saved to the Engagement Calendar, but nothing is copied to that Ops row. Open the engagement for details.
@@ -607,7 +636,7 @@ export default function FinanceTracker({ onRefreshed }) {
         {/* RIGHT — detail panel */}
         <div style={{ height: '100%', overflowY: 'auto' }}>
           {sel
-            ? <FinancePanel key={keyOf(sel)} ec={sel} link={linkOf(sel)} canEdit={canEditFin} onEdit={handleEdit} saving={savingKeys.has(keyOf(sel))} />
+            ? <FinancePanel key={keyOf(sel)} ec={sel} link={linkOf(sel)} canEdit={canEditFin} onEdit={handleEdit} saving={savingKeys.has(keyOf(sel))} focusN={focusN} />
             : (
               <div className="card" style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--muted)' }}>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>👈</div>

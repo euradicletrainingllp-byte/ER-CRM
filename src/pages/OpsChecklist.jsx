@@ -9,6 +9,8 @@ import { autoColumns } from '../utils/exportExcel.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
+import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
+import { pendingItems, OPS_RULES } from '../config/pendingFields.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // Filters compare text safely: Excel cells can be numbers, blank or carry stray spaces
@@ -107,6 +109,11 @@ const EMPTY_FORM = {
 };
 
 // ─── Add / Edit Modal ────────────────────────────────────────────────────────
+// Defined outside the modal so inputs keep focus while typing
+const Row = ({ label, children }) => (
+  <div className="form-field"><label className="form-label">{label}</label>{children}</div>
+);
+
 function AddEditModal({ initial, onSave, onClose, saving }) {
   const isEdit = !!initial?.sno;
   const [form, setForm] = useState(isEdit ? {
@@ -135,9 +142,6 @@ function AddEditModal({ initial, onSave, onClose, saving }) {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const inp = { className: 'form-input' };
-  const Row = ({ label, children }) => (
-    <div className="form-field"><label className="form-label">{label}</label>{children}</div>
-  );
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -260,8 +264,10 @@ function CommentCell({ value, commentKey, row, canEdit, onUpdate, saving }) {
 }
 
 // ─── Checklist Detail Panel ──────────────────────────────────────────────────
-function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
+function ChecklistPanel({ row, canEdit, onUpdate, saving, focusN }) {
   const [tab, setTab] = useState('checklist');
+  // Opened from the Reminders popup → show the checklist tab
+  useEffect(() => { if (focusN) setTab('checklist'); }, [focusN]);
   const [editingPoc, setEditingPoc]   = useState(null);
   const [editingDone, setEditingDone] = useState(null);
   // Item waiting for a completion date before 'Yes' is saved
@@ -376,7 +382,7 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving }) {
                 const dLabel  = isDone ? '' : dueDateLabel(due);
 
                 return (
-                  <tr key={item.key} style={{
+                  <tr key={item.key} data-pf={`cl-${item.key}`} style={{
                     borderBottom:'1px solid var(--border)',
                     background: status==='Yes' ? '#f0fdf4' : status==='NA' ? '#f9fafb' : bdKeys.has(item.key) ? '#fffbf5' : 'transparent',
                   }}>
@@ -617,6 +623,7 @@ export default function OpsChecklist({ onRefreshed }) {
   const [deleteRow, setDeleteRow] = useState(null);
   const [saving,    setSaving]    = useState(false);
   const [toast,     setToast]     = useState('');
+  const [focusN,    setFocusN]    = useState(0);
 
   const { canEdit } = usePermissions();
 
@@ -660,6 +667,25 @@ export default function OpsChecklist({ onRefreshed }) {
   }, [data, search, statusF]);
 
   const sel = selected != null ? data.find(d => d.sno === selected) : null;
+
+  // Pending-fields bar: sessions with empty fields, in S No order (follows search / status filter)
+  const pendingBar = useMemo(() => pendingItems(filtered, OPS_RULES, r => ({
+    id: r.sno, serial: r.sno, title: r.company || '(no company)', subtitle: r.topic,
+  })), [filtered]);
+  const openPending = (it, f) => { setSelected(it.row.sno); setEditRow(it.row); revealField(f.key, f.label); };
+
+  // Reminders popup: checklist items not done (Yes / NA) with a TAT due date — same TAT rules as the panel
+  const dueBar = useMemo(() => filtered.filter(r => !/cancel/i.test(String(r.status ?? ''))).map(r => {
+    const s = toInputDate(r.startDate), e = toInputDate(r.endDate);
+    const tasks = CL_ITEMS.map(it => {
+      if (['Yes', 'NA'].includes(String(r[it.key] ?? '').trim())) return null;
+      const due = it.tatFn(s, e);
+      return due ? { key: it.key, label: it.label, due } : null;
+    }).filter(Boolean);
+    return { id: r.sno, serial: r.sno, title: r.company || '(no company)', subtitle: [r.topic, fmtDate(r.startDate)].filter(Boolean).join(' · '), tasks, row: r };
+  }).filter(x => x.tasks.length), [filtered]);
+  const openDue = (it, t) => { setSelected(it.row.sno); setFocusN(n => n + 1); revealField(`cl-${t.key}`, t.label); };
+
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), String(msg).includes('⚠') ? 9000 : 3000); };
 
   const handleUpdate = async (row, changes) => {
@@ -744,6 +770,8 @@ export default function OpsChecklist({ onRefreshed }) {
         <div className="kpi-card purple"><div className="kpi-label">Delivered</div><div className="kpi-value">{data.filter(r=>r.status==='Delivered').length}</div></div>
       </div>
 
+      <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={canEdit('ops')} storageKey="ops" noun="session" />
+
       {/* Two-column layout */}
       <div className="grid-sidebar" style={{ flex:1, overflow:'hidden', minHeight:0 }}>
 
@@ -824,7 +852,7 @@ export default function OpsChecklist({ onRefreshed }) {
         {/* RIGHT — detail panel */}
         <div style={{ height:'100%', overflowY:'auto' }}>
           {sel
-            ? <ChecklistPanel key={sel.engagementKey || sel.sno} row={sel} canEdit={canEdit('ops')} onUpdate={handleUpdate} saving={saving} />
+            ? <ChecklistPanel key={sel.engagementKey || sel.sno} row={sel} canEdit={canEdit('ops')} onUpdate={handleUpdate} saving={saving} focusN={focusN} />
             : (
               <div className="card" style={{ textAlign:'center', padding:'60px 20px', color:'var(--muted)' }}>
                 <div style={{ fontSize:40, marginBottom:12 }}>👈</div>

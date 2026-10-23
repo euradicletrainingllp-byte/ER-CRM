@@ -497,3 +497,89 @@ select.form-input   { cursor: pointer; }
 .fbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 @keyframes fbarIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @media (max-width: 900px) { .kpi-compact { grid-template-columns: 1fr 1fr; } }
+
+/* ── Reminders — floating launcher + popup card (all trackers) ──
+   Sized and typed like the CRM's own cards and list rows (card-title 15px, row title 13px,
+   meta 11px, btn-sm 12px). Navy primary, mauve accent; coral = overdue, gold = due soon.
+   Above the sidebar (300), below every modal (500 / 1000). */
+.pf-launch { position: fixed; right: 20px; bottom: 20px; z-index: 400; display: flex; align-items: center; gap: 7px;
+  height: 36px; padding: 0 10px 0 12px; border: none; border-radius: 8px; background: var(--navy); color: #fff;
+  font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(45,48,71,0.22); transition: background .15s, transform .15s; }
+.pf-launch:hover { background: var(--purple); transform: translateY(-1px); }
+.pf-launch:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(170,120,166,0.45), 0 6px 18px rgba(45,48,71,0.22); }
+.pf-launch .pf-count { min-width: 20px; height: 18px; padding: 0 5px; border-radius: 5px; color: #fff;
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.pf-launch .pf-count + .pf-count { margin-left: -3px; }
+.pf-launch .pf-c-over  { background: var(--error); }
+.pf-launch .pf-c-soon  { background: var(--warning); }
+.pf-launch .pf-c-field { background: var(--mauve); }
+.pf-launch.pf-pulse::after { content: ''; position: absolute; inset: 0; border-radius: 8px; animation: pfPulse 2.2s ease-out 2; pointer-events: none; }
+@keyframes pfPulse { 0% { box-shadow: 0 0 0 0 rgba(233,130,114,.5); } 100% { box-shadow: 0 0 0 10px rgba(233,130,114,0); } }
+
+.pf-card { position: fixed; right: 20px; bottom: 20px; z-index: 450; width: min(340px, calc(100vw - 24px));
+  max-height: min(460px, calc(100vh - 120px)); display: flex; flex-direction: column; overflow: hidden;
+  background: var(--white); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-modal), 0 2px 8px rgba(45,48,71,0.08);
+  font-family: inherit; font-size: 13px; line-height: 1.45; color: var(--navy); animation: pfIn .16s ease; }
+@keyframes pfIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.pf-card button { font-family: inherit; }
+.pf-card-head { position: relative; flex-shrink: 0; padding: 12px 14px 10px; border-bottom: 1px solid var(--border); }
+.pf-card-title { display: flex; align-items: center; gap: 8px; margin-right: 28px; font-size: 14px; font-weight: 700; color: var(--navy); }
+.pf-card-icon { width: 22px; height: 22px; border-radius: 6px; background: #F3EAF2; color: #7A3F76; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.pf-close { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; border-radius: 6px; border: 1px solid transparent;
+  background: transparent; color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .15s; }
+.pf-close:hover { color: var(--navy); background: #F2F2F2; }
+.pf-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin-top: 10px; padding: 3px; background: #F2F2F2; border-radius: 8px; }
+.pf-tab { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; height: 26px; padding: 0 4px; border: none; border-radius: 6px;
+  background: transparent; color: var(--muted); font-size: 11.5px; font-weight: 600; cursor: pointer; transition: all .15s; }
+.pf-tab-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-tab-count { flex-shrink: 0; min-width: 17px; height: 16px; padding: 0 4px; border-radius: 4px; font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; background: #E5E7EB; color: #475569; }
+.pf-tab:hover:not(:disabled) { color: var(--navy); }
+.pf-tab:disabled { opacity: .45; cursor: default; }
+.pf-tab.on { background: var(--white); color: var(--navy); box-shadow: 0 1px 2px rgba(45,48,71,0.12); }
+.pf-tab-over.on .pf-tab-count  { background: var(--error-lt);   color: #8b2e20; }
+.pf-tab-soon.on .pf-tab-count  { background: var(--warning-lt); color: #6b4a00; }
+.pf-tab-field.on .pf-tab-count { background: #F3EAF2;           color: #7A3F76; }
+.pf-tab-over.on svg  { color: var(--error); }
+.pf-tab-soon.on svg  { color: var(--warning); }
+.pf-tab-field.on svg { color: var(--mauve); }
+.pf-card-sub { margin: 8px 0 0; font-size: 11px; line-height: 1.4; color: var(--muted); }
+.pf-card-sub strong { color: var(--navy); font-weight: 700; }
+
+.pf-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 6px; }
+.pf-row { display: flex; gap: 8px; align-items: flex-start; padding: 8px 8px; border-bottom: 1px solid var(--border); }
+.pf-row:last-child { border-bottom: none; }
+.pf-row:hover { background: #FAFBFD; }
+.pf-serial { flex-shrink: 0; width: 18px; height: 18px; margin-top: 1px; border-radius: 4px; background: #F3EAF2; color: #7A3F76; font-weight: 700; font-size: 10.5px; display: flex; align-items: center; justify-content: center; }
+.pf-serial-over { background: var(--error-lt);   color: #8b2e20; }
+.pf-serial-soon { background: var(--warning-lt); color: #6b4a00; }
+.pf-rec { flex: 1; min-width: 0; }
+.pf-rec-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pf-sno { flex-shrink: 0; font-size: 11px; font-weight: 700; color: var(--muted); background: var(--border); border-radius: 4px; padding: 0 6px; line-height: 17px; }
+.pf-name { font-weight: 700; font-size: 13px; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.pf-chip { font-size: 11px; font-weight: 600; line-height: 1.4; padding: 1px 8px; border-radius: 5px; cursor: pointer; transition: all .15s;
+  border: 1px solid #E5D3E3; background: #F8F1F7; color: #7A3F76; text-align: left; }
+.pf-chip-over { border-color: rgba(233,130,114,0.45); background: var(--error-lt);   color: #8b2e20; }
+.pf-chip-soon { border-color: rgba(208,166,22,0.35);  background: var(--warning-lt); color: #6b4a00; }
+.pf-chip-when { font-weight: 700; }
+.pf-chip:hover:not(:disabled) { background: var(--navy); border-color: var(--navy); color: #fff; }
+.pf-chip:disabled { cursor: default; opacity: .7; }
+
+.pf-card-foot { flex-shrink: 0; display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); background: #F8F9FB; }
+.pf-next, .pf-later { height: 32px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; white-space: nowrap; }
+.pf-next { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px; border: none; background: var(--navy); color: #fff; padding: 0 12px; }
+.pf-next span { overflow: hidden; text-overflow: ellipsis; }
+.pf-next:hover { background: var(--purple); }
+.pf-later { flex-shrink: 0; padding: 0 14px; border: 1px solid var(--navy); background: var(--white); color: var(--navy); }
+.pf-later:hover { background: #f5f5f8; }
+
+/* Field highlight after jumping from the popup — mauve focus ring (form focus colour) */
+.pf-flash { animation: pfFlash 2.6s ease; border-radius: 8px; }
+@keyframes pfFlash {
+  0%, 55% { box-shadow: 0 0 0 3px var(--mauve), 0 0 0 8px rgba(170,120,166,0.18); background-color: #FBF7FB; }
+  100%    { box-shadow: 0 0 0 0 transparent; }
+}
+@media (max-width: 600px) { .pf-launch, .pf-card { right: 12px; bottom: 12px; } .pf-launch .pf-word { display: none; } }

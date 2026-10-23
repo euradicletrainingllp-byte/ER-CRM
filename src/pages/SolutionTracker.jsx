@@ -17,6 +17,8 @@ import ChecklistPicker, { ChecklistChips } from '../components/ChecklistPicker.j
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import ExportButton from '../components/ExportButton.jsx';
 import { pushBdChecklist } from '../services/bdChecklistSync.js';
+import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
+import { pendingItems, BD_RULES, SOL_RULES, toIso } from '../config/pendingFields.js';
 
 // In Process and Won proposals must carry the Operations checklist ticked by the BD person
 const CHECKLIST_STATUSES = ['In Process', 'Won'];
@@ -984,6 +986,50 @@ export default function SolutionTracker({ onRefreshed, view }) {
     solValue: kpiRows.reduce((t, r) => t + (r._sols || []).reduce((u, x) => u + toNum(x.solutionValue), 0), 0),
   };
   const decided = kpi.won + kpi.lost;
+
+  // Pending-fields bar — BD view: one item per BD line; Solution view: one item per solution item.
+  // Follows the filters / search and the order shown in the table.
+  const pendingBar = useMemo(() => {
+    if (view === 'bd') {
+      return pendingItems(
+        bdRows.map(r => ({ ...r, proposalV1Link: bdLinkFor(rows, r.proposalId, r.proposalVersion) })),
+        BD_RULES,
+        r => ({ id: r._key, serial: r.bdSNo || r.sno, title: `${r.proposalId} ${r.proposalVersion || 'V1'} · ${r.clientName || '(no client)'}`, subtitle: r.programTopic }),
+      ).map(it => ({ ...it, row: bdRows.find(b => b._key === it.id) || it.row }));
+    }
+    const items = bdRows.flatMap(r => (r._sols || []).map(sol => ({ ...sol, _line: r })));
+    return pendingItems(items, SOL_RULES, sol => ({
+      id: `${sol._line._key}|${sol.sno}`, serial: `${sol._line.bdSNo || sol._line.sno}${sol.solSNo ? '·' + sol.solSNo : ''}`,
+      title: `${sol.proposalId} ${sol._line.proposalVersion || 'V1'} · ${sol._line.clientName || '(no client)'}`,
+      subtitle: sol.solutionTopic,
+    }));
+  }, [view, bdRows, rows]);
+
+  function openPending(it, f) {
+    if (view === 'bd') {
+      setBdModal(it.row);
+    } else {
+      const { _line: line, ...sol } = it.row;
+      setExpanded(prev => new Set(prev).add(line._key));
+      setSolModal({ mode: 'edit', row: sol, programTopic: line.programTopic, bdStatus: line.bdStatus });
+    }
+    revealField(f.key, f.label);
+  }
+
+  // Reminders popup: In Process proposals not yet submitted, due on the Client Expected Date
+  const dueBar = useMemo(() => bdRows.map(r => {
+    if (r.bdStatus !== 'In Process' || toIso(r.submissionToClient)) return null;
+    const due = toIso(r.clientExpectedDate);
+    return due ? {
+      id: r._key, serial: r.bdSNo || r.sno, title: `${r.proposalId} ${r.proposalVersion || 'V1'} · ${r.clientName || '(no client)'}`,
+      subtitle: r.programTopic, tasks: [{ key: 'submissionToClient', label: 'Submit proposal to client', due }], row: r,
+    } : null;
+  }).filter(Boolean), [bdRows]);
+  function openDue(it, t) {
+    if (view === 'bd' && canUpdate('bd')) { setBdModal(it.row); revealField(t.key, 'Date of Submission to Client'); return; }
+    setExpanded(prev => new Set(prev).add(it.id));
+    revealField(`line-${it.id}`, '');
+  }
   const winRate = decided ? Math.round((kpi.won / decided) * 100) : 0;
 
 
@@ -1273,6 +1319,18 @@ export default function SolutionTracker({ onRefreshed, view }) {
           </div>
         </div>
 
+        {!loading && !error && (
+          <PendingFieldsBar
+            items={pendingBar}
+            dueItems={dueBar}
+            onPick={openPending}
+            onPickDue={openDue}
+            canEdit={view === 'bd' ? canUpdate('bd') : canEdit('solution')}
+            storageKey={view === 'bd' ? 'bd' : 'solution'}
+            noun={view === 'bd' ? 'BD line' : 'solution item'}
+          />
+        )}
+
         {/* Excel-style Filter Bar */}
         <CollapsibleFilterBar state={filterState}>
             {refreshing && !loading && (
@@ -1362,6 +1420,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                           transition: 'background 0.15s',
                           cursor: 'pointer',
                         }}
+                        data-pf={`line-${r._key}`}
                         onClick={() => toggleExpand(r._key)}
                         onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = 'var(--surface)'; }}
                         onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = 'transparent'; }}

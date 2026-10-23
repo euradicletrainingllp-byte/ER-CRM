@@ -1,8 +1,10 @@
 /**
  * EURADICLE CRM — EMAIL NOTIFICATIONS
  * =====================================
- * Every Create / Update / Delete in a tracker sends an email to everyone who
- * has View (Read) access to that tracker in the Admin Panel.
+ * Every Create / Delete in a tracker sends an email to everyone who has View
+ * (Read) access to that tracker in the Admin Panel. Updates do NOT send an email
+ * (23 Oct 2026) — they stay in the activity log only. Change NOTIFY_OPTIONS.actions
+ * to bring them back.
  *
  * How it works
  *  - Hooks into the activity log (auditLogger.onAuditEvent), which already sees
@@ -29,6 +31,9 @@ export const NOTIFY_OPTIONS = {
   maxWaitMs:     45000,   // …but never hold a change longer than 45 s
   maxRecords:    25,      // records listed in one email (rest summarised)
   maxFields:     30,      // fields listed per record
+  // Which actions send an email. 'UPDATE' left out on purpose: edits are logged, not emailed.
+  // (An edit made within a few seconds of creating a record is folded into the "created" email.)
+  actions:       ['CREATE', 'DELETE'],
 };
 
 // ── Trackers ─────────────────────────────────────────────────────────────────
@@ -121,6 +126,13 @@ function addChange(ev) {
   const oldV = parseJson(ev.OldValues), newV = parseJson(ev.NewValues);
   const recKey = ev.RecordId ? `id:${ev.RecordId}` : `n:${buf.records.size}:${ev.LogId}`;
   const prev = buf.records.get(recKey);
+
+  // Updates are emailed only when switched on — except an edit to a record created moments
+  // ago in this same batch, which just refreshes the values shown in the "created" email.
+  if (ev.Action === 'UPDATE' && !NOTIFY_OPTIONS.actions.includes('UPDATE') && prev?.action !== 'CREATE') {
+    if (!buf.records.size) buffers.delete(bufKey);
+    return;
+  }
   const fields = prev?.fields || new Map();   // field → { before, after }
 
   if (ev.Action === 'CREATE') {
@@ -263,6 +275,8 @@ onAuditEvent(ev => {
     if (!FLOW_URLS.NOTIFY) return;
     if (ev.Category !== 'CRUD') return;                       // renumber / auth / page views
     if (!VERB[ev.Action]) return;                             // READ etc.
+    // UPDATE goes through to addChange only so it can refresh a pending "created" email
+    if (ev.Action !== 'UPDATE' && !NOTIFY_OPTIONS.actions.includes(ev.Action)) return;
     if (ev.Result && ev.Result !== 'SUCCESS') return;         // failed saves
     if (ev.Action === 'UPDATE' && ev.ChangedFields === '(no change)') return;
     addChange(ev);

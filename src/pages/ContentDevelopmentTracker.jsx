@@ -7,6 +7,8 @@ import ExportButton from '../components/ExportButton.jsx';
 import { autoColumns } from '../utils/exportExcel.js';
 import { DeleteButton } from '../components/ActionButtons.jsx';
 import { LinkButton } from '../components/LinkButton.jsx';
+import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
+import { pendingItems, CDT_RULES } from '../config/pendingFields.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDt = d => {
@@ -78,7 +80,7 @@ function WorkItemRow({ item, canEdit, onSave, onDelete }) {
   if (editing) {
     const valid = draft.title.trim() && draft.deadline;
     return (
-      <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1.4fr 130px auto', gap:6, padding:'6px 0', borderBottom:'1px solid var(--border)', alignItems:'center' }}>
+      <div data-pf={`wi-${item.id}`} style={{ display:'grid', gridTemplateColumns:'1.4fr 1.4fr 130px auto', gap:6, padding:'6px 0', borderBottom:'1px solid var(--border)', alignItems:'center' }}>
         <input style={miniInp} value={draft.title} placeholder="Title *" onChange={e => setDraft(d => ({ ...d, title:e.target.value }))} />
         <input style={miniInp} value={draft.link} placeholder="Link (https://…)" onChange={e => setDraft(d => ({ ...d, link:e.target.value }))} />
         <input style={miniInp} type="date" value={draft.deadline} title="Deadline" onChange={e => setDraft(d => ({ ...d, deadline:e.target.value }))} />
@@ -91,7 +93,7 @@ function WorkItemRow({ item, canEdit, onSave, onDelete }) {
   }
 
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 0', borderBottom:'1px solid var(--border)', flexWrap:'wrap' }}>
+    <div data-pf={`wi-${item.id}`} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 0', borderBottom:'1px solid var(--border)', flexWrap:'wrap' }}>
       {canEdit ? (
         <input type="checkbox" checked={!!item.done} title={item.done ? 'Mark as not done' : 'Mark as done (today)'}
           onChange={() => onSave({ ...item, done: item.done ? '' : todayISO() })}
@@ -258,8 +260,10 @@ function DeleteConfirmModal({ row, onConfirm, onClose, saving }) {
 }
 
 // ─── Inline editable field ────────────────────────────────────────────────────
-function EditField({ label, value, field, type='text', row, onSave, canEdit }) {
+function EditField({ label, value, field, type='text', row, onSave, canEdit, autoEdit = 0 }) {
   const [editing, setEditing] = useState(false);
+  // Opened from the pending-fields bar → go straight into edit mode
+  useEffect(() => { if (autoEdit && canEdit) setEditing(true); }, [autoEdit]);
   const displayVal = type === 'date' ? fmtDt(value) : (value || '—');
 
   const commit = raw => {
@@ -269,7 +273,7 @@ function EditField({ label, value, field, type='text', row, onSave, canEdit }) {
   };
 
   return (
-    <div>
+    <div data-pf={field}>
       <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.3px' }}>{label}</div>
       {editing ? (
         <input
@@ -314,7 +318,7 @@ function YesNoPill({ label, value, field, row, onSave, canEdit }) {
   const bg     = value==='Yes' ? '#dcfce7'  : value==='No' ? '#fee2e2'  : '#f3f4f6';
   const border = value==='Yes' ? '#86efac'  : value==='No' ? '#fca5a5'  : '#e5e7eb';
   return (
-    <div>
+    <div data-pf={field}>
       <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.3px' }}>{label}</div>
       <div
         onClick={cycle}
@@ -336,7 +340,8 @@ function YesNoPill({ label, value, field, row, onSave, canEdit }) {
 }
 
 // ─── Detail Panel ─────────────────────────────────────────────────────────────
-function DetailPanel({ row, canEdit, onUpdate, onDelete, saving }) {
+function DetailPanel({ row, canEdit, onUpdate, onDelete, saving, focus }) {
+  const ae = f => (focus?.field === f ? focus.n : 0);
   const isCompleted = !!(row.completionDate && row.completionDate !== '—');
   return (
     <div className="card" style={{ height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' }}>
@@ -382,16 +387,16 @@ function DetailPanel({ row, canEdit, onUpdate, onDelete, saving }) {
 
           {/* Client — full width */}
           <div style={{ gridColumn:'1 / -1' }}>
-            <EditField label="Client" value={row.client} field="client" row={row} onSave={onUpdate} canEdit={canEdit} />
+            <EditField autoEdit={ae('client')} label="Client" value={row.client} field="client" row={row} onSave={onUpdate} canEdit={canEdit} />
           </div>
 
           {/* Topic — full width */}
           <div style={{ gridColumn:'1 / -1' }}>
-            <EditField label="Program Topic" value={row.topic} field="topic" row={row} onSave={onUpdate} canEdit={canEdit} />
+            <EditField autoEdit={ae('topic')} label="Program Topic" value={row.topic} field="topic" row={row} onSave={onUpdate} canEdit={canEdit} />
           </div>
 
-          <EditField label="Start Date" value={row.startDate} field="startDate" type="date" row={row} onSave={onUpdate} canEdit={canEdit} />
-          <EditField label="POC" value={row.poc} field="poc" row={row} onSave={onUpdate} canEdit={canEdit} />
+          <EditField autoEdit={ae('startDate')} label="Start Date" value={row.startDate} field="startDate" type="date" row={row} onSave={onUpdate} canEdit={canEdit} />
+          <EditField autoEdit={ae('poc')} label="POC" value={row.poc} field="poc" row={row} onSave={onUpdate} canEdit={canEdit} />
 
           {/* PM Required BEFORE EV Required */}
           <YesNoPill label="PM Required" value={row.pmRequired} field="pmRequired" row={row} onSave={onUpdate} canEdit={canEdit} />
@@ -405,7 +410,7 @@ function DetailPanel({ row, canEdit, onUpdate, onDelete, saving }) {
             </div>
           </div>
 
-          <EditField label="Completion Date" value={row.completionDate} field="completionDate" type="date" row={row} onSave={onUpdate} canEdit={canEdit} />
+          <EditField autoEdit={ae('completionDate')} label="Completion Date" value={row.completionDate} field="completionDate" type="date" row={row} onSave={onUpdate} canEdit={canEdit} />
         </div>
 
         {/* Content Assets / Pre-Work / Post-Work — each item has its own deadline */}
@@ -435,6 +440,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
   const [saving,    setSaving]    = useState(false);
   const [showAdd,   setShowAdd]   = useState(false);
   const [deleteRow, setDeleteRow] = useState(null);
+  const [focus,     setFocus]     = useState(null);   // { field, n } — field to open from the pending bar
 
   const { canEdit } = usePermissions();
   const editable = canEdit('content-dev');
@@ -474,6 +480,33 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
 
   // keep selected in sync when data reloads
   const sel = selected != null ? data.find(d => d.sno === selected) : null;
+
+  // Pending-fields bar: entries with empty fields, in S No order (follows search / status filter)
+  const pendingBar = useMemo(() => pendingItems(filtered, CDT_RULES, r => ({
+    id: r.sno, serial: r.sno, title: r.client || '(no client)', subtitle: r.topic,
+  })), [filtered]);
+  const openPending = (it, f) => {
+    setSelected(it.row.sno);
+    setFocus({ field: f.key, n: Date.now() });
+    revealField(f.key, f.label);
+  };
+
+  // Reminders popup: open work items with a deadline, and entries past their Due Date with no Completion Date
+  const dueBar = useMemo(() => filtered.map(r => {
+    const tasks = [];
+    WORK_SECTIONS.forEach(sec => (r[sec.key] || []).forEach(it => {
+      if (!it.done && it.deadline) tasks.push({ key: `wi-${it.id}`, label: `${sec.label}: ${it.title || '(untitled)'}`, due: toInputDate(it.deadline) });
+    }));
+    const done = String(r.completionDate ?? '').trim();
+    const due = toInputDate(r.dueDate);
+    if ((!done || done === '—') && due) tasks.push({ key: 'completionDate', label: 'Content completion', due });
+    return { id: r.sno, serial: r.sno, title: r.client || '(no client)', subtitle: r.topic, tasks: tasks.filter(t => t.due), row: r };
+  }).filter(x => x.tasks.length), [filtered]);
+  const openDue = (it, t) => {
+    setSelected(it.row.sno);
+    if (t.key === 'completionDate') { setFocus({ field: 'completionDate', n: Date.now() }); revealField('completionDate', 'Completion Date'); }
+    else { setFocus(null); revealField(t.key, t.label); }
+  };
 
   const handleUpdate = async (row, changes) => {
     // A row with an empty Index cell can't be found by the flow, so nothing would save.
@@ -537,6 +570,8 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
         </div></div>
       </div>
 
+      <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={editable} storageKey="content-dev" noun="entry" />
+
       {/* Two-column layout */}
       <div className="grid-sidebar" style={{ flex:1, overflow:'hidden', minHeight:0 }}>
 
@@ -573,7 +608,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
                     const isSel = selected === r.sno;
                     return (
                       <div key={r.sno ?? i}
-                        onClick={() => setSelected(isSel ? null : r.sno)}
+                        onClick={() => { setFocus(null); setSelected(isSel ? null : r.sno); }}
                         style={{
                           padding:'10px 14px', borderBottom:'1px solid var(--border)',
                           cursor:'pointer',
@@ -621,7 +656,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
         {/* RIGHT — detail panel */}
         <div style={{ height:'100%', overflowY:'auto' }}>
           {sel
-            ? <DetailPanel row={sel} canEdit={editable} onUpdate={handleUpdate} onDelete={setDeleteRow} saving={saving} />
+            ? <DetailPanel row={sel} canEdit={editable} onUpdate={handleUpdate} onDelete={setDeleteRow} saving={saving} focus={focus} />
             : (
               <div className="card" style={{ textAlign:'center', padding:'60px 20px', color:'var(--muted)' }}>
                 <div style={{ fontSize:40, marginBottom:12 }}>📋</div>

@@ -18,6 +18,8 @@ import { parseChecklist } from '../config/opsChecklistItems.js';
 import { addEngagementToOps, addEngagementToCDT, isInTracker } from '../services/addToTrackers.js';
 import { checklistForEngagement } from '../services/bdChecklistSync.js';
 import { onListChange, getOpsChecklist, getContentDevTracker, ecContractFields } from '../services/api.js';
+import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
+import { pendingItems, EC_RULES } from '../config/pendingFields.js';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -1017,6 +1019,40 @@ export default function EngagementCalendar({ onRefreshed }) {
     return list;
   }, [filtered, win]);
 
+  // Pending-fields bar: engagements with empty fields, in the order shown (month, then filter/sort)
+  const pendingBar = useMemo(() => pendingItems(groups.flatMap(g => g.rows), EC_RULES, e => ({
+    id: rowKey(e), serial: e.sno && e.sno !== '—' ? e.sno : '',
+    title: e.company || '(no company)',
+    subtitle: [e.egId, e.topic, e.startDate ? fmtDt(e.startDate) : 'No start date'].filter(Boolean).join(' · '),
+  })), [groups]);
+  const openPending = (it, f) => {
+    cardRefs.current[it.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setEditRow(it.row);
+    revealField(f.key, f.label);
+  };
+
+  // Reminders popup: deliveries starting within the week, and finished engagements whose status
+  // was never moved to Delivered (overdue from the end date)
+  const dueBar = useMemo(() => groups.flatMap(g => g.rows).map(e => {
+    const st = String(e.status ?? '');
+    if (/cancel|postpone/i.test(st)) return null;
+    const start = /^\d{4}-\d{2}-\d{2}/.test(e.startDate || '') ? e.startDate.slice(0, 10) : '';
+    const end = /^\d{4}-\d{2}-\d{2}/.test(e.endDate || '') && e.endDate >= start ? e.endDate.slice(0, 10) : start;
+    const tasks = [];
+    if (start && start >= today) tasks.push({ key: 'start', label: 'Delivery starts', due: start });
+    if (end && end < today && !/deliver/i.test(st)) tasks.push({ key: 'status', label: 'Mark as Delivered', due: end });
+    return tasks.length ? {
+      id: rowKey(e), serial: e.sno && e.sno !== '—' ? e.sno : '', title: e.company || '(no company)',
+      subtitle: [e.egId, e.topic, e.consultant1].filter(Boolean).join(' · '), tasks, row: e,
+    } : null;
+  }).filter(Boolean), [groups, today]);
+  const openDue = (it, t) => {
+    const card = cardRefs.current[it.id];
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (t.key === 'status' && canEdit('engagement')) { setEditRow(it.row); revealField('status', 'Status'); return; }
+    if (card) { card.classList.remove('pf-flash'); void card.offsetWidth; card.classList.add('pf-flash'); setTimeout(() => card.classList.remove('pf-flash'), 2800); }
+  };
+
   // Next upcoming (or ongoing) delivery — only when the current month is in view
   const nextUpKey = useMemo(() => {
     if (!containsToday) return null;
@@ -1188,6 +1224,10 @@ export default function EngagementCalendar({ onRefreshed }) {
           <div className="kpi-value">{rangeLoading ? '…' : filtered.filter(e => e.status === 'Delivered').length}</div>
         </div>
       </div>
+
+      {!rangeLoading && !error && (
+        <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={canEdit('engagement')} storageKey="engagement" noun="engagement" />
+      )}
 
       {/* ── Excel-style Filter Bar ── */}
       <CollapsibleFilterBar state={filterState}>
