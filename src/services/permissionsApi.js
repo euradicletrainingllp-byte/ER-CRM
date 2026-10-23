@@ -12,7 +12,8 @@
  *   SolCreate  | SolRead  | SolUpdate  | SolDelete  |
  *   LeadCreate | LeadRead | LeadUpdate | LeadDelete |
  *   VendorCreate | VendorRead | VendorUpdate | VendorDelete |
- *   FounderCreate | FounderRead | FounderUpdate | FounderDelete   (Founder's Desk: only Read is used)
+ *   FounderCreate | FounderRead | FounderUpdate | FounderDelete   (Founder's Desk: only Read is used) |
+ *   TaskCreate | TaskRead | TaskUpdate | TaskDelete   (Project Management)
  *
  *  Values are the strings "true" or "false".
  */
@@ -36,6 +37,7 @@ const PAGE_PREFIX = {
   'leads':       'Lead',
   'vendors':     'Vendor',
   'founder':     'Founder',
+  'tasks':       'Task',
 };
 const PAGES = Object.keys(PAGE_PREFIX);
 const OPS   = ['Create', 'Read', 'Update', 'Delete'];

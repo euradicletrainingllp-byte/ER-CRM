@@ -22,6 +22,7 @@ export default function NoAccessPage({ page }) {
     engagement: 'Engagement Calendar',
     ops:        'Ops Checklist',
     founder:    "Founder's Desk",
+    tasks:      'Project Management',
   }[page] || 'this page';
 
   return (

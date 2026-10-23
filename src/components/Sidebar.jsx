@@ -5,6 +5,7 @@ const NAV = [
   { path: '/',            page: 'dashboard',  icon: '📊', label: 'Dashboard'           },
   // Founder's Desk shows money too, so it needs Dashboard AND Finance view access
   { path: '/founder',     page: 'founder',    icon: '🧭', label: "Founder's Desk" },
+  { path: '/tasks',       page: 'tasks',      icon: '✅', label: 'Project Management'  },
   { path: '/leads',       page: 'leads',      icon: '🧲', label: 'Lead Tracker'        },
   { path: '/bd-tracker',  page: 'bd',         icon: '🎯', label: 'BD Tracker'          },
   { path: '/solution',    page: 'solution',   icon: '💡', label: 'Solution Tracker'    },

@@ -269,6 +269,43 @@ function sendBuffer(bufKey, { keepalive = false } = {}) {
   } catch { /* ignore */ }
 }
 
+// ── Direct email to one person (Project Management: task assigned) ───────────
+// Tasks are NOT broadcast to everyone with View access (that would flood inboxes);
+// only the person a task is assigned to gets an email. 'tasks' is therefore not in
+// STORE_TRACKERS above.
+const normName = v => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Email of a team member from the Admin Panel, by name (or the email itself). */
+export function emailForPerson(nameOrEmail) {
+  const n = normName(nameOrEmail);
+  if (!n) return '';
+  if (n.includes('@')) return n;
+  const entries = Object.entries(directory);
+  const exact = entries.find(([, cfg]) => normName(cfg?.name) === n);
+  if (exact) return exact[0].toLowerCase();
+  const first = n.split(' ')[0];
+  const byFirst = entries.filter(([email, cfg]) => normName(cfg?.name).split(' ')[0] === first || email.toLowerCase().split(/[@.]/)[0] === first);
+  return byFirst.length === 1 ? byFirst[0][0].toLowerCase() : '';
+}
+
+/** Send one email through the "CRM Notify" flow. Never throws; returns true when sent. */
+export function emailPerson({ to, subject, html, tracker = 'tasks', trackerName = 'Project Management', actor = {} }) {
+  try {
+    const url = FLOW_URLS.NOTIFY;
+    const email = emailForPerson(to);
+    if (!url || !email) return false;
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: email, subject: String(subject || '').slice(0, 250), html, tracker, trackerName,
+        actorEmail: actor.email || '', actorName: actor.name || '', recordCount: 1,
+      }),
+    }).catch(() => { /* an email must never break the CRM */ });
+    return true;
+  } catch { return false; }
+}
+
 /** Send everything waiting now (used when the tab closes or the user logs out). */
 export function flushNotifications() {
   for (const k of [...buffers.keys()]) sendBuffer(k, { keepalive: true });
