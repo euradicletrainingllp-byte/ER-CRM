@@ -110,7 +110,6 @@ function LeadModal({ initial, onSave, onClose, saving, names, me }) {
           <Field label="Status"><Select value={f.status} options={LEAD_STATUSES} onChange={v => set('status', v)} blank="— status —" /></Field>
           <Field label="Priority"><Select value={f.priority} options={LEAD_PRIORITIES} onChange={v => set('priority', v)} /></Field>
           <Field label="Next Follow-up"><input className="form-input" type="date" value={f.nextFollowUp} onChange={e => set('nextFollowUp', e.target.value)} /></Field>
-          <Field label="BD Proposal ID"><input className="form-input" value={f.proposalId} onChange={e => set('proposalId', e.target.value)} placeholder="When converted, e.g. P ID 145" /></Field>
           <Field label="Comments" full><textarea className="form-input" rows={2} value={f.comments} onChange={e => set('comments', e.target.value)} /></Field>
         </div>
 
@@ -193,7 +192,6 @@ function LeadPanel({ lead, canEdit, names, me, onEdit, onDelete, onLogAction, on
           <div className="lv-info-full" data-pf="requirement"><dt>Requirement</dt><dd>{lead.requirement || '—'}</dd></div>
           <Info k="programInterest" label="Program interest">{lead.programInterest}</Info>
           <Info k="owner" label="Lead owner">{lead.owner}</Info>
-          <Info k="proposalId" label="BD proposal ID">{lead.proposalId}</Info>
           {(onAddToBd || lead.proposalId) && (
             <div className="lv-info-full">
               {lead.proposalId
