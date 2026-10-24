@@ -8,6 +8,7 @@ const TITLES = {
   '/leads':      'Lead Tracker',
   '/vendors':    'Vendor Service Tracker',
   '/consultants': 'Consultant Directory',
+  '/clients':    'Client Directory',
   '/bd':         'BD Pipeline',
   '/engagement': 'Engagement Calendar',
   '/ops':        'Operations Checklist',

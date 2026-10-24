@@ -204,3 +204,22 @@ export const CONSULTANT_RULES = {
     { key: 'owner',          label: 'Relationship Owner' },
   ],
 };
+
+/* Client Directory — labels match the Add / Edit Client form.
+ * `money: true` fields are checked only for people who can see Commercial & billing. */
+export const CLIENT_RULES = {
+  skip: r => s(r.clientType) === 'Lost',
+  fields: [
+    { key: 'clientType',     label: 'Client Type *', test: v => isBlank(v) || s(v) === 'To confirm' },
+    { key: 'industry',       label: 'Industry' },
+    { key: 'owner',          label: 'EuRadicle Account Owner' },
+    { key: 'relStatus',      label: 'Relationship Status', test: v => isBlank(v) || s(v) === 'To confirm' },
+    { key: 'health',         label: 'Relationship Health', when: r => s(r.clientType) === 'Existing' },
+    { key: 'geography',      label: 'Geography' },
+    { key: 'legalName',      label: 'Legal / Billing Entity Name', when: r => s(r.clientType) === 'Existing' },
+    { key: 'contractBasis',  label: 'Contract Basis', when: r => s(r.clientType) === 'Existing' },
+    { key: 'payDays',        label: 'Payment Terms (Days)', when: r => s(r.clientType) === 'Existing', money: true },
+    { key: 'portal',         label: 'Invoice Portal', when: r => s(r.clientType) === 'Existing', money: true },
+    { key: 'invoiceContact', label: 'Invoice Contact', when: r => s(r.clientType) === 'Existing', money: true },
+  ],
+};

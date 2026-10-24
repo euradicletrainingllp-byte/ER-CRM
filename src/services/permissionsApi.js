@@ -14,7 +14,8 @@
  *   VendorCreate | VendorRead | VendorUpdate | VendorDelete |
  *   FounderCreate | FounderRead | FounderUpdate | FounderDelete   (Founder's Desk: only Read is used) |
  *   TaskCreate | TaskRead | TaskUpdate | TaskDelete   (Project Management) |
- *   ConsultantCreate | ConsultantRead | ConsultantUpdate | ConsultantDelete   (Consultant Directory)
+ *   ConsultantCreate | ConsultantRead | ConsultantUpdate | ConsultantDelete   (Consultant Directory) |
+ *   ClientCreate | ClientRead | ClientUpdate | ClientDelete   (Client Directory)
  *
  *  Values are the strings "true" or "false".
  */
@@ -40,6 +41,7 @@ const PAGE_PREFIX = {
   'founder':     'Founder',
   'tasks':       'Task',
   'consultants': 'Consultant',
+  'clients':     'Client',
 };
 const PAGES = Object.keys(PAGE_PREFIX);
 const OPS   = ['Create', 'Read', 'Update', 'Delete'];

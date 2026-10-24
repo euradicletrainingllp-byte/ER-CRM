@@ -24,6 +24,7 @@ export default function NoAccessPage({ page }) {
     founder:    "Founder's Desk",
     tasks:      'Project Management',
     consultants: 'Consultant Directory',
+    clients:    'Client Directory',
   }[page] || 'this page';
 
   return (

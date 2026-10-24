@@ -65,6 +65,15 @@ const FLOW_URLS = {
   // Leave "" until the flow exists — the page then shows a "not connected yet" message.
   CONSULTANTS_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/10/workflows/d24bfb6bd95f4cf0b42fc24305c44e90/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pDaN3a8XLBbxy4HZJR4ODC_pKutCShfUBOpit59RnGM",
 
+  // ── CLIENT DIRECTORY (one file, five tables, ONE flow) ─────────────────────
+  // Excel: "Client_Directory.xlsx" → Tables: ClientTable, ContactTable, ProgramTable, ActionTable, InteractionTable
+  // Payload: { action: get | create | update | delete, table: <table name>, sno: <record ID>, ...exact column headers }
+  // Flow: TableName = triggerBody()?['table']; key column looked up from the table name (Key map);
+  //       Row = removeProperty(removeProperty(removeProperty(triggerBody(),'action'),'sno'),'table')
+  // Build guide: project doc claude/feature-2026-10-25-client-directory.md
+  // Leave "" until the flow exists — the page then shows a "not connected yet" message.
+  CLIENTS_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/10/workflows/1a7c5fa0fd08407fbcd0c54f6c985ba3/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=c0YtTdKczvfGlnl-4SHMbrwQQ0qDokRUFBKFX4nKKJs",
+
   // ── ACTIVITY LOG (audit trail) ────────────────────────────────────────────
   // SharePoint list: "CRM ACTIVITY LOG"  ·  Flow: "CRM Activity Log"
   // Payload: { action: 'append', events: [ ...log rows ] }

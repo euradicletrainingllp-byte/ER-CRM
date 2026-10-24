@@ -14,6 +14,7 @@ const NAV = [
   { path: '/finance',     page: 'finance',    icon: '💰', label: 'Finance Tracker'     },
   { path: '/content-dev', page: 'content-dev',icon: '📘', label: 'Content Dev Tracker' },
   { path: '/vendors',     page: 'vendors',    icon: '🧾', label: 'Vendor Services'     },
+  { path: '/clients',     page: 'clients',    icon: '🏢', label: 'Client Directory'    },
   { path: '/consultants', page: 'consultants',icon: '🧑‍🏫', label: 'Consultant Directory' },
   { path: '/er-calendar',  page: 'engagement',  icon: '🗓️', label: 'ER Calendar'         },
 ];
@@ -30,7 +31,7 @@ export default function Sidebar() {
     <aside className="sidebar" style={{ display: 'flex', flexDirection: 'column' }}>
       <div className="sidebar-logo">
         <img
-          src="/ER_Logo.jpg"
+          src="/ER_Logo.png"
           alt="EuRadicle"
           style={{
             width: '100%',
@@ -42,7 +43,7 @@ export default function Sidebar() {
             marginBottom: 8,
           }}
         />
-        <div className="logo-sub">CRM · Live Excel Connect</div>
+        <div className="logo-sub">Customer Relationship Management</div>
       </div>
 
       <div className="sidebar-section-label">Main Menu</div>

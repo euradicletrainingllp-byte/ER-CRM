@@ -21,9 +21,10 @@ const AUDIT_MODULE = {
   VENDOR_CRUD:        'vendors',
   TASKS_CRUD:         'tasks',
   CONSULTANTS_CRUD:   'consultants',
+  CLIENTS_CRUD:       'clients',
 };
 const AUDIT_ACTION = { get: 'READ', create: 'CREATE', update: 'UPDATE', delete: 'DELETE' };
-const AUDIT_META_KEYS = new Set(['action', 'rowId', 'sno', 'SNo', 'newSno']);
+const AUDIT_META_KEYS = new Set(['action', 'rowId', 'sno', 'SNo', 'newSno', 'table']);
 const _auditRows = new Map();          // module → Map(sno → { vals:{norm→value}, names:{norm→column} })
 
 function auditRowsOf(module) {
@@ -49,8 +50,10 @@ function auditRecordId(body) {
 function auditLabel(vals) {
   const pick = (...keys) => { for (const k of keys) { const v = vals[normKey(k)]; if (v) return String(v).trim(); } return ''; };
   const who  = pick('Client', 'Company', 'Client Name', 'Vendor Name', 'Full Name');
-  const what = pick('Topic', 'Program Topic', 'Solution Topic', 'Service Description', 'Requirement', 'Task Title');
-  const eg   = pick('EG ID', 'Proposal ID', 'Lead ID', 'Service ID', 'Task ID', 'Consultant ID');
+  const whom = pick('Full Name') && pick('Client Name') ? pick('Full Name') : '';
+  const what = whom || pick('Topic', 'Program Topic', 'Solution Topic', 'Service Description', 'Requirement', 'Task Title', 'Program Name', 'Action', 'Summary');
+  const eg   = pick('EG ID', 'Proposal ID', 'Lead ID', 'Service ID', 'Task ID', 'Consultant ID',
+    'Contact ID', 'Program Record ID', 'Action ID', 'Interaction ID', 'Client ID');
   return [eg, who, what].filter(Boolean).join(' · ');
 }
 
