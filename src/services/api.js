@@ -20,6 +20,7 @@ const AUDIT_MODULE = {
   LEADS_CRUD:         'leads',
   VENDOR_CRUD:        'vendors',
   TASKS_CRUD:         'tasks',
+  CONSULTANTS_CRUD:   'consultants',
 };
 const AUDIT_ACTION = { get: 'READ', create: 'CREATE', update: 'UPDATE', delete: 'DELETE' };
 const AUDIT_META_KEYS = new Set(['action', 'rowId', 'sno', 'SNo', 'newSno']);
@@ -47,9 +48,9 @@ function auditRecordId(body) {
 
 function auditLabel(vals) {
   const pick = (...keys) => { for (const k of keys) { const v = vals[normKey(k)]; if (v) return String(v).trim(); } return ''; };
-  const who  = pick('Client', 'Company', 'Client Name', 'Vendor Name');
+  const who  = pick('Client', 'Company', 'Client Name', 'Vendor Name', 'Full Name');
   const what = pick('Topic', 'Program Topic', 'Solution Topic', 'Service Description', 'Requirement', 'Task Title');
-  const eg   = pick('EG ID', 'Proposal ID', 'Lead ID', 'Service ID', 'Task ID');
+  const eg   = pick('EG ID', 'Proposal ID', 'Lead ID', 'Service ID', 'Task ID', 'Consultant ID');
   return [eg, who, what].filter(Boolean).join(' · ');
 }
 

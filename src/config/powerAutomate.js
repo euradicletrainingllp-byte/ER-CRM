@@ -58,6 +58,13 @@ const FLOW_URLS = {
   // Flow writes the whole body as the row: removeProperty(removeProperty(triggerBody(),'action'),'sno')
   TASKS_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/09/workflows/3d0c63b7d9cb480a91b3f2f4d35aef3f/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=oMRHaDjnNSZKWGn3W-miihK766HQfqRNU0mEqDfZFVA",
 
+  // ── CONSULTANT DIRECTORY ──────────────────────────────────────────────────
+  // Excel: "Consultant_Directory.xlsx" → Table: "ConsultantTable"  ·  key column: "Consultant ID"
+  // Payload: { action: get | create | update | delete, sno: <Consultant ID>, ...exact column headers }
+  // Flow writes the whole body as the row: removeProperty(removeProperty(triggerBody(),'action'),'sno')
+  // Leave "" until the flow exists — the page then shows a "not connected yet" message.
+  CONSULTANTS_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/10/workflows/d24bfb6bd95f4cf0b42fc24305c44e90/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pDaN3a8XLBbxy4HZJR4ODC_pKutCShfUBOpit59RnGM",
+
   // ── ACTIVITY LOG (audit trail) ────────────────────────────────────────────
   // SharePoint list: "CRM ACTIVITY LOG"  ·  Flow: "CRM Activity Log"
   // Payload: { action: 'append', events: [ ...log rows ] }

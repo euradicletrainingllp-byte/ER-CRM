@@ -16,7 +16,7 @@ import { useMsal } from '@azure/msal-react';
 import { ADMIN_EMAIL, DEFAULT_ACCESS } from '../config/permissions.js';
 import { usePermissionsContext } from '../context/PermissionsContext.jsx';
 
-const PAGES = ['dashboard', 'bd', 'engagement', 'ops', 'finance', 'content-dev', 'solution', 'leads', 'vendors', 'founder', 'tasks'];
+const PAGES = ['dashboard', 'bd', 'engagement', 'ops', 'finance', 'content-dev', 'solution', 'leads', 'vendors', 'founder', 'tasks', 'consultants'];
 
 const ALL_CRUD_TRUE  = Object.fromEntries(PAGES.map(p => [p, { create: true,  read: true,  update: true,  delete: true  }]));
 const ALL_CRUD_FALSE = Object.fromEntries(PAGES.map(p => [p, { create: false, read: false, update: false, delete: false }]));

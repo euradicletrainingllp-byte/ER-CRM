@@ -185,3 +185,22 @@ export function pendingItems(rows, rules, describe) {
   });
   return out;
 }
+
+/* Consultant Directory — labels match the Add / Edit Consultant form */
+export const CONSULTANT_RULES = {
+  skip: r => s(r.status) === 'Inactive',
+  fields: [
+    { key: 'email',          label: 'Email' },
+    { key: 'phone',          label: 'Phone' },
+    { key: 'headline',       label: 'Profile Headline' },
+    { key: 'yearsExp',       label: 'Years of Experience', test: blankOrZero },
+    { key: 'badges',         label: 'Practice Badges' },
+    { key: 'skills',         label: 'Core Skills' },
+    { key: 'profileLink',    label: 'Profile PDF Link' },
+    { key: 'contractStart',  label: 'Contract Start Date', when: r => s(r.contractStatus) !== 'Terminated' },
+    { key: 'contractEnd',    label: 'Contract End Date (expiry)', when: r => s(r.contractStatus) !== 'Terminated' },
+    { key: 'contractLink',   label: 'Contract Link', when: r => ['Signed', 'Expired'].includes(s(r.contractStatus)) },
+    { key: 'ndaSigned',      label: 'NDA Signed' },
+    { key: 'owner',          label: 'Relationship Owner' },
+  ],
+};

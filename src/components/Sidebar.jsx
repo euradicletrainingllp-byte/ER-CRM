@@ -14,6 +14,7 @@ const NAV = [
   { path: '/finance',     page: 'finance',    icon: '💰', label: 'Finance Tracker'     },
   { path: '/content-dev', page: 'content-dev',icon: '📘', label: 'Content Dev Tracker' },
   { path: '/vendors',     page: 'vendors',    icon: '🧾', label: 'Vendor Services'     },
+  { path: '/consultants', page: 'consultants',icon: '🧑‍🏫', label: 'Consultant Directory' },
   { path: '/er-calendar',  page: 'engagement',  icon: '🗓️', label: 'ER Calendar'         },
 ];
 

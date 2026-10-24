@@ -11,6 +11,7 @@ import FounderDashboard   from './pages/FounderDashboard.jsx';
 import LeadTracker        from './pages/LeadTracker.jsx';
 import VendorTracker      from './pages/VendorTracker.jsx';
 import TaskTracker        from './pages/TaskTracker.jsx';
+import ConsultantDirectory from './pages/ConsultantDirectory.jsx';
 import TaskFloat          from './components/TaskFloat.jsx';
 import EngagementCalendar from './pages/EngagementCalendar.jsx';
 import OpsChecklist          from './pages/OpsChecklist.jsx';
@@ -46,7 +47,7 @@ function DeniedPage({ page }) {
 
 // Activity log: page key for each route (used for PAGE_VIEW rows)
 const ROUTE_MODULE = {
-  '/': 'dashboard', '/founder': 'founder', '/tasks': 'tasks', '/leads': 'leads', '/vendors': 'vendors', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
+  '/': 'dashboard', '/founder': 'founder', '/tasks': 'tasks', '/leads': 'leads', '/vendors': 'vendors', '/consultants': 'consultants', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
   '/content-dev': 'content-dev', '/solution': 'solution', '/er-calendar': 'engagement', '/admin': 'permissions',
 };
 
@@ -126,6 +127,11 @@ function Shell() {
             <Route path="/vendors" element={
               <PermissionRoute page="vendors">
                 <VendorTracker onRefreshed={setLastRefreshed} />
+              </PermissionRoute>
+            } />
+            <Route path="/consultants" element={
+              <PermissionRoute page="consultants">
+                <ConsultantDirectory onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
             <Route path="/bd-tracker" element={

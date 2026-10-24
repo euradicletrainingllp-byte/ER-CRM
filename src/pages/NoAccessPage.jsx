@@ -23,6 +23,7 @@ export default function NoAccessPage({ page }) {
     ops:        'Ops Checklist',
     founder:    "Founder's Desk",
     tasks:      'Project Management',
+    consultants: 'Consultant Directory',
   }[page] || 'this page';
 
   return (

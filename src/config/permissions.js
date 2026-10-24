@@ -35,6 +35,7 @@ export const PERMISSIONS = {
       vendors:       { ...ALL_CRUD },
       founder:       { ...ALL_CRUD },
       tasks:         { ...ALL_CRUD },
+      consultants:   { ...ALL_CRUD },
     },
   },
   // ── Add team members below (or manage via Admin Panel) ──────────────────

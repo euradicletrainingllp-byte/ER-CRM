@@ -24,6 +24,7 @@ const PAGES = [
   { key: 'vendors',     label: 'Vendors',              icon: '🧾' },
   { key: 'founder',     label: "Founder's Desk",       icon: '🧭' },   // read-only page: only Read (R) matters
   { key: 'tasks',       label: 'Project Mgmt',         icon: '✅' },
+  { key: 'consultants', label: 'Consultants',          icon: '🧑‍🏫' },
 ];
 
 const OPS = [
