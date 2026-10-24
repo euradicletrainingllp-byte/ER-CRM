@@ -8,7 +8,10 @@
  */
 import { CL_ITEMS } from '../pages/OpsChecklist.jsx';
 import { financeDates, financeStage, totalOf } from '../pages/FinanceTracker.jsx';
-import { pendingItems, OPS_RULES, EC_RULES, CDT_RULES, FIN_RULES, BD_RULES, SOL_RULES, LEAD_RULES, VENDOR_RULES, toIso } from '../config/pendingFields.js';
+import { pendingItems, OPS_RULES, EC_RULES, CDT_RULES, FIN_RULES, BD_RULES, SOL_RULES, LEAD_RULES, VENDOR_RULES, CONSULTANT_RULES, CLIENT_RULES, toIso } from '../config/pendingFields.js';
+import { taskIsOpen } from '../config/taskOptions.js';
+import { contractAlert, noticeDays } from './consultantsApi.js';
+import { CONTRACT_WARN_DAYS } from '../config/clientOptions.js';
 import { leadIsOpen, isBillable, VENDOR_INVOICE_EXPECTED_DAYS, CLIENT_BILLING_DAYS, VENDOR_PAYMENT_DAYS } from '../config/leadVendorOptions.js';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { buildProposals, toRupees } from '../components/proposalData.js';
@@ -23,7 +26,11 @@ export const TRACKERS = {
   'content-dev': { label: 'Content Dev Tracker', short: 'Content', route: '/content-dev' },
   leads:       { label: 'Lead Tracker',        short: 'Leads',    route: '/leads' },
   vendors:     { label: 'Vendor Services',     short: 'Vendors',  route: '/vendors' },
+  tasks:       { label: 'Project Management',  short: 'Projects', route: '/tasks' },
+  consultants: { label: 'Consultant Directory', short: 'Consultants', route: '/consultants' },
+  clients:     { label: 'Client Directory',    short: 'Clients',  route: '/clients' },
 };
+const clientOpenAction = a => ['Open', 'In progress', ''].includes(s(a.status));
 const vToBill = v => isBillable(v.billable) && !['Billed', 'Not applicable'].includes(s(v.clientBilling));
 const vToPay = v => ['To pay', 'Partly paid'].includes(s(v.paymentStatus));
 
@@ -86,7 +93,7 @@ export function bdLines(solRows) {
 
 /* ─── Open tasks (everything with a due date that is not done) ─────────────── */
 // Task: { id, tracker, record, sub, label, due, owner, amount?, details: [[label, value]], key }
-export function openTasks({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [] }) {
+export function openTasks({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [], tasks = [], consultants = [], clients = null }) {
   const out = [];
   const opsByKey = new Map(ops.map(o => [s(o.engagementKey), o]));
 
@@ -209,12 +216,68 @@ export function openTasks({ sol = [], eng = [], ops = [], cdt = [], leads = [], 
       amount: Math.max(0, num(v.total) - num(v.paidAmount)) });
   });
 
+  // Project Management — open tasks with a due date, owned by the assignee
+  tasks.forEach(k => {
+    const due = toIso(k.dueDate);
+    if (!taskIsOpen(k) || !due) return;
+    out.push({
+      id: `task|${k.taskId}`, tracker: 'tasks', record: s(k.projectName) || '(no project)', serial: k.taskId,
+      sub: [s(k.client), s(k.team)].filter(Boolean).join(' · '), label: s(k.title) || '(untitled task)', due, owner: owner(k.assignedTo),
+      details: [['Task', `${s(k.taskId)} · ${s(k.title)}`], ['Project', [s(k.projectId), s(k.projectName)].filter(Boolean).join(' · ')], ['Client', s(k.client)],
+        ['Assigned to', s(k.assignedTo)], ['Assigned by', s(k.assignedBy)], ['Status', s(k.status)], ['Priority', s(k.priority)],
+        ['Waiting on', s(k.waitingOn)], ['Description', s(k.description)], ['Output', s(k.outputLink)]],
+    });
+  });
+
+  // Consultant Directory — contracts in the renewal window or expired
+  consultants.forEach(c => {
+    if (s(c.status) === 'Inactive') return;
+    const a = contractAlert(c);
+    if (a !== 'renew' && a !== 'expired') return;
+    out.push({
+      id: `cn|${c.consultantId}|renew`, tracker: 'consultants', record: s(c.fullName) || '(no name)', serial: c.consultantId,
+      sub: [s(c.designation), s(c.contractType)].filter(Boolean).join(' · '), label: a === 'expired' ? 'Contract expired — renew' : 'Renew contract',
+      due: addDaysIso(toIso(c.contractEnd), -noticeDays(c)), owner: owner(c.owner),
+      details: [['Consultant', `${s(c.consultantId)} · ${s(c.fullName)}`], ['Contract', [s(c.contractType), s(c.contractStatus)].filter(Boolean).join(' · ')],
+        ['Ends', toIso(c.contractEnd)], ['Last renewed', toIso(c.lastRenewed)], ['NDA', s(c.ndaSigned)], ['Relationship owner', s(c.owner)], ['Contract link', s(c.contractLink)]],
+    });
+  });
+
+  // Client Directory — follow-ups, open client actions, contract renewals
+  if (clients) {
+    const byId = new Map((clients.clients || []).map(c => [s(c.clientId), c]));
+    const byName = new Map((clients.clients || []).map(c => [s(c.name).toLowerCase(), c]));
+    (clients.clients || []).forEach(c => {
+      const base = {
+        tracker: 'clients', record: s(c.name) || '(no name)', serial: c.clientId, sub: [s(c.clientType), s(c.industry)].filter(Boolean).join(' · '),
+        owner: owner(c.owner), details: [['Client', `${s(c.clientId)} · ${s(c.name)}`], ['Type', s(c.clientType)], ['Relationship', [s(c.relStatus), s(c.health) && `${s(c.health)} health`].filter(Boolean).join(' · ')],
+          ['Account owner', s(c.owner)], ['Next action', s(c.nextAction)], ['Last interaction', toIso(c.lastInteraction)]],
+      };
+      const fu = toIso(c.nextFollowUp);
+      if (fu) out.push({ ...base, id: `cl|${c.clientId}|fu`, label: s(c.nextAction) ? `Follow up: ${s(c.nextAction)}` : 'Client follow-up', due: fu });
+      const end = toIso(c.contractEnd);
+      if (end && !['Expired', 'Not required'].includes(s(c.contractStatus)))
+        out.push({ ...base, id: `cl|${c.clientId}|contract`, label: 'Renew client contract', due: addDaysIso(end, -CONTRACT_WARN_DAYS),
+          details: [...base.details, ['Contract', [s(c.contractBasis), s(c.contractStatus)].filter(Boolean).join(' · ')], ['Ends', end]] });
+    });
+    (clients.actions || []).forEach(a => {
+      const due = toIso(a.due);
+      if (!clientOpenAction(a) || !due) return;
+      const c = byId.get(s(a.clientId)) || byName.get(s(a.clientName).toLowerCase()) || {};
+      out.push({
+        id: `ca|${a.actionId}`, tracker: 'clients', record: s(a.clientName) || s(c.name) || '(no client)', serial: a.actionId,
+        sub: s(a.ownerContact) ? `with ${s(a.ownerContact)}` : s(a.timing), label: s(a.action) || 'Client action', due, owner: owner(a.erOwner || c.owner),
+        details: [['Action', s(a.action)], ['Client', s(a.clientName)], ['With', s(a.ownerContact)], ['Priority', s(a.priority)], ['Status', s(a.status) || 'Open'], ['Context', s(a.context)]],
+      });
+    });
+  }
+
   return out.map(x => ({ ...x, days: daysBetween(t, x.due) }));
 }
 
 /* ─── Completed work (dated) ───────────────────────────────────────────────── */
 // { id, tracker, record, label, date, amount? }
-export function completedWork({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [] }) {
+export function completedWork({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [], tasks = [], consultants = [], clients = null }) {
   const out = [];
   ops.forEach(r => CL_ITEMS.forEach(it => {
     if (s(r[it.key]) !== 'Yes') return;
@@ -250,13 +313,31 @@ export function completedWork({ sol = [], eng = [], ops = [], cdt = [], leads = 
     const p = toIso(v.paidDate);
     if (p) out.push({ id: `vs|${v.serviceId}|paid`, tracker: 'vendors', record: s(v.vendorName), sub: s(v.client), label: 'Vendor paid', date: p, amount: num(v.paidAmount) || num(v.total) });
   });
+  tasks.forEach(k => {
+    const d = toIso(k.completedDate);
+    if (d && s(k.status) === 'Done') out.push({ id: `task|${k.taskId}|done`, tracker: 'tasks', record: s(k.projectName), sub: s(k.title), label: 'Task completed', date: d, who: s(k.assignedTo) });
+  });
+  consultants.forEach(c => {
+    const d = toIso(c.lastRenewed);
+    if (d) out.push({ id: `cn|${c.consultantId}|renewed`, tracker: 'consultants', record: s(c.fullName), sub: s(c.contractType), label: 'Consultant contract renewed', date: d, who: s(c.owner) });
+  });
+  if (clients) {
+    (clients.actions || []).forEach(a => {
+      const d = toIso(a.closedOn);
+      if (d && s(a.status) === 'Done') out.push({ id: `ca|${a.actionId}|done`, tracker: 'clients', record: s(a.clientName), sub: s(a.action), label: 'Client action closed', date: d, who: s(a.erOwner) });
+    });
+    (clients.interactions || []).forEach(i => {
+      const d = toIso(i.date);
+      if (d && s(i.summary)) out.push({ id: `ci|${i.interactionId}`, tracker: 'clients', record: s(i.clientName), sub: `${s(i.type)}: ${s(i.summary)}`, label: 'Client interaction', date: d, who: s(i.erAttendees || i.loggedBy) });
+    });
+  }
   // A future 'done' date is a typo or a plan, not completed work
   const t = todayIso();
   return out.filter(x => x.date <= t).sort((a, b) => b.date.localeCompare(a.date));
 }
 
 /* ─── Missing fields per tracker (same rules as the Reminders popup) ───────── */
-export function missingByTracker({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [] }) {
+export function missingByTracker({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [], consultants = [], clients = null }) {
   const lines = bdLines(sol);
   const sols = lines.flatMap(l => l._sols);
   const make = (tracker, rows, rules, title) => {
@@ -277,7 +358,12 @@ export function missingByTracker({ sol = [], eng = [], ops = [], cdt = [], leads
     make('content-dev', cdt, CDT_RULES, r => s(r.client)),
     make('leads', leads, LEAD_RULES, r => `${s(r.leadId)} · ${s(r.company)}`),
     make('vendors', vendors, VENDOR_RULES, r => `${s(r.serviceId)} · ${s(r.vendorName)}`),
-  ].filter(m => m.tracker !== 'leads' && m.tracker !== 'vendors' || (m.tracker === 'leads' ? leads.length : vendors.length));
+    make('consultants', consultants, CONSULTANT_RULES, r => `${s(r.consultantId)} · ${s(r.fullName)}`),
+    make('clients', clients?.clients || [], CLIENT_RULES, r => `${s(r.clientId)} · ${s(r.name)}`),
+  ].filter(m => {                          // optional trackers appear only once they have data
+    const n = { leads: leads.length, vendors: vendors.length, consultants: consultants.length, clients: (clients?.clients || []).length }[m.tracker];
+    return n === undefined || n > 0;
+  });
 }
 
 /* ─── Money ────────────────────────────────────────────────────────────────── */
@@ -369,3 +455,98 @@ export const fmtL = v => {
   if (n >= 1e3) return '₹' + (n / 1e3).toFixed(0) + 'K';
   return '₹' + Math.round(n);
 };
+
+/* ─── Client Directory summary ─────────────────────────────────────────────── */
+const COLD_DAYS = 60;
+export function clientSummary(clients, eng = []) {
+  const list = clients?.clients || [];
+  const t = todayIso(), week = addDaysIso(t, 7);
+  const lastLog = new Map();
+  (clients?.interactions || []).forEach(i => {
+    const k = s(i.clientId) || s(i.clientName).toLowerCase(); const d = toIso(i.date);
+    if (d && (!lastLog.get(k) || d > lastLog.get(k))) lastLog.set(k, d);
+  });
+  const lastTouch = c => [toIso(c.lastInteraction), lastLog.get(s(c.clientId)), lastLog.get(s(c.name).toLowerCase())].filter(Boolean).sort().pop() || '';
+  // sessions in the Engagement Calendar per client name (to show who is busiest now)
+  const live = list.filter(c => ['Existing'].includes(s(c.clientType)) || s(c.relStatus) === 'Active');
+  const atRisk = live.filter(c => ['Red', 'Amber'].includes(s(c.health)));
+  const cold = live.filter(c => { const lt = lastTouch(c); return !lt || daysBetween(lt, t) > COLD_DAYS; });
+  const followWeek = list.filter(c => { const f = toIso(c.nextFollowUp); return f && f <= week; });
+  const openActs = (clients?.actions || []).filter(a => clientOpenAction(a));
+  const noOwner = list.filter(c => !s(c.owner));
+  const engCount = new Map();
+  eng.forEach(e => { const k = s(e.company).toLowerCase(); if (k) engCount.set(k, (engCount.get(k) || 0) + 1); });
+  const describe = c => ({
+    id: c.clientId, name: s(c.name), type: s(c.clientType), health: s(c.health), owner: s(c.owner), status: s(c.relStatus),
+    lastTouch: lastTouch(c), next: toIso(c.nextFollowUp), nextAction: s(c.nextAction), outstanding: num(c.outstanding),
+    openActions: openActs.filter(a => s(a.clientId) === s(c.clientId) || s(a.clientName).toLowerCase() === s(c.name).toLowerCase()).length,
+    sessions: engCount.get(s(c.name).toLowerCase()) || 0,
+  });
+  const watch = [...new Map([...atRisk, ...cold].map(c => [c.clientId, c])).values()].map(describe)
+    .sort((a, b) => (b.health === 'Red') - (a.health === 'Red') || (a.lastTouch || '0').localeCompare(b.lastTouch || '0'));
+  return {
+    total: list.length, existing: list.filter(c => s(c.clientType) === 'Existing').length, prospects: list.filter(c => s(c.clientType) === 'Prospect').length,
+    active: list.filter(c => s(c.relStatus) === 'Active').length, atRisk: atRisk.length, cold: cold.length, coldDays: COLD_DAYS,
+    followWeek: followWeek.length, openActions: openActs.length, noOwner: noOwner.length,
+    dues: list.reduce((x, c) => x + num(c.outstanding), 0), withDues: list.filter(c => num(c.outstanding) > 0).length,
+    watch: watch.slice(0, 10),
+    upcoming: followWeek.map(describe).sort((a, b) => a.next.localeCompare(b.next)).slice(0, 8),
+    topDues: list.filter(c => num(c.outstanding) > 0).map(describe).sort((a, b) => b.outstanding - a.outstanding).slice(0, 6),
+  };
+}
+
+/* ─── Project Management summary ───────────────────────────────────────────── */
+export function projectSummary(tasks = [], range) {
+  const t = todayIso(), week = addDaysIso(t, 7);
+  const open = tasks.filter(taskIsOpen);
+  const overdue = open.filter(k => toIso(k.dueDate) && toIso(k.dueDate) < t);
+  const dueWeek = open.filter(k => { const d = toIso(k.dueDate); return d && d >= t && d <= week; });
+  const doneP = tasks.filter(k => s(k.status) === 'Done' && inRange(toIso(k.completedDate), range));
+  const byProject = new Map();
+  tasks.forEach(k => {
+    const id = s(k.projectId) || s(k.projectName) || '(no project)';
+    const p = byProject.get(id) || { id, name: s(k.projectName) || id, client: s(k.client), owner: s(k.projectOwner), due: toIso(k.projectDue), team: s(k.team), total: 0, done: 0, open: 0, overdue: 0, cancelled: 0 };
+    if (s(k.status) === 'Cancelled') p.cancelled++;
+    else { p.total++; if (s(k.status) === 'Done') p.done++; else { p.open++; if (toIso(k.dueDate) && toIso(k.dueDate) < t) p.overdue++; } }
+    byProject.set(id, p);
+  });
+  const projects = [...byProject.values()].filter(p => p.total > 0).map(p => ({
+    ...p, pct: Math.round((p.done / p.total) * 100),
+    state: p.open === 0 ? 'Completed' : p.overdue > 0 || (p.due && p.due < t) ? 'At risk' : p.done > 0 ? 'Active' : 'Not started',
+  }));
+  const active = projects.filter(p => p.state !== 'Completed');
+  return {
+    open: open.length, overdue: overdue.length, dueWeek: dueWeek.length, done: doneP.length,
+    activeProjects: active.length, atRisk: active.filter(p => p.state === 'At risk').length, waiting: open.filter(k => /waiting/i.test(s(k.status))).length,
+    projects: active.sort((a, b) => (b.state === 'At risk') - (a.state === 'At risk') || b.overdue - a.overdue || a.pct - b.pct).slice(0, 10),
+  };
+}
+
+/* ─── Consultant Directory summary ─────────────────────────────────────────── */
+export function consultantSummary(consultants = [], eng = [], days = 30) {
+  const t = todayIso(), until = addDaysIso(t, days);
+  const live = consultants.filter(c => s(c.status) !== 'Inactive');
+  const alerts = { ok: 0, renew: 0, expired: 0, none: 0, terminated: 0 };
+  live.forEach(c => { alerts[contractAlert(c)]++; });
+  // sessions per consultant in the Engagement Calendar (lead or co-consultant), next N days
+  const load = new Map();
+  eng.forEach(e => {
+    if (/cancel|postpone/i.test(s(e.status))) return;
+    const st = toIso(e.startDate);
+    if (!st || st < t || st > until) return;
+    [e.consultant1, e.consultant2, e.consultant3].map(s).filter(Boolean).forEach((n, i) => {
+      const k = n.toLowerCase(); const o = load.get(k) || { name: n, lead: 0, co: 0 };
+      if (i === 0) o.lead++; else o.co++; load.set(k, o);
+    });
+  });
+  const known = new Map(consultants.map(c => [s(c.fullName).toLowerCase(), c]));
+  const bench = [...load.values()].map(x => ({ ...x, total: x.lead + x.co, inDirectory: known.has(x.name.toLowerCase()), id: known.get(x.name.toLowerCase())?.consultantId || '' }))
+    .sort((a, b) => b.total - a.total).slice(0, 10);
+  const renewals = live.filter(c => ['renew', 'expired'].includes(contractAlert(c)))
+    .map(c => ({ id: c.consultantId, name: s(c.fullName), alert: contractAlert(c), end: toIso(c.contractEnd), owner: s(c.owner), type: s(c.contractType) }))
+    .sort((a, b) => (a.end || '9999').localeCompare(b.end || '9999'));
+  return {
+    total: consultants.length, active: consultants.filter(c => s(c.status) === 'Active').length, onboarding: consultants.filter(c => s(c.status) === 'Onboarding').length,
+    alerts, renewals, bench, days, notInDirectory: [...load.values()].filter(x => !known.has(x.name.toLowerCase())).length,
+  };
+}

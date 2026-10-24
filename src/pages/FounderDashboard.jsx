@@ -1,7 +1,8 @@
 /**
  * FOUNDER'S DESK — one page for the whole business
  * ================================================
- * Pulls every tracker (BD / Solution, Engagement Calendar, Ops Checklist, Content Dev, Finance)
+ * Pulls every tracker (BD / Solution, Engagement Calendar, Ops Checklist, Content Dev, Finance, Leads, Vendors,
+ * Project Management, Consultant Directory, Client Directory)
  * and shows, in one place: what is overdue, what is due this week, who owns it, upcoming deliveries
  * with Ops readiness, the sales pipeline, cash & collections, completed work and data gaps.
  * Every row expands in place — the founder never has to open a tracker just to read something.
@@ -13,14 +14,17 @@ import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Gauge, AlertTriangle, CalendarDays, TrendingUp, Wallet, ClipboardCheck, BookOpen, CheckCircle2, Users, Database,
-  Settings2, ChevronUp, ChevronDown, ChevronRight, RefreshCw, ExternalLink, X, Eye, EyeOff, RotateCcw,
+  Settings2, ChevronUp, ChevronDown, ChevronRight, RefreshCw, ExternalLink, X, Eye, EyeOff, RotateCcw, Building2, Briefcase, UserCheck,
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { peekList, peekAllEngagements, getSolutionTracker, getAllEngagementsCached, getOpsChecklist, getContentDevTracker } from '../services/api.js';
 import { getLeads, getVendorServices } from '../services/leadsVendorsApi.js';
+import { getTasks, tasksConfigured } from '../services/tasksApi.js';
+import { getConsultants, consultantsConfigured } from '../services/consultantsApi.js';
+import { getClientDirectory, peekClientDirectory, clientsConfigured } from '../services/clientsApi.js';
 import {
   TRACKERS, PERIODS, periodRange, inRange, todayIso, addDaysIso, openTasks, completedWork, missingByTracker,
-  cashSummary, pipelineSummary, upcomingDeliveries, fmtL,
+  cashSummary, pipelineSummary, upcomingDeliveries, fmtL, clientSummary, projectSummary, consultantSummary, daysBetween,
 } from '../services/actionItems.js';
 import '../styles/founder.css';
 
@@ -36,18 +40,21 @@ const SECTIONS = {
   done:      { title: 'Completed',           Icon: CheckCircle2,   desc: 'What the team finished in the selected period', width: 'half' },
   owners:    { title: 'Team Load',           Icon: Users,          desc: 'Overdue and this-week tasks by owner', width: 'half' },
   health:    { title: 'Data Health',         Icon: Database,       desc: 'Missing fields in each tracker', width: 'half' },
+  clients:   { title: 'Clients & Relationships', Icon: Building2,  desc: 'Accounts at risk or going cold, follow-ups, dues', width: 'half' },
+  projects:  { title: 'Projects & Tasks',    Icon: Briefcase,      desc: 'Internal projects, progress and overdue tasks', width: 'half' },
+  consultants: { title: 'Consultant Bench',  Icon: UserCheck,      desc: 'Who is delivering next, contract renewals', width: 'half' },
 };
 const ALL_IDS = Object.keys(SECTIONS);
 
 const PRESETS = {
   founder:  { label: 'Founder overview', desc: 'Everything, most urgent first',
-    order: ['pulse', 'attention', 'calendar', 'pipeline', 'cash', 'ops', 'content', 'done', 'owners', 'health'], tracker: 'all', period: 'fy' },
+    order: ['pulse', 'attention', 'calendar', 'pipeline', 'cash', 'clients', 'projects', 'ops', 'content', 'consultants', 'done', 'owners', 'health'], tracker: 'all', period: 'fy' },
   monday:   { label: 'Monday review', desc: 'Weekly meeting: risks, owners, this week, money',
-    order: ['pulse', 'attention', 'owners', 'calendar', 'pipeline', 'cash'], tracker: 'all', period: 'month' },
+    order: ['pulse', 'attention', 'owners', 'projects', 'calendar', 'pipeline', 'clients', 'cash'], tracker: 'all', period: 'month' },
   sales:    { label: 'Sales & pipeline', desc: 'Proposals, wins and follow-ups',
-    order: ['pulse', 'pipeline', 'attention', 'done'], tracker: 'bd', period: 'quarter' },
+    order: ['pulse', 'pipeline', 'clients', 'attention', 'done'], tracker: 'bd', period: 'quarter' },
   delivery: { label: 'Delivery & operations', desc: 'Sessions, readiness, content, who is stuck',
-    order: ['calendar', 'ops', 'attention', 'content', 'owners'], tracker: 'ops', period: 'month' },
+    order: ['calendar', 'ops', 'consultants', 'attention', 'content', 'projects', 'owners'], tracker: 'ops', period: 'month' },
   cash:     { label: 'Cash & collections', desc: 'Invoices to raise, money to collect',
     order: ['pulse', 'cash', 'attention', 'done'], tracker: 'finance', period: 'quarter' },
 };
@@ -153,6 +160,9 @@ export default function FounderDashboard({ onRefreshed }) {
   const [cdt, setCdt] = useState(() => peekList('cdt') || []);
   const [leads, setLeads] = useState(() => peekList('leads') || []);
   const [vendors, setVendors] = useState(() => peekList('vendors') || []);
+  const [projTasks, setProjTasks] = useState(() => peekList('tasks') || []);
+  const [consultants, setConsultants] = useState(() => peekList('consultants') || []);
+  const [clients, setClients] = useState(() => peekClientDirectory());
   const [loading, setLoading] = useState(() => !(peekList('solution') && peekAllEngagements() && peekList('ops') && peekList('cdt')));
   const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState({});
@@ -179,13 +189,18 @@ export default function FounderDashboard({ onRefreshed }) {
       // Lead / Vendor trackers are optional until their flows are set up — skip quietly when not configured
       getLeads().then(setLeads).catch(e => { if (!/FLOW_NOT_CONFIGURED/.test(e?.message)) errs['Lead Tracker'] = e; }),
       getVendorServices().then(setVendors).catch(e => { if (!/FLOW_NOT_CONFIGURED/.test(e?.message)) errs['Vendor Services'] = e; }),
+      // Project Management / Consultant / Client directories — also optional until their flows exist
+      tasksConfigured() && getTasks().then(setProjTasks).catch(e => { errs['Project Management'] = e; }),
+      consultantsConfigured() && getConsultants().then(setConsultants).catch(e => { errs['Consultant Directory'] = e; }),
+      clientsConfigured() && getClientDirectory().then(setClients).catch(e => { errs['Client Directory'] = e; }),
     ]);
     setErrors(errs); setLoading(false); setRefreshing(false);
     onRefreshed?.(new Date().toLocaleTimeString());
   };
   useEffect(() => { load(); }, []);
 
-  const data = useMemo(() => ({ sol, eng, ops, cdt, leads, vendors }), [sol, eng, ops, cdt, leads, vendors]);
+  const data = useMemo(() => ({ sol, eng, ops, cdt, leads, vendors, tasks: projTasks, consultants, clients }),
+    [sol, eng, ops, cdt, leads, vendors, projTasks, consultants, clients]);
   const range = useMemo(() => periodRange(layout.period), [layout.period]);
   const tasks = useMemo(() => openTasks(data), [data]);
   const done = useMemo(() => completedWork(data), [data]);
@@ -193,6 +208,9 @@ export default function FounderDashboard({ onRefreshed }) {
   const cash = useMemo(() => cashSummary(eng, range), [eng, range]);
   const pipe = useMemo(() => pipelineSummary(sol, range), [sol, range]);
   const upcoming30 = useMemo(() => upcomingDeliveries(eng, ops, 30), [eng, ops]);
+  const clientSum = useMemo(() => clientSummary(clients, eng), [clients, eng]);
+  const projSum = useMemo(() => projectSummary(projTasks, range), [projTasks, range]);
+  const benchSum = useMemo(() => consultantSummary(consultants, eng, 30), [consultants, eng]);
 
   const overdue = useMemo(() => tasks.filter(t => t.days < 0), [tasks]);
   const soon = useMemo(() => tasks.filter(t => t.days >= 0 && t.days <= 7), [tasks]);
@@ -343,7 +361,7 @@ export default function FounderDashboard({ onRefreshed }) {
       const inP = done.filter(d => inRange(d.date, range));
       const groups = {};
       inP.forEach(d => { const k = d.tracker === 'ops' ? 'Ops checklist items' : d.label.split(':')[0]; groups[k] = groups[k] || { n: 0, amt: 0 }; groups[k].n++; groups[k].amt += d.amount || 0; });
-      const order = ['Session delivered', 'Proposal submitted', 'Invoice raised', 'Payment received', 'Lead converted to BD', 'Lead action', 'Vendor cost billed to client', 'Vendor paid', 'Ops checklist items', 'Content completed', 'Content Assets', 'Pre-Work', 'Post-Work'];
+      const order = ['Session delivered', 'Proposal submitted', 'Invoice raised', 'Payment received', 'Lead converted to BD', 'Lead action', 'Client interaction', 'Client action closed', 'Task completed', 'Vendor cost billed to client', 'Vendor paid', 'Ops checklist items', 'Content completed', 'Content Assets', 'Pre-Work', 'Post-Work', 'Consultant contract renewed'];
       return (
         <Section id="done" {...sp} right={<span className="fd-muted">{periodLabel}</span>} count={inP.length}>
           {inP.length ? (
@@ -392,7 +410,104 @@ export default function FounderDashboard({ onRefreshed }) {
               </tbody>
             </table>
           ) : <Empty>No open tasks</Empty>}
-          <div className="fd-muted fd-mt">Owner = the item's POC in the tracker (Ops item POC, Content POC, Invoice POC, lead consultant). Click a name to see their tasks.</div>
+          <div className="fd-muted fd-mt">Owner = the item's POC in the tracker (Ops item POC, Content POC, Invoice POC, lead consultant, task assignee, client account owner, consultant relationship owner). Click a name to see their tasks.</div>
+        </Section>
+      );
+    },
+
+    clients: () => {
+      const c = clientSum;
+      if (!clientsConfigured()) return <Section id="clients" {...sp}><Empty>Client Directory is not connected yet (CLIENTS_CRUD flow).</Empty></Section>;
+      const ago = d => (d ? `${daysBetween(d, todayIso())}d ago` : 'never');
+      return (
+        <Section id="clients" {...sp} count={c.watch.length}>
+          <div className="fd-stats fd-stats-4">
+            <Stat label="Existing clients" value={c.existing} sub={`${c.prospects} prospects · ${c.total} in directory`} tone="navy" />
+            <Stat label="At risk" value={c.atRisk} sub="amber / red health" tone={c.atRisk ? 'coral' : 'green'} />
+            <Stat label={`No contact ${c.coldDays}d+`} value={c.cold} sub="active / existing accounts" tone={c.cold ? 'gold' : 'green'} />
+            <Stat label="Follow-ups ≤ 7 days" value={c.followWeek} sub={`${c.openActions} open client actions`} tone="mauve" />
+          </div>
+          <div className="fd-flags">
+            {c.noOwner > 0 && <span className="fd-flag gold">{plural(c.noOwner, 'client')} without an account owner</span>}
+            {c.withDues > 0 && <span className="fd-flag coral">{fmtL(c.dues)} dues noted on {plural(c.withDues, 'client')}</span>}
+          </div>
+          <div className="fd-sub-title">Watch list · at risk or going cold</div>
+          {c.watch.length ? (
+            <ExpandList rows={c.watch.map(x => ({
+              id: 'cw' + x.id, main: x.name, sub: [x.type, x.owner ? `owner ${x.owner}` : 'no owner', `last contact ${ago(x.lastTouch)}`].filter(Boolean).join(' · '),
+              right: x.health ? `${x.health} health` : 'No contact', tone: x.health === 'Red' ? 'coral' : '',
+              details: [['Client', `${x.id} · ${x.name}`], ['Relationship', [x.status, x.health && `${x.health} health`].filter(Boolean).join(' · ')], ['Account owner', x.owner],
+                ['Last interaction', x.lastTouch], ['Next follow-up', x.next], ['Next action', x.nextAction], ['Open actions', String(x.openActions)],
+                ['Sessions in calendar', String(x.sessions)], ['Dues noted', rupee(x.outstanding)]],
+            }))} onOpen={() => open('clients')} openLabel="Open in Client Directory" />
+          ) : <Empty>No accounts at risk or going cold</Empty>}
+          {c.upcoming.length > 0 && <>
+            <div className="fd-sub-title">Follow-ups this week</div>
+            <ExpandList rows={c.upcoming.map(x => ({
+              id: 'cu' + x.id, main: x.name, sub: x.nextAction || 'Follow up', right: fmtD(x.next), tone: x.next < todayIso() ? 'coral' : '',
+              details: [['Client', `${x.id} · ${x.name}`], ['Next action', x.nextAction], ['Due', x.next], ['Account owner', x.owner], ['Last interaction', x.lastTouch]],
+            }))} onOpen={() => open('clients')} openLabel="Open in Client Directory" />
+          </>}
+        </Section>
+      );
+    },
+
+    projects: () => {
+      const p = projSum;
+      if (!tasksConfigured()) return <Section id="projects" {...sp}><Empty>Project Management is not connected yet (TASKS_CRUD flow).</Empty></Section>;
+      return (
+        <Section id="projects" {...sp} count={p.atRisk} right={<span className="fd-muted">done · {periodLabel}</span>}>
+          <div className="fd-stats fd-stats-4">
+            <Stat label="Active projects" value={p.activeProjects} sub={`${p.atRisk} at risk`} tone={p.atRisk ? 'coral' : 'navy'} />
+            <Stat label="Open tasks" value={p.open} sub={`${p.waiting} waiting on someone`} />
+            <Stat label="Overdue tasks" value={p.overdue} sub={`${p.dueWeek} due this week`} tone={p.overdue ? 'coral' : 'green'} onClick={() => { setLayout(l => ({ ...l, tracker: 'tasks' })); go('attention'); }} />
+            <Stat label="Tasks done" value={p.done} sub={periodLabel} tone="green" />
+          </div>
+          {p.projects.length ? (
+            <ExpandList rows={p.projects.map(x => ({
+              id: 'pj' + x.id, main: x.name, sub: [x.client, x.team, x.owner && `owner ${x.owner}`, x.due && `due ${fmtD(x.due)}`].filter(Boolean).join(' · '),
+              meter: x.pct, right: x.state === 'At risk' ? `${x.overdue} overdue` : x.state, tone: x.state === 'At risk' ? 'coral' : '',
+              details: [['Project', `${x.id} · ${x.name}`], ['Status', x.state], ['Progress', `${x.done} of ${x.total} tasks done (${x.pct}%)`], ['Open tasks', String(x.open)],
+                ['Overdue tasks', String(x.overdue)], ['Project owner', x.owner], ['Client', x.client], ['Team', x.team], ['Project due', x.due]],
+            }))} onOpen={() => open('tasks')} openLabel="Open in Project Management" />
+          ) : <Empty>No active projects</Empty>}
+        </Section>
+      );
+    },
+
+    consultants: () => {
+      const b = benchSum;
+      if (!consultantsConfigured()) return <Section id="consultants" {...sp}><Empty>Consultant Directory is not connected yet (CONSULTANTS_CRUD flow).</Empty></Section>;
+      const max = Math.max(1, ...b.bench.map(x => x.total));
+      return (
+        <Section id="consultants" {...sp} count={b.renewals.length}>
+          <div className="fd-stats fd-stats-4">
+            <Stat label="Active consultants" value={b.active} sub={`${b.onboarding} onboarding · ${b.total} listed`} tone="navy" />
+            <Stat label="Contracts valid" value={b.alerts.ok} tone="green" />
+            <Stat label="Renew / expired" value={b.alerts.renew + b.alerts.expired} sub={`${b.alerts.expired} expired`} tone={b.alerts.renew + b.alerts.expired ? 'coral' : 'green'} />
+            <Stat label="No contract date" value={b.alerts.none} tone={b.alerts.none ? 'gold' : 'green'} />
+          </div>
+          <div className="fd-sub-title">Sessions in the next {b.days} days · lead + co-consultant</div>
+          {b.bench.length ? (
+            <div className="fd-bars">
+              {b.bench.map(x => (
+                <div key={x.name} className="fd-bar-row" title={`${x.lead} as lead · ${x.co} as co-consultant${x.inDirectory ? '' : ' · not in the Consultant Directory'}`}>
+                  <span className="fd-bar-label">{x.name}{!x.inDirectory && ' *'}</span>
+                  <span className="fd-bar-track"><span className="fd-bar-fill navy" style={{ width: `${(x.total / max) * 100}%` }} /></span>
+                  <span className="fd-bar-val">{x.total}</span>
+                </div>
+              ))}
+            </div>
+          ) : <Empty>No sessions booked in the next {b.days} days</Empty>}
+          {b.notInDirectory > 0 && <div className="fd-muted fd-mt">* {plural(b.notInDirectory, 'name')} in the Engagement Calendar not found in the Consultant Directory (spelling or missing profile).</div>}
+          {b.renewals.length > 0 && <>
+            <div className="fd-sub-title">Contracts to renew</div>
+            <ExpandList rows={b.renewals.map(x => ({
+              id: 'cr' + x.id, main: x.name, sub: [x.id, x.type, x.owner && `owner ${x.owner}`].filter(Boolean).join(' · '),
+              right: x.alert === 'expired' ? `Expired ${fmtD(x.end)}` : `Ends ${fmtD(x.end)}`, tone: x.alert === 'expired' ? 'coral' : '',
+              details: [['Consultant', `${x.id} · ${x.name}`], ['Contract', x.type], ['Ends', x.end], ['Relationship owner', x.owner]],
+            }))} onOpen={() => open('consultants')} openLabel="Open in Consultant Directory" />
+          </>}
         </Section>
       );
     },

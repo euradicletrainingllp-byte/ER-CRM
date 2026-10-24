@@ -28,7 +28,7 @@ const SAVE_PERMISSIONS_URL = 'https://default018223f9187e4f9091b8a53275307c.d9.e
 const BOOL = v => String(v).toLowerCase() === 'true';
 
 // Page key → Excel column prefix
-const PAGE_PREFIX = {
+export const PAGE_PREFIX = {
   'dashboard':   'Dash',
   'bd':          'BD',
   'engagement':  'Eng',
@@ -45,6 +45,14 @@ const PAGE_PREFIX = {
 };
 const PAGES = Object.keys(PAGE_PREFIX);
 const OPS   = ['Create', 'Read', 'Update', 'Delete'];
+
+/** Every column PermissionsTable needs, in order (Email, Name, then 4 per page). */
+export const PERMISSION_COLUMNS = ['Email', 'Name', ...PAGES.flatMap(p => OPS.map(o => `${PAGE_PREFIX[p]}${o}`))];
+
+// Column names seen in the last GET (null until the first successful load).
+// Lets the Admin Panel show which columns are missing from the Excel table.
+let _seenColumns = null;
+export const seenPermissionColumns = () => _seenColumns;
 
 function emptyPageCrud() {
   return { create: false, read: false, update: false, delete: false };
@@ -94,8 +102,14 @@ export async function fetchPermissions() {
 
   const rows = await res.json();
   const perms = {};
+  const list = Array.isArray(rows) ? rows : (rows.value || []);
+  if (list.length) {
+    const cols = new Set();
+    list.forEach(r => Object.keys(r || {}).forEach(k => { if (!k.startsWith('@odata') && k !== 'ItemInternalId') cols.add(k); }));
+    _seenColumns = cols;
+  }
 
-  for (const row of Array.isArray(rows) ? rows : (rows.value || [])) {
+  for (const row of list) {
     const email = (row.Email || row.email || '').toLowerCase().trim();
     if (!email) continue;
 

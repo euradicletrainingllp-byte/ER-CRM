@@ -61,7 +61,7 @@ export function PermissionsProvider({ children }) {
 
   /**
    * Update permissions in state AND push to Excel via PA.
-   * Returns a promise so AdminPage can show a saving indicator.
+   * Resolves to { ok: true } or { ok: false, error } so the Admin Panel can report the result.
    */
   const updatePermissions = async (newPerms) => {
     const oldPerms = permissions;   // for the activity log
@@ -70,14 +70,23 @@ export function PermissionsProvider({ children }) {
     try {
       await savePermissions(newPerms);
       logPermissionChanges(oldPerms, newPerms, null);
+      return { ok: true };
     } catch (err) {
       setSaveError(err.message || 'Failed to save to Excel');
       logPermissionChanges(oldPerms, newPerms, err);
+      return { ok: false, error: err };
     }
   };
 
+  /** Re-read permissions from Excel (Admin Panel "verify" and "reload"). */
+  const reloadPermissions = async () => {
+    const perms = await fetchPermissions();
+    if (Object.keys(perms).length > 0) setPermissions(perms);
+    return perms;
+  };
+
   return (
-    <PermissionsContext.Provider value={{ permissions, updatePermissions, loading, saveError }}>
+    <PermissionsContext.Provider value={{ permissions, updatePermissions, reloadPermissions, loading, saveError }}>
       {children}
     </PermissionsContext.Provider>
   );
