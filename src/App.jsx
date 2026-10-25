@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { MsalProvider } from '@azure/msal-react';
 import { PublicClientApplication, EventType, InteractionType } from '@azure/msal-browser';
 import { msalConfig } from './config/authConfig.js';
@@ -14,13 +14,12 @@ import TaskTracker        from './pages/TaskTracker.jsx';
 import ConsultantDirectory from './pages/ConsultantDirectory.jsx';
 import ClientDirectory from './pages/ClientDirectory.jsx';
 import TaskFloat          from './components/TaskFloat.jsx';
-import EngagementCalendar from './pages/EngagementCalendar.jsx';
+import EngagementPage     from './pages/EngagementPage.jsx';
 import OpsChecklist          from './pages/OpsChecklist.jsx';
 import ContentDevelopmentTracker from './pages/ContentDevelopmentTracker.jsx';
 import FinanceTracker        from './pages/FinanceTracker.jsx';
 import SolutionTracker        from './pages/SolutionTracker.jsx';
 import AdminPage             from './pages/AdminPage.jsx';
-import ERCalendar            from './pages/ERCalendar.jsx';
 import NoAccessPage       from './pages/NoAccessPage.jsx';
 import { PermissionsProvider } from './context/PermissionsContext.jsx';
 import { usePermissions } from './hooks/usePermissions.js';
@@ -147,7 +146,7 @@ function Shell() {
             } />
             <Route path="/engagement" element={
               <PermissionRoute page="engagement">
-                <EngagementCalendar onRefreshed={setLastRefreshed} />
+                <EngagementPage onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
             <Route path="/ops" element={
@@ -170,11 +169,8 @@ function Shell() {
                 <SolutionTracker key="sol" view="sol" onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
-            <Route path="/er-calendar" element={
-              <PermissionRoute page="engagement">
-                <ERCalendar onRefreshed={setLastRefreshed} />
-              </PermissionRoute>
-            } />
+            {/* ER Calendar is now the "Calendar" view of the Engagement Calendar — keep old links working */}
+            <Route path="/er-calendar" element={<Navigate to="/engagement?view=calendar" replace />} />
             <Route path="/admin" element={<AdminPage />} />
           </Routes>
         </main>

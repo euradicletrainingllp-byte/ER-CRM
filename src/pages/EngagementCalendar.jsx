@@ -20,6 +20,7 @@ import { checklistForEngagement } from '../services/bdChecklistSync.js';
 import { onListChange, getOpsChecklist, getContentDevTracker, ecContractFields } from '../services/api.js';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, EC_RULES } from '../config/pendingFields.js';
+import CalendarView from './ERCalendar.jsx';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -624,7 +625,7 @@ const MAX_SPAN = 24;
 const rowKey = e => `${e.egId}|${e.sno}`;
 
 /* ─── Range navigator (Months / Year view) ──────────────────────────────── */
-function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan, onShift, onToday, onJumpMonth, onJumpYear, onChipClick }) {
+function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan, onShift, onToday, onJumpMonth, onJumpYear, onChipClick, leading }) {
   const [customOpen, setCustomOpen] = useState(!SPAN_OPTIONS.includes(span));
   const [draft, setDraft] = useState(String(span));
   useEffect(() => { setDraft(String(span)); }, [span]);
@@ -656,7 +657,9 @@ function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan,
       padding: '6px 12px', marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 6,
     }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        <span style={lbl}>📅 View:</span>
+        {leading}
+        {leading && <span style={{ width: 1, height: 20, background: '#e2e8f0', margin: '0 2px' }} />}
+        <span style={lbl}>📅 Period:</span>
         <div style={{ display: 'inline-flex', border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
           <button type="button" style={seg(viewMode === 'months')} onClick={() => onMode('months')} disabled={loading}>Months</button>
           <button type="button" style={seg(viewMode === 'year')}   onClick={() => onMode('year')}   disabled={loading}>Year</button>
@@ -802,7 +805,11 @@ const formToExcel = form => ({
 });
 
 /* ─── Main Page ─────────────────────────────────────────────────────────── */
-export default function EngagementCalendar({ onRefreshed }) {
+/**
+ * view       'list' (cards by month) | 'calendar' (month grids) — same data, same range, same filters
+ * viewSwitch element rendered at the start of the range bar (List / Calendar switch)
+ */
+export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwitch = null }) {
   const location = useLocation();
 
   // View: 'months' (N months starting at `start`) or 'year' (Jan–Dec of start.year)
@@ -1070,7 +1077,7 @@ export default function EngagementCalendar({ onRefreshed }) {
   // Auto-scroll the next upcoming delivery to the middle of the screen
   // (once per range, and again whenever "Today" / "Next up" is clicked)
   useEffect(() => {
-    if (rangeLoading || !nextUpKey) return;
+    if (view !== 'list' || rangeLoading || !nextUpKey) return;
     const token = `${win.from}|${win.to}|${scrollNonce}`;
     if (scrolledFor.current === token) return;
     const el = cardRefs.current[nextUpKey];
@@ -1078,7 +1085,14 @@ export default function EngagementCalendar({ onRefreshed }) {
     scrolledFor.current = token;
     const raf = requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
     return () => cancelAnimationFrame(raf);
-  }, [rangeLoading, nextUpKey, win.from, win.to, scrollNonce]);
+  }, [view, rangeLoading, nextUpKey, win.from, win.to, scrollNonce]);
+
+  // Calendar view: open on (and "Today" returns to) the current month
+  useEffect(() => {
+    if (view !== 'calendar' || rangeLoading) return;
+    const t = setTimeout(() => monthRefs.current[todayISO().slice(0, 7)]?.scrollIntoView({ block: 'start' }), 30);
+    return () => clearTimeout(t);
+  }, [view, rangeLoading, win.from, win.to, scrollNonce]);
 
   /* ── Writes ── */
 
@@ -1201,10 +1215,11 @@ export default function EngagementCalendar({ onRefreshed }) {
         onJumpMonth={jumpMonth}
         onJumpYear={jumpYear}
         onChipClick={scrollToMonth}
+        leading={viewSwitch}
       />
 
-      {/* ── KPI Row ── */}
-      <div className="kpi-compact">
+      {/* ── KPI Row (list view; the calendar shows counts per month) ── */}
+      {view === 'list' && <div className="kpi-compact">
         <div className="kpi-card accent">
           <div className="kpi-label">Filtered Sessions</div>
           <div className="kpi-value">{rangeLoading ? '…' : filtered.length}</div>
@@ -1223,7 +1238,7 @@ export default function EngagementCalendar({ onRefreshed }) {
           <div className="kpi-label">Delivered</div>
           <div className="kpi-value">{rangeLoading ? '…' : filtered.filter(e => e.status === 'Delivered').length}</div>
         </div>
-      </div>
+      </div>}
 
       {!rangeLoading && !error && (
         <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={canEdit('engagement')} storageKey="engagement" noun="engagement" />
@@ -1234,7 +1249,7 @@ export default function EngagementCalendar({ onRefreshed }) {
           {syncing && !rangeLoading && (
             <span style={{ fontSize: 11, fontWeight: 600, color: '#e8760a' }}>⟳ Syncing with Excel…</span>
           )}
-          {nextUpKey && (
+          {nextUpKey && view === 'list' && (
             <button className="btn btn-outline btn-sm" onClick={() => setScrollNonce(n => n + 1)} title="Scroll to the next upcoming delivery">
               ⏭ Next up
             </button>
@@ -1259,8 +1274,8 @@ export default function EngagementCalendar({ onRefreshed }) {
           )}
       </CollapsibleFilterBar>
 
-      {/* ── Column header labels ── */}
-      <div style={{
+      {/* ── Column header labels (list view) ── */}
+      {view === 'list' && <div style={{
         display: 'grid',
         gridTemplateColumns: '100px 50px minmax(0,1fr) 120px 120px 160px 120px 108px 22px',
         gap: '0 16px',
@@ -1272,7 +1287,7 @@ export default function EngagementCalendar({ onRefreshed }) {
             {h}
           </div>
         ))}
-      </div>
+      </div>}
 
       {/* Thin progress bar instead of covering the page */}
       <div className={`ec-syncbar${syncing ? ' on' : ''}`} />
@@ -1284,6 +1299,14 @@ export default function EngagementCalendar({ onRefreshed }) {
           <ErrorState error={error} onRetry={() => load({ force: true })} />
         ) : rangeLoading ? (
           <SkeletonCards />
+        ) : view === 'calendar' ? (
+          <CalendarView
+            months={win.months}
+            rows={filtered}
+            undated={filtered.filter(e => !e.startDate).length}
+            onEdit={canEdit('engagement') ? setEditRow : undefined}
+            monthRef={(key, el) => { monthRefs.current[key] = el; }}
+          />
         ) : filtered.length === 0 ? (
           <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, padding: '52px 0', textAlign: 'center', color: '#64748b', fontSize: 14 }}>
             {windowRows.length === 0
@@ -1336,7 +1359,7 @@ export default function EngagementCalendar({ onRefreshed }) {
           ))
         )}
 
-        {!error && !rangeLoading && filtered.length > 0 && (
+        {!error && !rangeLoading && filtered.length > 0 && view === 'list' && (
           <div style={{ textAlign: 'center', padding: '14px 0', fontSize: 12, color: '#94a3b8' }}>
             Showing {filtered.length} engagement{filtered.length !== 1 ? 's' : ''} for {rangeLabel}.
             Use “Previous / Next” or change the view to see other periods.

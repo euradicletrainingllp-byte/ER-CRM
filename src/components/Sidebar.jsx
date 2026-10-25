@@ -16,7 +16,6 @@ const NAV = [
   { path: '/vendors',     page: 'vendors',    icon: '🧾', label: 'Vendor Services'     },
   { path: '/clients',     page: 'clients',    icon: '🏢', label: 'Client Directory'    },
   { path: '/consultants', page: 'consultants',icon: '🧑‍🏫', label: 'Consultant Directory' },
-  { path: '/er-calendar',  page: 'engagement',  icon: '🗓️', label: 'ER Calendar'         },
 ];
 
 export default function Sidebar() {
