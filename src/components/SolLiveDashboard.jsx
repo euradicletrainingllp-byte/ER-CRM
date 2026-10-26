@@ -5,10 +5,11 @@
  *   FY 2025-26         → fixed numbers from Dashboard Report Data (12 Oct 2026), see dashboardBaseline.js
  *
  * Live definitions
- *   Proposal       one Proposal ID (several versions count once; the latest version supplies value / status)
+ *   Proposal       one proposal line = Proposal ID + version, same as the BD Tracker page (a revision counts again,
+ *                  in its own month, with its own value)
  *   Opportunity    one BD S No (a row without a BD S No counts by its Proposal ID) — used for Industry
  *   Value          Solution Value → BD Proposal Value (first one filled); "12,50,000", "12.5 L", "1.2 Cr" all work
- *   Proposal date  Date of Submission to Client → by Sol team → Date of Discussion → Solution Month → BD Month
+ *   Proposal date  Date of Discussion → BD Month → Date of Submission to Client → by Sol team → Solution Month
  *   Status         BD Status Won / Closed / Confirmed → Closed · Lost / Dropped / Rejected → Lost · else In Process
  */
 import { useMemo } from 'react';
@@ -16,7 +17,7 @@ import {
   ChartBox, Kpi, SourceNote, NV, TL, GD, GN, RD, PU, bOpts, dlNum, dlInr, dlStack, dlStackInr, dlH, dlInrH, fmtInr, fmtShort, inrAxis, heightFor,
   CURRENT_FY, fyStartOf, fyLong, fyTiny, pad2, clean, keyOf,
 } from './erdCharts.jsx';
-import { buildProposals, monthSlot } from './proposalData.js';
+import { buildProposalLines, monthSlot, uniqueProposals } from './proposalData.js';
 import { LIVE_FROM_FY, SOL_BASELINE } from '../config/dashboardBaseline.js';
 
 const NR = 'Not recorded';
@@ -95,7 +96,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
   /* Live proposals — one per Proposal ID, latest version wins */
   // A proposal has several rows in the Solution Tracker (the BD line + one per solution item).
   // Use the latest version, and for every field take the first row of that version that has it filled.
-  const allProposals = useMemo(() => buildProposals(solutions), [solutions]);
+  const allProposals = useMemo(() => buildProposalLines(solutions), [solutions]);
   const proposals = useMemo(() => allProposals.filter(p => p.fy >= LIVE_FROM_FY), [allProposals]);
 
   /* Live data check — explains empty charts */
@@ -103,7 +104,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
     const cur = proposals.filter(p => p.fy === CURRENT_FY);
     const miss = k => cur.filter(p => !clean(p[k])).length;
     return {
-      total: allProposals.length, cur: cur.length, undated: allProposals.filter(p => p.undated).length,
+      total: allProposals.length, unique: uniqueProposals(allProposals), cur: cur.length, curUnique: uniqueProposals(cur), undated: allProposals.filter(p => p.undated).length,
       byFy: Object.entries(allProposals.reduce((m, p) => { m[p.fy] = (m[p.fy] || 0) + 1; return m; }, {})).sort((a, b) => b[0] - a[0]),
       missing: [['Industry', miss('industry')], ['Development Category', miss('developmentCategory')], ['Engagement Type', miss('engagementType')],
         ['Line of Service', miss('lineOfService')], ['Type of Service', miss('typeOfService')], ['Program Type', miss('customization')], ['Value', cur.filter(p => !p.value).length]]
@@ -141,7 +142,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
       const monthly = Array(12).fill(0);
       ps.forEach(p => { monthly[monthSlot(p)] += 1; });
       out[y] = {
-        summary: { total: ps.length, closed: ps.filter(p => p.pipeline === 'closed').length,
+        summary: { total: ps.length, unique: uniqueProposals(ps), closed: ps.filter(p => p.pipeline === 'closed').length,
           lost: ps.filter(p => p.pipeline === 'lost').length, process: ps.filter(p => p.pipeline === 'process').length },
         industry: groupMix([...opps.values()], o => o.industry),
         lineOfService: groupMix(ps, p => p.lineOfService),
@@ -248,7 +249,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
       <SourceNote live={`${fyLong(LIVE_FROM_FY)} onward from the Solution Tracker`} fixed="FY 2025-26 from Dashboard Report Data (12 Oct 2026)" />
 
       <div className="kg g4">
-        <Kpi tone="tl" label={`FY ${curTiny} Total Proposals`} value={Cd.summary?.total ?? 0} sub="Submitted this financial year" />
+        <Kpi tone="tl" label={`FY ${curTiny} Total Proposals`} value={Cd.summary?.total ?? 0} sub={Cd.summary ? `${Cd.summary.unique} unique proposals${Cd.summary.total > Cd.summary.unique ? ` · ${Cd.summary.total - Cd.summary.unique} revisions` : ''}` : 'Submitted this financial year'} />
         <Kpi tone="gn" label="Journey Engagements" value={journey.curCount} sub={engTotal > 0 ? `${Math.round((journey.curCount / engTotal) * 100)}% of ${engTotal} total` : '--'} tag="Demand shift" tagTone="up" />
         <Kpi tone="gd" label="Top Industry" value={topInd?.curCount ? topInd.label : '--'} sub={topInd?.curCount ? `${topInd.curCount} opportunities this FY` : 'most active sector'} />
         <Kpi tone="nv" label="Customization Rate" value={`${custTotal ? Math.round((custRow.curCount / custTotal) * 100) : 0}%`} sub={`${custRow.curCount} of ${custTotal} proposals`} tag="Fully custom" />
@@ -335,8 +336,9 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
         <div className="card"><h3>Live Data Check — Solution Tracker</h3><div className="cs">How the Solution Tracker rows are counted — month = Date of Discussion, else BD Month (same as the BD Tracker page)</div>
           <table className="mt">
             <tbody>
-              <tr><td>Proposals in the Solution Tracker (unique Proposal IDs)</td><td className="nr">{check.total}</td></tr>
-              <tr><td>Counted in {curLabel}</td><td className="nr">{check.cur}</td></tr>
+              <tr><td>Proposal lines in the Solution Tracker (each version counts, as on the BD Tracker)</td><td className="nr">{check.total}</td></tr>
+              <tr><td>Unique Proposal IDs</td><td className="nr">{check.unique}</td></tr>
+              <tr><td>Counted in {curLabel} (lines · unique)</td><td className="nr">{check.cur} · {check.curUnique}</td></tr>
               <tr><td>No date at all — counted in {curLabel} (fill Date of Discussion)</td><td className="nr" style={{ color: check.undated ? RD : undefined }}>{check.undated}</td></tr>
               {check.byFy.map(([y, n]) => (
                 <tr key={y}><td>Proposals dated in {fyLong(+y)}{+y < LIVE_FROM_FY ? ' (shown in the fixed Excel figures instead)' : ''}</td><td className="nr">{n}</td></tr>

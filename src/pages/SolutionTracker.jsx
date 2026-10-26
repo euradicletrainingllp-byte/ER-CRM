@@ -154,6 +154,7 @@ function bdYearMonth(r) {
   return { y, m: mi >= 0 ? mi + 1 : 0 };
 }
 const toNum = v => Number(String(v ?? '').replace(/[^0-9.]/g, '')) || 0;
+const lineValue = r => toNum(r.bdProposalValue) || (r._sols || []).reduce((t, x) => t + toNum(x.solutionValue), 0);
 const fmtL  = n => (n > 0 ? '₹' + (n / 100000).toFixed(1) + 'L' : '₹0');
 const fmtIN = n => (n > 0 ? '₹' + Math.round(n).toLocaleString('en-IN') : '—');
 const solVals = (r, k) => (r._sols || []).map(s => s[k]);
@@ -1027,8 +1028,14 @@ export default function SolutionTracker({ onRefreshed, view }) {
     all:      new Set(allBdRows.map(r => r.proposalId)).size,
     lines:    bdRows.length,
     allLines: allBdRows.length,
-    value:    kpiRows.reduce((t, r) => t + toNum(r.bdProposalValue), 0),
-    wonValue: kpiRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + toNum(r.bdProposalValue), 0),
+    // Line counts (each version counts) — same as the Sales / Solutioning dashboards
+    wonLines:  bdRows.filter(r => r.bdStatus === 'Won').length,
+    lostLines: bdRows.filter(r => r.bdStatus === 'Lost').length,
+    ipLines:   bdRows.filter(r => r.bdStatus === 'In Process').length,
+    // Value — same rule as the Sales / Solutioning dashboards: BD Proposal Value, else the line's Solution Values
+    // added up; every line (version) adds its own value, like the Total Proposals count
+    value:    bdRows.reduce((t, r) => t + lineValue(r), 0),
+    wonValue: bdRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + lineValue(r), 0),
     clients:  new Set(kpiRows.map(r => r.clientName).filter(Boolean)).size,
     won:      kpiRows.filter(r => r.bdStatus === 'Won').length,
     lost:     kpiRows.filter(r => r.bdStatus === 'Lost').length,
@@ -1374,8 +1381,8 @@ export default function SolutionTracker({ onRefreshed, view }) {
           {view === 'bd' ? (
             <div className="kpi-card blue">
               <div className="kpi-label">In Process</div>
-              <div className="kpi-value">{loading ? '…' : kpi.inProc}</div>
-              <div className="kpi-sub">{kpi.lost} lost</div>
+              <div className="kpi-value">{loading ? '…' : kpi.ipLines}</div>
+              <div className="kpi-sub">{kpi.inProc} unique · {kpi.lostLines} lost ({kpi.lost} unique)</div>
             </div>
           ) : (
             <div className="kpi-card blue">
@@ -1386,8 +1393,8 @@ export default function SolutionTracker({ onRefreshed, view }) {
           )}
           <div className="kpi-card purple">
             <div className="kpi-label">Won</div>
-            <div className="kpi-value">{loading ? '…' : kpi.won}</div>
-            <div className="kpi-sub">{decided ? `${winRate}% win rate · ${fmtL(kpi.wonValue)}` : 'No closed proposals'}</div>
+            <div className="kpi-value">{loading ? '…' : (view === 'bd' ? kpi.wonLines : kpi.won)}</div>
+            <div className="kpi-sub">{view === 'bd' ? `${kpi.won} unique · ` : ''}{decided ? `${winRate}% win rate · ${fmtL(kpi.wonValue)}` : 'No closed proposals'}</div>
           </div>
         </div>
 

@@ -3,6 +3,8 @@
  *
  * Sources
  *   Proposals, funnel, pipeline, order booked     → BD Tracker (BD lines of the Solution Tracker), live
+ *     counted like the BD Tracker page: every proposal line (V1, V2 …) in its own month, count and value
+ *     alike; order book and pipeline list use the latest version only (see proposalData.js)
  *   Monthly / quarterly revenue, targets achieved  → Engagement Calendar "Price (INR)", live, by session start month
  *   Clients engaged per FY                         → Engagement Calendar, live from FY 2026-27
  *   Earlier years (quarterly revenue, client list) → fixed, Dashboard Report Data (12 Oct 2026)
@@ -16,7 +18,7 @@ import {
   ChartBox, Kpi, SourceNote, NV, TL, GD, GN, PU, RD, bOpts, dlInr, dlStack, dlStackInr, dlInrH, fmtInr, fmtShort, inrAxis, heightFor,
   CURRENT_FY, fyStartOf, fyLong, fyTiny, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
-import { buildProposals, monthSlot } from './proposalData.js';
+import { buildProposalLines, monthSlot, uniqueProposals } from './proposalData.js';
 import { LIVE_FROM_FY, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
 
 const MONTHS = ['April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
@@ -39,7 +41,8 @@ function topicMatch(a, b) {
 }
 
 export default function SalesLiveDashboard({ solutions, engagements, refreshing }) {
-  const proposals = useMemo(() => buildProposals(solutions).filter(p => p.fy >= LIVE_FROM_FY), [solutions]);
+  // Proposal lines (each version counts, in its own month) — same logic as the BD Tracker page
+  const proposals = useMemo(() => buildProposalLines(solutions).filter(p => p.fy >= LIVE_FROM_FY), [solutions]);
   const curProps = useMemo(() => proposals.filter(p => p.fy === CURRENT_FY), [proposals]);
 
   // Engagement Calendar sessions that count as revenue
@@ -96,7 +99,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
 
   /* ── Order book: Won proposals vs Engagement Calendar sessions ── */
   const orderBook = useMemo(() => {
-    const won = proposals.filter(p => p.pipeline === 'closed');
+    const won = proposals.filter(p => p.isLatest && p.pipeline === 'closed');
     const rows = won.map(p => ({ p, booked: p.value, delivered: 0, confirmed: 0, curFy: p.fy === CURRENT_FY }));
     sessions.forEach(e => {
       const link = clean(e.proposalLink);
@@ -119,7 +122,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
     { booked: 0, delivered: 0, confirmed: 0, balance: 0 });
 
   /* ── Expected major pipeline: open (In Process) proposals by value ── */
-  const pipeline = useMemo(() => proposals.filter(p => p.pipeline === 'process' && p.value > 0)
+  const pipeline = useMemo(() => proposals.filter(p => p.isLatest && p.pipeline === 'process' && p.value > 0)
     .sort((a, b) => b.value - a.value).slice(0, 8), [proposals]);
 
   /* ── Client engagement by FY ── */
@@ -214,7 +217,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
                   fixed="earlier quarterly revenue, targets and client history from Dashboard Report Data (12 Oct 2026)" />
 
       <div className="kg g5">
-        <Kpi tone="tl" label="Total Proposals (YTD)" value={tot.n} sub={propStatus.filter(r => r.n).map(r => r.month).join(' + ') || 'this financial year'} />
+        <Kpi tone="tl" label="Total Proposals (YTD)" value={tot.n} sub={`${uniqueProposals(curProps)} unique proposals${tot.n > uniqueProposals(curProps) ? ` · ${tot.n - uniqueProposals(curProps)} revisions` : ''}`} />
         <Kpi tone="gn" label="Won Value (YTD)" value={fmtInr(tot.wonV)} sub={`${tot.wonC} proposals won`} tag="Closed" tagTone="up" />
         <Kpi tone="gd" label="In-Process Value" value={fmtInr(tot.ipV)} sub={`${tot.ipC} proposals active`} tag="In negotiation" />
         <Kpi tone="nv" label={`${curTarget?.q || `Q${curQ + 1}`} Target Achieved`} value={curTarget?.target ? `${curTarget.pct.toFixed(1)}%` : '--'}
