@@ -1026,6 +1026,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
     total:    kpiRows.length,
     all:      new Set(allBdRows.map(r => r.proposalId)).size,
     lines:    bdRows.length,
+    allLines: allBdRows.length,
     value:    kpiRows.reduce((t, r) => t + toNum(r.bdProposalValue), 0),
     wonValue: kpiRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + toNum(r.bdProposalValue), 0),
     clients:  new Set(kpiRows.map(r => r.clientName).filter(Boolean)).size,
@@ -1340,11 +1341,23 @@ export default function SolutionTracker({ onRefreshed, view }) {
 
         {/* KPI Row */}
         <div className="kpi-compact">
-          <div className="kpi-card accent">
-            <div className="kpi-label">Filtered Proposals</div>
-            <div className="kpi-value">{loading ? '…' : kpi.total}</div>
-            <div className="kpi-sub">of {kpi.all} total{kpi.lines > kpi.total ? ` · ${kpi.lines} lines incl. revisions` : ''}</div>
-          </div>
+          {view === 'bd' ? (
+            <div className="kpi-card accent">
+              <div className="kpi-label">Total Proposals</div>
+              <div className="kpi-value">{loading ? '…' : kpi.lines}</div>
+              <div className="kpi-sub">
+                {kpi.total} unique proposal{kpi.total === 1 ? '' : 's'}
+                {kpi.lines > kpi.total ? ` · ${kpi.lines - kpi.total} revision${kpi.lines - kpi.total === 1 ? '' : 's'}` : ''}
+                {kpi.lines < kpi.allLines ? ` · of ${kpi.allLines} total` : ''}
+              </div>
+            </div>
+          ) : (
+            <div className="kpi-card accent">
+              <div className="kpi-label">Filtered Proposals</div>
+              <div className="kpi-value">{loading ? '…' : kpi.total}</div>
+              <div className="kpi-sub">of {kpi.all} total{kpi.lines > kpi.total ? ` · ${kpi.lines} lines incl. revisions` : ''}</div>
+            </div>
+          )}
           {view === 'bd' ? (
             <div className="kpi-card green">
               <div className="kpi-label">Proposal Value</div>
@@ -1358,11 +1371,19 @@ export default function SolutionTracker({ onRefreshed, view }) {
               <div className="kpi-sub">Value {fmtIN(kpi.solValue)}</div>
             </div>
           )}
-          <div className="kpi-card blue">
-            <div className="kpi-label">Unique Clients</div>
-            <div className="kpi-value">{loading ? '…' : kpi.clients}</div>
-            <div className="kpi-sub">{kpi.inProc} in process</div>
-          </div>
+          {view === 'bd' ? (
+            <div className="kpi-card blue">
+              <div className="kpi-label">In Process</div>
+              <div className="kpi-value">{loading ? '…' : kpi.inProc}</div>
+              <div className="kpi-sub">{kpi.lost} lost</div>
+            </div>
+          ) : (
+            <div className="kpi-card blue">
+              <div className="kpi-label">Unique Clients</div>
+              <div className="kpi-value">{loading ? '…' : kpi.clients}</div>
+              <div className="kpi-sub">{kpi.inProc} in process</div>
+            </div>
+          )}
           <div className="kpi-card purple">
             <div className="kpi-label">Won</div>
             <div className="kpi-value">{loading ? '…' : kpi.won}</div>
