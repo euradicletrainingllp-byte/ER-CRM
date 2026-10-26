@@ -543,8 +543,10 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
   };
 
 
-  const completed = data.filter(r => r.completionDate && r.completionDate !== '—').length;
-  const pending   = data.length - completed;
+  // KPIs follow the search / status filter (same rows and same "completed" test as the list)
+  const isDoneRow = r => { const d = String(r.completionDate ?? '').trim(); return !!(d && d !== '—'); };
+  const completed = filtered.filter(isDoneRow).length;
+  const pending   = filtered.length - completed;
 
   if (loading) return <LoadingState message="Loading Content Dev Tracker from OneDrive…" />;
   if (error)   return <ErrorState error={error} onRetry={load} />;
@@ -562,11 +564,11 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
 
       {/* KPIs */}
       <div className="kpi-compact">
-        <div className="kpi-card accent"><div className="kpi-label">Total Entries</div><div className="kpi-value">{data.length}</div></div>
+        <div className="kpi-card accent"><div className="kpi-label">{filtered.length === data.length ? 'Total Entries' : 'Filtered Entries'}</div><div className="kpi-value">{filtered.length}</div>{filtered.length !== data.length && <div className="kpi-sub">of {data.length} total</div>}</div>
         <div className="kpi-card green"><div className="kpi-label">Completed</div><div className="kpi-value">{completed}</div></div>
         <div className="kpi-card blue"><div className="kpi-label">Pending</div><div className="kpi-value">{pending}</div></div>
         <div className="kpi-card purple"><div className="kpi-label">This Month</div><div className="kpi-value">
-          {data.filter(r => { if(!r.startDate) return false; const d=new Date(r.startDate); return d.getMonth()===new Date().getMonth()&&d.getFullYear()===new Date().getFullYear(); }).length}
+          {filtered.filter(r => { if(!r.startDate) return false; const d=new Date(r.startDate); return d.getMonth()===new Date().getMonth()&&d.getFullYear()===new Date().getFullYear(); }).length}
         </div></div>
       </div>
 

@@ -312,7 +312,15 @@ export default function VendorTracker({ onRefreshed }) {
 
   const sel = selected ? data.find(v => v.serviceId === selected) : null;
   const sum = (list, f) => list.reduce((t, v) => t + f(v), 0);
-  const billList = data.filter(toBill), payList = data.filter(toPay), awaitList = data.filter(v => v.paymentStatus === 'Invoice awaited');
+  // KPIs (and the quick-tab counts) follow search, category and month. The quick tabs themselves are
+  // not applied to the cards — they are the same breakdown, so applying them would zero the others.
+  const kpiBase = useMemo(() => {
+    const q = norm(search);
+    return data.filter(v => (!q || [v.serviceId, v.vendorName, v.description, v.client, v.program, v.egId, v.vendorInvoiceNo, v.clientInvoiceRef].some(x => norm(x).includes(q)))
+      && (catF === 'All' || v.category === catF) && (monthF === 'All' || String(v.serviceDate).startsWith(monthF)));
+  }, [data, search, catF, monthF]);
+  const billList = kpiBase.filter(toBill), payList = kpiBase.filter(toPay), awaitList = kpiBase.filter(v => v.paymentStatus === 'Invoice awaited');
+  const costMonth = monthF !== 'All' ? monthF : todayIso().slice(0, 7);
 
   /* writes */
   const save = async (v, isNew) => {
@@ -359,7 +367,7 @@ export default function VendorTracker({ onRefreshed }) {
   if (loading) return <LoadingState message="Loading Vendor Service Tracker from Excel…" />;
   if (error) return <ErrorState error={error} onRetry={load} />;
 
-  const quickCount = { all: data.length, tobill: billList.length, awaited: awaitList.length, topay: payList.length, done: data.filter(v => !toBill(v) && v.paymentStatus === 'Paid').length };
+  const quickCount = { all: kpiBase.length, tobill: billList.length, awaited: awaitList.length, topay: payList.length, done: kpiBase.filter(v => !toBill(v) && v.paymentStatus === 'Paid').length };
 
   return (
     <div className="tracker-page">
@@ -371,7 +379,7 @@ export default function VendorTracker({ onRefreshed }) {
         <div className="kpi-card"><div className="kpi-label">To bill client</div><div className="kpi-value" style={{ color: billList.length ? 'var(--error)' : undefined }}>{inr(sum(billList, v => Number(v.total) || 0))}</div><div className="kpi-sub">{billList.length} billable services not billed</div></div>
         <div className="kpi-card"><div className="kpi-label">To pay vendors</div><div className="kpi-value">{inr(sum(payList, balance))}</div><div className="kpi-sub">{payList.length} invoice{payList.length === 1 ? "" : "s"} unpaid</div></div>
         <div className="kpi-card"><div className="kpi-label">Vendor invoices awaited</div><div className="kpi-value">{awaitList.length}</div><div className="kpi-sub">{inr(sum(awaitList, v => Number(v.total) || 0))} expected</div></div>
-        <div className="kpi-card accent"><div className="kpi-label">Vendor cost this month</div><div className="kpi-value">{inr(sum(data.filter(v => String(v.serviceDate).slice(0, 7) === todayIso().slice(0, 7)), v => Number(v.total) || 0))}</div><div className="kpi-sub">{data.length} services in total</div></div>
+        <div className="kpi-card accent"><div className="kpi-label">{monthF !== 'All' ? `Vendor cost · ${monthF}` : 'Vendor cost this month'}</div><div className="kpi-value">{inr(sum(kpiBase.filter(v => String(v.serviceDate).slice(0, 7) === costMonth), v => Number(v.total) || 0))}</div><div className="kpi-sub">{kpiBase.length !== data.length ? `${kpiBase.length} filtered · ` : ''}{data.length} services in total</div></div>
       </div>
 
       <div className="filter-bar lv-filters" style={{ flexShrink: 0 }}>

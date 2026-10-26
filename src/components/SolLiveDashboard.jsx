@@ -96,7 +96,8 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
   /* Live proposals — one per Proposal ID, latest version wins */
   // A proposal has several rows in the Solution Tracker (the BD line + one per solution item).
   // Use the latest version, and for every field take the first row of that version that has it filled.
-  const allProposals = useMemo(() => buildProposalLines(solutions), [solutions]);
+  // Value = Solution Values only (same as the Solution Tracker — no BD Proposal Value)
+  const allProposals = useMemo(() => buildProposalLines(solutions).map(p => ({ ...p, value: p.solValue })), [solutions]);
   const proposals = useMemo(() => allProposals.filter(p => p.fy >= LIVE_FROM_FY), [allProposals]);
 
   /* Live data check — explains empty charts */

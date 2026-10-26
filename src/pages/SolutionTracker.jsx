@@ -41,7 +41,7 @@ function bdLinkFor(rows, pid, version) {
 // ── Proposal versions (V1, V2 …) ─────────────────────────────────────────────
 // Each revised version of a proposal is its own Excel row with the same Proposal ID.
 const versionNo = v => { const m = String(v ?? '').match(/(\d+)/); return m ? Number(m[1]) : 1; };
-// Serial shown for a BD line: the proposal's BD S No (shared by all its versions)
+// Serial shown for a BD line: its position in BD-month order (each version is its own line and number)
 const bdNoOf = r => r?._bdNo ?? (r?.bdSNo || r?.sno);
 // The row that represents the latest version of a proposal (prefers the BD anchor row of that version)
 function latestRowFor(rows, pid) {
@@ -125,7 +125,6 @@ const SOL_EXPORT_COLUMNS = [
   { label: 'Client Name',          get: r => r.clientName },
   { label: 'Program Topic',        get: r => r.programTopic },
   { label: 'BD Status',            get: r => r.bdStatus },
-  { label: 'BD Proposal Value',    get: r => (toNum(r.bdProposalValue) || r.bdProposalValue || '') },
   { label: 'Sol S No',             get: r => r.solSNo },
   { label: 'Solution Month',       get: r => r.solutionMonth },
   { label: 'Solution Topic',       get: r => r.solutionTopic },
@@ -154,7 +153,31 @@ function bdYearMonth(r) {
   return { y, m: mi >= 0 ? mi + 1 : 0 };
 }
 const toNum = v => Number(String(v ?? '').replace(/[^0-9.]/g, '')) || 0;
-const lineValue = r => toNum(r.bdProposalValue) || (r._sols || []).reduce((t, x) => t + toNum(x.solutionValue), 0);
+// Sort key (year*12 + month) of a BD line, from its BD Month ("Sep 2026", "Sept", "April"), else its dates.
+// A month without a year takes the year of the line's Date of Discussion, else the current FY
+// (Apr–Dec → FY start year, Jan–Mar → the year after). No month at all → end of the list.
+const fyStartYear = () => { const d = new Date(); return d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; };
+function lineMonthKey(rows) {
+  const iso = rows.map(r => String(r.dateOfDiscussion || '')).find(d => /^\d{4}-\d{2}/.test(d)) || '';
+  for (const r of rows) {
+    const t = String(r.bdMonth || '').trim();
+    const mi = MONTHS_SHORT.findIndex(mm => t.toLowerCase().startsWith(mm.toLowerCase()));
+    if (mi < 0) continue;
+    const y = Number((t.match(/(19|20)\d{2}/) || [''])[0])
+      || (iso && Number(iso.slice(5, 7)) === mi + 1 ? Number(iso.slice(0, 4)) : 0)
+      || (mi >= 3 ? fyStartYear() : fyStartYear() + 1);
+    return y * 12 + mi;
+  }
+  const d = iso || rows.map(r => String(r.submissionToClient || r.submissionBySolTeam || '')).find(x => /^\d{4}-\d{2}/.test(x)) || '';
+  return d ? Number(d.slice(0, 4)) * 12 + Number(d.slice(5, 7)) - 1 : Infinity;
+}
+const MONTHS_LONG = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const monthHeading = k => (Number.isFinite(k) ? `${MONTHS_LONG[k % 12]} ${Math.floor(k / 12)}` : 'No BD Month');
+const pidNum = pid => { const m = String(pid || '').match(/(\d+)/); return m ? Number(m[1]) : Infinity; };
+// BD view uses only the BD Proposal Value; Solution view uses only the Solution Values of the line's items.
+// (No fallback from one to the other — each tracker shows its own figures.)
+const lineValue = r => toNum(r.bdProposalValue);
+const solValueOf = r => (r._sols || []).reduce((t, x) => t + toNum(x.solutionValue), 0);
 const fmtL  = n => (n > 0 ? '₹' + (n / 100000).toFixed(1) + 'L' : '₹0');
 const fmtIN = n => (n > 0 ? '₹' + Math.round(n).toLocaleString('en-IN') : '—');
 const solVals = (r, k) => (r._sols || []).map(s => s[k]);
@@ -171,7 +194,8 @@ const BD_FILTER_COLUMNS = [
   { key: 'value',    label: 'Proposal Value', get: r => (r.bdProposalValue ? String(r.bdProposalValue) : ''), sortBy: r => toNum(r.bdProposalValue) },
 ];
 const SOL_FILTER_COLUMNS = [
-  ...BD_FILTER_COLUMNS,
+  ...BD_FILTER_COLUMNS.filter(c => c.key !== 'value'),   // Solution view: Solution Value instead of BD Proposal Value
+  { key: 'solValue', label: 'Solution Value', get: r => { const v = solValueOf(r); return v ? String(v) : ''; }, sortBy: r => solValueOf(r) },
   { key: 'solMonth',   label: 'Sol Month',       get: r => solVals(r, 'solutionMonth') },
   { key: 'programType', label: 'Program Type',   get: r => solVals(r, 'programType') },
   { key: 'engType',    label: 'Engagement Type', get: r => solVals(r, 'engagementType') },
@@ -963,10 +987,10 @@ export default function SolutionTracker({ onRefreshed, view }) {
   }
 
   // ── Derived data ──────────────────────────────────────────────────────────
-  // One line per Proposal ID + version. Only the BD row of a proposal carries a BD S No (Excel
-  // formula, first row of each Proposal ID); every other row of that proposal is a solution item
-  // and is shown only in the line's dropdown. Lines are ordered by the proposal's BD S No, then
-  // by version (V1, V2 …), so a revision sits right under its proposal and shows the same number.
+  // One line per Proposal ID + version; every other row of that version is a solution item and is
+  // shown only in the line's dropdown. Lines are ordered by BD Month (then Proposal ID number, then
+  // version), so a revision sits in the month it was sent, and numbered 1, 2, 3 … in that order —
+  // whatever the row order in Excel. The Excel BD S No is kept as _bdExcel.
   // A row with a blank Proposal Version belongs to the version of its proposal's BD row.
   const allBdRows = useMemo(() => {
     const sNoOf = r => { const n = Number(r.sno); return Number.isFinite(n) ? n : Infinity; };
@@ -994,11 +1018,13 @@ export default function SolutionTracker({ onRefreshed, view }) {
       const sorted = [...g.rows].sort((a, b) => sNoOf(a) - sNoOf(b));
       const anchor = sorted.find(r => bdNoNum(r) != null) || sorted[0];
       const pidBd = bdNoNum(bdRowOf.get(g.pid));
+      const ownBd = bdNoNum(anchor);
       return {
         ...anchor,
         _key: k,
-        _bdNo: pidBd ?? (anchor.bdSNo || anchor.sno),   // number shown: the proposal's BD S No
-        _bdSort: pidBd ?? Infinity,
+        _bdExcel: ownBd ?? pidBd ?? (anchor.bdSNo || anchor.sno),   // BD S No in Excel (reference only)
+        _monthKey: lineMonthKey([anchor, ...sorted]),
+        _pidNum: pidNum(g.pid),
         _version: g.n,
         _order: Math.min(...g.rows.map(sNoOf)),
         _first: g.first,
@@ -1006,7 +1032,9 @@ export default function SolutionTracker({ onRefreshed, view }) {
         _isLatest: g.n === topVersion.get(g.pid),
         _versionCount: countByPid.get(g.pid),
       };
-    }).sort((a, b) => (a._bdSort - b._bdSort) || (a._version - b._version) || (a._order - b._order) || (a._first - b._first));
+    }).sort((a, b) => (a._monthKey - b._monthKey) || (a._pidNum - b._pidNum) || (a._version - b._version)
+        || (a._order - b._order) || (a._first - b._first))
+      .map((r, i) => ({ ...r, _bdNo: i + 1 }));   // number shown: position in BD-month order
   }, [rows]);
 
   // Excel-style column filters + sorting (shared with Engagement Calendar)
@@ -1015,6 +1043,9 @@ export default function SolutionTracker({ onRefreshed, view }) {
     .filter(r => !search || [r.proposalId, r.clientName, r.programTopic, r.bdStatus, r.bdMonth, r.clientPoc,
       r.clientPocEmail, r.clientPocDesignation, r.participantProfile, r.bdComments,
       ...(r._sols || []).map(x => x.solutionTopic)].join(' ').toLowerCase().includes(search.toLowerCase()));
+
+  // Lines per BD month among the shown lines (month headings)
+  const monthCounts = bdRows.reduce((m, r) => m.set(r._monthKey, (m.get(r._monthKey) || 0) + 1), new Map());
 
   // KPI figures (follow the active filters). A proposal counts once — its highest version
   // among the shown lines — so revised versions don't double the value.
@@ -1036,12 +1067,13 @@ export default function SolutionTracker({ onRefreshed, view }) {
     // added up; every line (version) adds its own value, like the Total Proposals count
     value:    bdRows.reduce((t, r) => t + lineValue(r), 0),
     wonValue: bdRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + lineValue(r), 0),
+    wonSolValue: kpiRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + solValueOf(r), 0),
     clients:  new Set(kpiRows.map(r => r.clientName).filter(Boolean)).size,
     won:      kpiRows.filter(r => r.bdStatus === 'Won').length,
     lost:     kpiRows.filter(r => r.bdStatus === 'Lost').length,
     inProc:   kpiRows.filter(r => r.bdStatus === 'In Process').length,
     solItems: kpiRows.reduce((t, r) => t + (r._sols || []).length, 0),
-    solValue: kpiRows.reduce((t, r) => t + (r._sols || []).reduce((u, x) => u + toNum(x.solutionValue), 0), 0),
+    solValue: kpiRows.reduce((t, r) => t + solValueOf(r), 0),
   };
   const decided = kpi.won + kpi.lost;
 
@@ -1394,7 +1426,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
           <div className="kpi-card purple">
             <div className="kpi-label">Won</div>
             <div className="kpi-value">{loading ? '…' : (view === 'bd' ? kpi.wonLines : kpi.won)}</div>
-            <div className="kpi-sub">{view === 'bd' ? `${kpi.won} unique · ` : ''}{decided ? `${winRate}% win rate · ${fmtL(kpi.wonValue)}` : 'No closed proposals'}</div>
+            <div className="kpi-sub">{view === 'bd' ? `${kpi.won} unique · ` : ''}{decided ? `${winRate}% win rate · ${fmtL(view === 'bd' ? kpi.wonValue : kpi.wonSolValue)}` : 'No closed proposals'}</div>
           </div>
         </div>
 
@@ -1469,7 +1501,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
                   <th style={thStyle}>Program Topic</th>
                   <th style={thStyle}>BD Month</th>
                   <th style={thStyle}>BD Status</th>
-                  <th style={thStyle}>Proposal Value</th>
+                  <th style={thStyle}>{view === 'bd' ? 'Proposal Value' : 'Solution Value'}</th>
                   {view !== 'bd' && <th style={thStyle}>Sol Items</th>}
                   <th style={thStyle}>Actions</th>
                 </tr>
@@ -1488,9 +1520,23 @@ export default function SolutionTracker({ onRefreshed, view }) {
                   const isOpen   = expanded.has(r._key);
                   const hasSols  = solItems.length > 0;
                   const multi    = r._versionCount > 1;
+                  // Month heading above the first line of each BD month (default month order only)
+                  const showMonth = !filterState.sort && (i === 0 || bdRows[i - 1]._monthKey !== r._monthKey);
 
                   return (
                     <Fragment key={`group-${r._key}-${i}`}>
+                      {showMonth && (
+                        <tr data-month-head>
+                          <td colSpan={10} style={{ padding: '10px 14px 6px', background: 'var(--surface, #F8F9FB)',
+                            borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700, color: '#2D3047',
+                            letterSpacing: 0.3, textTransform: 'uppercase' }}>
+                            {monthHeading(r._monthKey)}
+                            <span style={{ marginLeft: 8, fontWeight: 500, color: 'var(--muted)', textTransform: 'none' }}>
+                              · {monthCounts.get(r._monthKey) || 0} {monthCounts.get(r._monthKey) === 1 ? 'line' : 'lines'}
+                            </span>
+                          </td>
+                        </tr>
+                      )}
                       {/* ── BD Primary Row ── */}
                       <tr
                         style={{
@@ -1535,7 +1581,10 @@ export default function SolutionTracker({ onRefreshed, view }) {
                             <span title="Operations Checklist not ticked yet. Edit the BD lead to tick it." style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700, color: '#b91c1c' }}>⚠ Checklist pending</span>
                           )}
                         </td>
-                        <td style={tdStyle}>{r.bdProposalValue ? `₹${r.bdProposalValue}` : '—'}</td>
+                        {/* BD view: BD Proposal Value as entered · Solution view: Solution Values of the line added up */}
+                        <td style={tdStyle}>{view === 'bd'
+                          ? (r.bdProposalValue ? `₹${r.bdProposalValue}` : '—')
+                          : fmtIN(solValueOf(r))}</td>
                         {view !== 'bd' && (
                           <td style={tdStyle}>
                             {hasSols ? (

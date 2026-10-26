@@ -122,9 +122,20 @@ export function bOpts(stacked, horiz) {
 
 /* ─── Date / FY helpers ─── */
 export const pad2 = n => String(n).padStart(2, '0');
-export const todayISO = (() => { const t = new Date(); return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`; })();
+const localToday = () => { const t = new Date(); return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`; };
 export const fyStartOf = iso => { const y = +iso.slice(0, 4), m = +iso.slice(5, 7); return m >= 4 ? y : y - 1; };
-export const CURRENT_FY = fyStartOf(todayISO);
+// Live bindings: every module that imports these sees the new value after refreshToday(),
+// so a dashboard left open past midnight (or past 31 March) moves to the new day / FY.
+export let todayISO = localToday();
+export let CURRENT_FY = fyStartOf(todayISO);
+/** Re-read the date. Returns true when the day changed (the Dashboard then redraws its tabs). */
+export function refreshToday() {
+  const t = localToday();
+  if (t === todayISO) return false;
+  todayISO = t;
+  CURRENT_FY = fyStartOf(t);
+  return true;
+}
 export const fyShort = y => `${y}-${pad2((y + 1) % 100)}`;          // 2026-27
 export const fyLong  = y => `FY ${y}-${pad2((y + 1) % 100)}`;       // FY 2026-27
 export const fyTiny  = y => `FY ${pad2(y % 100)}-${pad2((y + 1) % 100)}`; // FY 26-27

@@ -417,7 +417,13 @@ export default function FinanceTracker({ onRefreshed }) {
   }).sort((a, b) => String(a.startDate || '9999').localeCompare(String(b.startDate || '9999')) || num(a.engagementKey) - num(b.engagementKey)),
   [rows, search, stageF]);
 
-  const count = (...st) => rows.filter(r => st.includes(r._stage)).length;
+  // KPI counts follow the period and the search. The stage filter is not applied to the
+  // cards — the cards ARE the stage filter (click to filter), so applying it would zero the others.
+  const kpiRows = useMemo(() => {
+    const q = search.toLowerCase();
+    return !q ? rows : rows.filter(r => [r.company, r.topic, r.egId, r.engagementKey, r.consultant1].some(v => String(v ?? '').toLowerCase().includes(q)));
+  }, [rows, search]);
+  const count = (...st) => kpiRows.filter(r => st.includes(r._stage)).length;
 
   // Pending-fields bar: engagements with finance details due but empty, in the list order
   const pendingBar = useMemo(() => pendingItems(filtered.filter(r => keyOf(r)), FIN_RULES, r => ({
@@ -537,13 +543,13 @@ export default function FinanceTracker({ onRefreshed }) {
       {/* KPIs — click to filter */}
       <div className="kpi-compact">
         <div className="kpi-card accent" style={{ cursor: 'pointer' }} onClick={() => setStageF('All')}>
-          <div className="kpi-label">Engagements · {rangeLabel}</div><div className="kpi-value">{rows.length}</div>
+          <div className="kpi-label">Engagements · {rangeLabel}</div><div className="kpi-value">{kpiRows.length}</div>{(kpiRows.length !== rows.length || filtered.length !== kpiRows.length) && <div className="kpi-sub">{filtered.length !== kpiRows.length ? `${filtered.length} in list · ` : ''}of {rows.length} in period</div>}
         </div>
         <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => setStageF('All To Invoice')} title="Engagement ended, invoice not raised yet">
           <div className="kpi-label">To Invoice</div><div className="kpi-value">{count('Invoice Overdue', 'To Invoice')}{overdueTag(count('Invoice Overdue'))}</div>
         </div>
         <div className="kpi-card blue" style={{ cursor: 'pointer' }} onClick={() => setStageF('All Awaiting Payment')} title="Invoice raised, not fully paid">
-          <div className="kpi-label">Awaiting Payment</div><div className="kpi-value">{count('Awaiting Payment', 'Payment Overdue', 'Partly Received')}{overdueTag(rows.filter(r => overdueDays(r) > 0).length)}</div>
+          <div className="kpi-label">Awaiting Payment</div><div className="kpi-value">{count('Awaiting Payment', 'Payment Overdue', 'Partly Received')}{overdueTag(kpiRows.filter(r => overdueDays(r) > 0).length)}</div>
         </div>
         <div className="kpi-card green" style={{ cursor: 'pointer' }} onClick={() => setStageF('Received')}>
           <div className="kpi-label">Received</div><div className="kpi-value">{count('Received')}</div>

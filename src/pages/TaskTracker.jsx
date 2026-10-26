@@ -269,15 +269,21 @@ export default function TaskTracker({ onRefreshed }) {
   }).sort(byDue), [base, statusF]);
 
   const t0 = todayIso();
-  const open = tasks.filter(taskIsOpen);
+  // KPIs follow search / team / person / project (the `base` list). The status filter is left out
+  // because the cards are themselves an open / done breakdown.
+  const open = base.filter(taskIsOpen);
   const mineOpen = open.filter(t => user.isMe(t.assignedTo));
+  const kpiProjects = projects.filter(p => (projectF === 'All' || p.projectId === projectF)
+    && (personF === 'All' || p.people.some(n => norm(n) === norm(personF)) || norm(p.projectOwner) === norm(personF))
+    && (teamF === 'All' || p.teams.includes(teamF))
+    && (!search || [p.projectName, p.projectId, p.client, p.projectOwner].some(v => norm(v).includes(norm(search))) || p.tasks.some(t => base.includes(t))));
   const kpi = {
     mine: mineOpen.length, mineOver: mineOpen.filter(isOverdue).length,
     open: open.length, over: open.filter(isOverdue).length,
     week: open.filter(t => t.dueDate && daysFrom(t.dueDate) >= 0 && daysFrom(t.dueDate) <= 7).length,
-    active: projects.filter(p => !['Completed', 'Cancelled'].includes(p.status)).length,
-    risk: projects.filter(p => p.status === 'At risk').length,
-    doneMonth: tasks.filter(t => t.status === 'Done' && String(t.completedDate).slice(0, 7) === t0.slice(0, 7)).length,
+    active: kpiProjects.filter(p => !['Completed', 'Cancelled'].includes(p.status)).length,
+    risk: kpiProjects.filter(p => p.status === 'At risk').length,
+    doneMonth: base.filter(t => t.status === 'Done' && String(t.completedDate).slice(0, 7) === t0.slice(0, 7)).length,
   };
 
   /* ── writes ── */

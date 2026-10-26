@@ -25,7 +25,6 @@ const MONTHS = ['April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'De
 const monthIdx = iso => (+iso.slice(5, 7) + 8) % 12;          // Apr = 0 … Mar = 11
 const NOT_REVENUE = /cancel|lost|drop|postpon|hold/i;
 const isDelivered = e => /^delivered$/i.test(clean(e.status));
-const curQ = Math.floor(monthIdx(todayISO) / 3);              // 0 = Q1 (Apr–Jun)
 
 /** Client name → comparison key ("DBS Bank" = "DBS", "AirIndia" = "Air India", "SocGen" = "Societe Generale"). */
 const ALIAS = { socgen: 'societegenerale', amli: 'axismaxlife', zscalar: 'zscaler', vendanta: 'vedanta' };
@@ -41,8 +40,11 @@ function topicMatch(a, b) {
 }
 
 export default function SalesLiveDashboard({ solutions, engagements, refreshing }) {
+  const curQ = Math.floor(monthIdx(todayISO) / 3);              // 0 = Q1 (Apr–Jun) — read each render
   // Proposal lines (each version counts, in its own month) — same logic as the BD Tracker page
-  const proposals = useMemo(() => buildProposalLines(solutions).filter(p => p.fy >= LIVE_FROM_FY), [solutions]);
+  // Value = BD Proposal Value only (same as the BD Tracker — no fallback to Solution Values)
+  const proposals = useMemo(() => buildProposalLines(solutions).filter(p => p.fy >= LIVE_FROM_FY)
+    .map(p => ({ ...p, value: p.bdValue })), [solutions]);
   const curProps = useMemo(() => proposals.filter(p => p.fy === CURRENT_FY), [proposals]);
 
   // Engagement Calendar sessions that count as revenue

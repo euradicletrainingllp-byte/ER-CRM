@@ -483,22 +483,26 @@ export default function ConsultantDirectory({ onRefreshed }) {
   const cities = useMemo(() => [...new Set(data.map(c => c.city).filter(Boolean))].sort(), [data]);
   const badgeList = useMemo(() => [...new Set([...PRACTICE_BADGES, ...data.flatMap(c => splitMulti(c.badges))])], [data]);
 
-  const filtered = useMemo(() => {
-    const q = norm(search);
-    return data.filter(c => {
+  // Search / status / badge / city (everything except the contract quick tabs). Shared by the list
+  // and the KPI cards; the quick tabs are the cards' own breakdown, so they are not applied to the cards.
+  const baseMatch = (c, q) => {
       const hay = [c.consultantId, c.fullName, c.designation, c.city, c.country, c.headline, c.badges, c.skills, c.industries,
         c.clients, c.certifications, c.psychometrics, c.languages, c.geographies, c.preferredFor, c.credential].map(norm).join(' | ');
       const mQ = !q || q.split(' ').every(w => hay.includes(w));
       const mStatus = statusF === 'All' || (statusF === 'Active+' ? c.status !== 'Inactive' : c.status === statusF);
       const mBadge = badgeF === 'All' || splitMulti(c.badges).includes(badgeF);
       const mCity = cityF === 'All' || c.city === cityF;
-      const mQuick = quick === 'all' || contractAlert(c) === quick;
-      return mQ && mStatus && mBadge && mCity && mQuick;
-    }).sort((a, b) => idNum(a) - idNum(b));
-  }, [data, search, statusF, badgeF, cityF, quick]);
+      return mQ && mStatus && mBadge && mCity;
+  };
+  const filtered = useMemo(() => {
+    const q = norm(search);
+    return data.filter(c => baseMatch(c, q) && (quick === 'all' || contractAlert(c) === quick)).sort((a, b) => idNum(a) - idNum(b));
+  }, [data, search, statusF, badgeF, cityF, quick]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const kpiBase = useMemo(() => { const q = norm(search); return data.filter(c => baseMatch(c, q)); },
+    [data, search, statusF, badgeF, cityF]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const sel = selected ? data.find(c => c.consultantId === selected) : null;
-  const live = data.filter(c => c.status !== 'Inactive');
+  const live = kpiBase.filter(c => c.status !== 'Inactive');
   const countAlert = a => live.filter(c => contractAlert(c) === a).length;
 
   /* writes */
@@ -560,7 +564,7 @@ export default function ConsultantDirectory({ onRefreshed }) {
         saving={saving} onClose={() => setModal(null)} onSave={c => save(c, modal === 'add')} />}
 
       <div className="kpi-compact">
-        <div className="kpi-card"><div className="kpi-label">Active consultants</div><div className="kpi-value">{data.filter(c => c.status === 'Active').length}</div><div className="kpi-sub">{data.length} in the directory</div></div>
+        <div className="kpi-card"><div className="kpi-label">Active consultants</div><div className="kpi-value">{kpiBase.filter(c => c.status === 'Active').length}</div><div className="kpi-sub">{kpiBase.length !== data.length ? `${kpiBase.length} filtered · ` : ''}{data.length} in the directory</div></div>
         <div className="kpi-card"><div className="kpi-label">Contracts signed</div><div className="kpi-value">{live.filter(c => c.contractStatus === 'Signed' && contractAlert(c) === 'ok').length}</div><div className="kpi-sub">valid, not due for renewal</div></div>
         <div className="kpi-card"><div className="kpi-label">Renew now</div><div className="kpi-value" style={{ color: countAlert('renew') ? 'var(--error)' : undefined }}>{countAlert('renew')}</div><div className="kpi-sub">{countAlert('expired')} already expired</div></div>
         <div className="kpi-card accent"><div className="kpi-label">No contract on file</div><div className="kpi-value">{countAlert('none')}</div><div className="kpi-sub">add start / end dates and link</div></div>

@@ -1,8 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import KPICard from '../components/KPICard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
-import { getAllEngagementsCached, peekAllEngagements, peekList, getOpsChecklist, getSolutionTracker } from '../services/api.js';
+import { getAllEngagementsResilient, peekAllEngagements, peekList, onListChange, getOpsChecklist, getSolutionTracker } from '../services/api.js';
+import { clScore } from './OpsChecklist.jsx';                         // same readiness score as the Ops Checklist page
+import { buildProposalLines, uniqueProposals } from '../components/proposalData.js';   // same proposal rule as the BD Tracker
+import { refreshToday } from '../components/erdCharts.jsx';
 import OpsLiveDashboard from '../components/OpsLiveDashboard.jsx';
 import SolLiveDashboard from '../components/SolLiveDashboard.jsx';
 import SalesLiveDashboard from '../components/SalesLiveDashboard.jsx';
@@ -20,7 +23,12 @@ const TAB_KEY = 'ercrm.dashboard.tab';
 const readTab = () => { try { return localStorage.getItem(TAB_KEY) || 'overview'; } catch { return 'overview'; } };
 
 const fmt = n => n ? '₹' + (n / 100000).toFixed(1) + 'L' : '₹0';
-const today = new Date().toISOString().slice(0, 10);
+// Local date (toISOString() is UTC, which is still "yesterday" in India before 5:30 am); read on every render
+const localToday = () => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; };
+const isUpcomingStatus = s => /^(scheduled|tentative|re-?schedule)$/i.test(String(s ?? '').trim());   // same as the Operations tab
+const isDeliveredStatus = s => /^delivered$/i.test(String(s ?? '').trim());
+const REFRESH_EVERY_MS = 5 * 60 * 1000;   // background refresh while the Dashboard is open and visible
+const REFRESH_MIN_GAP_MS = 2 * 60 * 1000; // on returning to the tab, refresh if the data is older than this
 
 // Convert Excel serial number OR YYYY-MM-DD string → YYYY-MM-DD (for comparisons)
 const toISO = d => {
@@ -52,13 +60,6 @@ const parseDateParts = d => {
 
 const COLORS = ['#1a3a5c','#2563eb','#16a34a','#7c3aed','#e8760a','#dc2626','#0891b2','#84cc16'];
 
-function clScore(cl) {
-  if (!cl) return 0;
-  const keys = Object.values(cl);
-  const done = keys.filter(v => v === 'Yes' || v === 'NA').length;
-  return Math.round((done / keys.length) * 100);
-}
-
 export default function Dashboard({ onRefreshed }) {
   // Show the last loaded data straight away; fresh data replaces it when it arrives
   const [engData,  setEngData]  = useState(() => peekAllEngagements() || []);
@@ -67,34 +68,83 @@ export default function Dashboard({ onRefreshed }) {
   const [loading,  setLoading]  = useState(() => !peekAllEngagements());
   const [refreshing, setRefreshing] = useState(false);
   const [errors,   setErrors]   = useState({});
+  const [notes,    setNotes]    = useState([]);           // non-fatal notices (e.g. loaded in windows)
+  const [loadedAt, setLoadedAt] = useState(null);
+  const [dayKey,   setDayKey]   = useState(localToday);   // changes at midnight → tabs redraw for the new day
   const [tab, setTabState] = useState(readTab);
   const setTab = t => { setTabState(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* ignore */ } };
+  const busy = useRef(false);
+  const lastLoad = useRef(0);
+  const today = localToday();
 
   const load = async () => {
+    if (busy.current) return;            // one refresh at a time
+    busy.current = true;
     if (!peekAllEngagements()) setLoading(true);
     setRefreshing(true);
-    setErrors({});
-    const errs = {};
+    const errs = {}, note = [];
 
     await Promise.allSettled([
-      getAllEngagementsCached({ force: true }).then(setEngData).catch(e => { errs.eng = e; }),
+      getAllEngagementsResilient({ force: true }).then(({ rows, fallback }) => {
+        setEngData(rows);
+        if (fallback) note.push('The full Engagement Calendar read did not finish, so it was loaded in 3-month windows (previous, current and next financial year). Older years show the last saved copy.');
+      }).catch(e => { errs.eng = e; }),
       getOpsChecklist().then(setOpsData).catch(e => { errs.ops = e; }),
       getSolutionTracker().then(setSolData).catch(e => { errs.solution = e; setSolData(d => d || []); }),
     ]);
 
     setErrors(errs);
+    setNotes(note);
     setLoading(false);
     setRefreshing(false);
+    busy.current = false;
+    lastLoad.current = Date.now();
+    if (Object.keys(errs).length < 3) setLoadedAt(new Date().toLocaleTimeString());
     onRefreshed?.(new Date().toLocaleTimeString());
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep the Dashboard up to date without a page reload:
+  //  • a save anywhere in the CRM (Engagement Calendar, Ops / BD sync) → show the patched copy now, re-read shortly after
+  //  • tracker lists re-read by another page → pick up that copy
+  //  • every 5 minutes while visible, and when returning to the tab with data older than 2 minutes
+  //  • at midnight → move "today", the current FY and the upcoming lists to the new day
+  useEffect(() => {
+    let timer = null;
+    const soon = () => { clearTimeout(timer); timer = setTimeout(load, 2500); };
+    const onEc = () => { const p = peekAllEngagements(); if (p) setEngData(p); soon(); };
+    const offList = onListChange(name => {
+      if (name === 'ops') { const p = peekList('ops'); if (p) setOpsData(p); }
+      if (name === 'solution') { const p = peekList('solution'); if (p) setSolData(p); }
+    });
+    const checkDay = () => { if (refreshToday()) setDayKey(localToday()); };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      checkDay();
+      if (Date.now() - lastLoad.current > REFRESH_MIN_GAP_MS) load();
+    };
+    const tick = setInterval(() => {
+      checkDay();
+      if (document.visibilityState === 'visible' && Date.now() - lastLoad.current >= REFRESH_EVERY_MS) load();
+    }, 60 * 1000);
+    window.addEventListener('ercrm:ec-changed', onEc);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      clearTimeout(timer); clearInterval(tick); offList();
+      window.removeEventListener('ercrm:ec-changed', onEc);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Upcoming = Scheduled / Tentative / Re-schedule from today onward (same rule as the Operations tab)
   const upcoming = useMemo(() =>
-    engData.filter(e => toISO(e.startDate) >= today && e.status !== 'Cancelled')
+    engData.filter(e => toISO(e.startDate) >= today && isUpcomingStatus(e.status))
            .sort((a,b) => toISO(a.startDate).localeCompare(toISO(b.startDate)))
            .slice(0, 6)
-  , [engData]);
+  , [engData, today]);
 
   const byCompany = useMemo(() => {
     const m = {};
@@ -108,13 +158,26 @@ export default function Dashboard({ onRefreshed }) {
     return Object.entries(m).sort((a,b) => b[1]-a[1]);
   }, [engData]);
 
-  const revenue    = useMemo(() => engData.filter(e => e.status === 'Delivered').reduce((s,e)=>s+e.price,0), [engData]);
-  const scheduled  = engData.filter(e => e.status === 'Scheduled').length;
-  const tentative  = engData.filter(e => e.status === 'Tentative').length;
+  const delivered  = useMemo(() => engData.filter(e => isDeliveredStatus(e.status)), [engData]);
+  const revenue    = useMemo(() => delivered.reduce((s,e)=>s+(Number(e.price)||0),0), [delivered]);
+  const scheduled  = engData.filter(e => /^scheduled$/i.test(String(e.status ?? '').trim())).length;
+  const tentative  = engData.filter(e => /^tentative$/i.test(String(e.status ?? '').trim())).length;
   const maxCount   = byCompany[0]?.[1] || 1;
-  // BD Tracker page = BD view of the combined Solution Tracker (SOLUTION_CRUD flow)
-  const bdCount = useMemo(() => new Set((solData || []).map(r =>
-    String(r.bdSNo ?? '').trim() || String(r.proposalId ?? '').trim()).filter(Boolean)).size, [solData]);
+  // BD Tracker page = BD view of the combined Solution Tracker (SOLUTION_CRUD flow).
+  // Counted with the same proposal-line rule as the BD Tracker cards and the Sales / Solutioning tabs.
+  const bdLines = useMemo(() => buildProposalLines(solData || []), [solData]);
+  const bdCount = useMemo(() => uniqueProposals(bdLines), [bdLines]);
+
+  // Ops readiness: sessions still to run (ongoing or upcoming, not cancelled / delivered), soonest first;
+  // when there are none, the most recent sessions. Score = Ops Checklist page score.
+  const opsReady = useMemo(() => {
+    const live = opsData.filter(e => !/cancel/i.test(String(e.status ?? '')) && !isDeliveredStatus(e.status));
+    const ahead = live.filter(e => (toISO(e.endDate) || toISO(e.startDate)) >= today)
+      .sort((a, b) => toISO(a.startDate).localeCompare(toISO(b.startDate)));
+    const list = ahead.length ? ahead : [...opsData].sort((a, b) => toISO(b.startDate).localeCompare(toISO(a.startDate)));
+    return { rows: list.slice(0, 7), ahead: ahead.length };
+  }, [opsData, today]);
+  const errorList = Object.entries(errors);
   const monthMon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   return (
@@ -131,8 +194,29 @@ export default function Dashboard({ onRefreshed }) {
             {t.label}
           </button>
         ))}
-        {refreshing && !loading && <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>⟳ Updating from Excel…</span>}
+        {refreshing && !loading
+          ? <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>⟳ Updating from Excel…</span>
+          : loadedAt && <span style={{ marginLeft: 'auto', alignSelf: 'center', fontSize: 12, color: 'var(--muted)' }} title="Refreshes by itself every 5 minutes, after saves, and when you come back to this tab">Updated {loadedAt}</span>}
       </div>
+
+      {/* Load problems — shown on every tab, so no tab shows old figures without saying so */}
+      {!loading && errorList.length > 0 && (
+        <div style={{ background: '#fff7ed', border: '1px solid #fbbf24', borderRadius: 10, padding: '12px 18px', marginBottom: 16, fontSize: 13 }}>
+          ⚠️ Some data could not be refreshed — the figures below use the last loaded copy for:
+          {errorList.map(([k, e]) => (
+            <div key={k} style={{ color: 'var(--red)', marginTop: 4 }}>
+              • {{ eng: 'Engagement Calendar (Overview, Operations, Sales, Finance)', ops: 'Ops Checklist (Overview readiness)', solution: 'Solution / BD Tracker (Solutioning, Sales, BD Prospects)' }[k] || k}: {e?.message || String(e)}
+            </div>
+          ))}
+          <div style={{ marginTop: 6 }}>
+            <button type="button" className="btn btn-outline btn-sm" onClick={load} disabled={refreshing}>↻ Try again</button>
+          </div>
+        </div>
+      )}
+      {!loading && notes.map((n, i) => (
+        <div key={i} style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '10px 16px', marginBottom: 12, fontSize: 12.5, color: '#1e3a8a' }}>ℹ️ {n}</div>
+      ))}
+      <div key={dayKey}>
 
       {tab === 'finance' ? (
         loading ? (
@@ -150,14 +234,7 @@ export default function Dashboard({ onRefreshed }) {
         !solData ? (
           <LoadingState message="Loading Solution Tracker and BD Tracker…" />
         ) : (
-          <>
-            {errors.solution && (
-              <div style={{ background: '#fff7ed', border: '1px solid #fbbf24', borderRadius: 10, padding: '12px 18px', marginBottom: 16, fontSize: 13 }}>
-                ⚠️ Showing the last loaded data — the Solution Tracker could not be refreshed ({errors.solution.message}).
-              </div>
-            )}
-            <SolLiveDashboard solutions={solData} refreshing={refreshing} />
-          </>
+          <SolLiveDashboard solutions={solData} refreshing={refreshing} />
         )
       ) : loading ? (
         <LoadingState message="Loading CRM data from OneDrive Excel…" />
@@ -168,19 +245,10 @@ export default function Dashboard({ onRefreshed }) {
       {/* KPIs */}
       <div className="kpi-grid">
         <KPICard label="Total Engagements" value={engData.length} sub="All time from Excel" icon="📋" variant="accent" />
-        <KPICard label="Revenue — Delivered" value={fmt(revenue)} sub={`${engData.filter(e=>e.status==='Delivered').length} delivered sessions`} icon="💰" variant="green" />
+        <KPICard label="Revenue — Delivered" value={fmt(revenue)} sub={`${delivered.length} delivered sessions`} icon="💰" variant="green" />
         <KPICard label="Scheduled Sessions" value={scheduled} sub={`${tentative} tentative`} icon="🗓" variant="blue" />
-        <KPICard label="BD Prospects" value={bdCount} sub="In BD Tracker" icon="🎯" variant="purple" />
+        <KPICard label="BD Prospects" value={solData ? bdCount : '…'} sub={solData ? `Unique proposals in BD Tracker${bdLines.length > bdCount ? ` · ${bdLines.length} incl. revisions` : ''}` : 'Loading BD Tracker…'} icon="🎯" variant="purple" />
       </div>
-
-      {Object.keys(errors).length > 0 && (
-        <div style={{ background: '#fff7ed', border: '1px solid #fbbf24', borderRadius: 10, padding: '12px 18px', marginBottom: 20, fontSize: 13 }}>
-          ⚠️ Some data could not be loaded — check your Power Automate URLs in <code>src/config/powerAutomate.js</code>.
-          {Object.entries(errors).map(([k,e]) => (
-            <div key={k} style={{ color: 'var(--red)', marginTop: 4 }}>• {k}: {e.message}</div>
-          ))}
-        </div>
-      )}
 
       <div className="grid-2">
         {/* Upcoming */}
@@ -260,11 +328,12 @@ export default function Dashboard({ onRefreshed }) {
         <div className="card">
           <div className="card-header">
             <span className="card-title">✔ Ops Checklist Readiness</span>
-            <span style={{ fontSize: 12, color: 'var(--muted)' }}>{opsData.length} sessions</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>{opsReady.ahead ? `${opsReady.ahead} upcoming / ongoing` : 'No upcoming sessions — latest shown'} · {opsData.length} total</span>
           </div>
           <div style={{ padding: 0 }}>
-            {opsData.slice(0, 7).map((e, i) => {
-              const score = clScore(e.checklist);
+            {opsReady.rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>No sessions in the Ops Checklist</div>}
+            {opsReady.rows.map((e, i) => {
+              const score = clScore(e);
               const color = score === 100 ? 'var(--green)' : score > 60 ? 'var(--accent)' : 'var(--red)';
               return (
                 <div key={i} style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)' }}>
@@ -288,6 +357,7 @@ export default function Dashboard({ onRefreshed }) {
       </div>
       </>
       )}
+      </div>
     </div>
   );
 }

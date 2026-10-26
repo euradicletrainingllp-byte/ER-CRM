@@ -391,9 +391,10 @@ export async function getEngagements(filters = {}) {
       contract:    ecContract(r),
       poStatus:    getField(r, 'PO Status', 'PO_Status', 'POStatus', 'poStatus') ?? '',
       invoice:        formatDate(getField(r, 'Invoice ', 'Invoice', 'invoice')),
-      price:          Number(getField(r, 'Price (INR)', 'Price__INR_', 'Price_INR_', 'price') ?? 0) || 0,
-      travelExpenses: Number(getField(r, 'Travel, Stay and Misc Expenses', 'Travel, Stay and Misc. Expenses', 'travelExpenses') ?? 0) || 0,
-      gst:            Number(getField(r, 'GST', 'gst') ?? 0) || 0,
+      // toAmount: also reads text cells such as "1,50,000" or "₹ 50,000" (plain Number() made them 0)
+      price:          toAmount(getField(r, 'Price (INR)', 'Price__INR_', 'Price_INR_', 'price')),
+      travelExpenses: toAmount(getField(r, 'Travel, Stay and Misc Expenses', 'Travel, Stay and Misc. Expenses', 'travelExpenses')),
+      gst:            toAmount(getField(r, 'GST', 'gst')),
       payment:        getField(r, 'Payment', 'payment') ?? '',
       amountReceived: getField(r, 'Amount Received', 'Amount_Received', 'amountReceived') ?? '',
       receivedDate:   formatDate(getField(r, 'Received Date', 'ReceivedDate', 'Received_Date', 'receivedDate')),
@@ -599,6 +600,45 @@ export function getAllEngagementsCached({ force = false } = {}) {
   return cachedRead('all', () => getEngagements(), force, true);
 }
 
+/**
+ * Every engagement, for the Dashboard. Tries the full read first; when that fails (usually the
+ * flow timing out on a large sheet) it reads the previous, current and next financial year in
+ * 3-month windows — the same reads the Engagement Calendar page uses — and keeps the last saved
+ * copy for rows outside those years. Returns { rows, fallback } — fallback is the full-read
+ * error when the window path was used, else null. Throws only if both paths fail.
+ */
+export async function getAllEngagementsResilient({ force = false } = {}) {
+  try {
+    return { rows: await getAllEngagementsCached({ force }), fallback: null };
+  } catch (fullErr) {
+    const t = new Date();
+    const fy = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;   // FY starts in April
+    const windows = [];
+    for (let i = 0; i < 12; i++) {                                          // Apr (FY-1) … Mar (FY+2)
+      const s = new Date(fy - 1, 3 + i * 3, 1), e = new Date(fy - 1, 3 + i * 3 + 3, 0);
+      const iso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      windows.push([iso(s), iso(e)]);
+    }
+    const parts = [];
+    for (let i = 0; i < windows.length; i += 3) {                           // 3 reads at a time
+      const got = await Promise.all(windows.slice(i, i + 3).map(([f, to]) => getEngagementsForRange(f, to, { force })));
+      parts.push(...got);
+    }
+    const from = windows[0][0], to = windows[windows.length - 1][1];
+    const keyOfRow = e => `${e.egId}|${e.sno}|${String(e.engagementKey ?? '').trim()}`;
+    const merged = new Map();
+    // Older saved copy first (only rows outside the re-read years), then the fresh windows
+    (peekAllEngagements() || []).forEach(e => {
+      if (e.startDate && !engagementInRange(e, from, to)) merged.set(keyOfRow(e), e);
+    });
+    parts.flat().forEach(e => { const { undated, ...row } = e; merged.set(keyOfRow(row), row); });   // eslint-disable-line no-unused-vars
+    const rows = [...merged.values()];
+    _ecData.set('all', { ts: Date.now(), rows });
+    storeSave('all', rows);
+    return { rows, fallback: fullErr };
+  }
+}
+
 // Tell the background sync that the Engagement Calendar changed
 function notifyEcChanged(result) {
   try { window.dispatchEvent(new CustomEvent('ercrm:ec-changed')); } catch { /* non-browser */ }
@@ -673,7 +713,9 @@ const fmtDtField = d => {
     const dt = new Date(Math.round((num - 25569) * 86400 * 1000));
     return isNaN(dt) ? s : dt.toISOString().slice(0, 10);
   }
-  return s;
+  // Text typed as a date (26/10/2026, 26-Oct-2026 …) → YYYY-MM-DD so date filters / dashboards can use it
+  const f = formatDate(s);
+  return /^\d{4}-\d{2}-\d{2}$/.test(f) && !/^\d{4}-\d{2}-\d{2}/.test(s) ? f : s;
 };
 
 // Raw rows from the last Ops Checklist read — used only to explain a failed save
@@ -1259,7 +1301,30 @@ function formatDate(val) {
     return '';                     // tiny positive serial — not a real date
   }
   // Already a string date like '2026-09-08T...' or '2026-09-08'
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // Typed text dates: 26/10/2026, 26-10-2026, 26.10.26 (day first, as used in India), 26-Oct-2026, 26 Oct 2026
+  const MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  const y4 = y => (y.length === 2 ? 2000 + Number(y) : Number(y));
+  const ok = (y, m, d) => {
+    const dt = new Date(Date.UTC(y, m - 1, d));   // rejects 31/02 etc.
+    return y >= 2000 && y <= 2099 && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
+      ? `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}` : null;
+  };
+  let m = s.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2}|\d{4})$/);
+  if (m) return ok(y4(m[3]), Number(m[2]), Number(m[1])) || s.slice(0, 10);
+  m = s.match(/^(\d{1,2})(?:st|nd|rd|th)?[\s\-/]+([A-Za-z]{3})[A-Za-z]*\.?[\s\-/,]+(\d{2}|\d{4})$/);
+  if (m && MON[m[2].toLowerCase()]) return ok(y4(m[3]), MON[m[2].toLowerCase()], Number(m[1])) || s.slice(0, 10);
+  m = s.match(/^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/);
+  if (m && MON[m[1].toLowerCase()]) return ok(Number(m[3]), MON[m[1].toLowerCase()], Number(m[2])) || s.slice(0, 10);
   return s.slice(0, 10);
+}
+
+/** Money cell → number. Handles numbers and text such as "1,50,000", "₹ 50,000", "Rs. 12,500/-". Blank / text → 0. */
+function toAmount(val) {
+  if (val === null || val === undefined || val === '') return 0;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
+  const n = Number(String(val).replace(/rs\.?|inr|₹|\/-|,|\s/gi, ''));
+  return Number.isFinite(n) ? n : 0;
 }
 
 function sanitiseLocation(val) {

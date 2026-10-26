@@ -196,11 +196,21 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
   const sDD = trainers.reduce((s, t) => s + t.dd, 0), sDU = trainers.reduce((s, t) => s + t.du, 0);
   const curName = fyLong(CURRENT_FY);
   const r2 = n => fmtNum(Math.round(n * 100) / 100);
+  // Sessions already over but still Scheduled / Tentative / Re-schedule: counted neither as delivered
+  // nor as upcoming until their Status is updated in the Engagement Calendar.
+  const staleStatus = live.filter(e => /^(scheduled|tentative|re-?schedule)$/i.test(clean(e.status))
+    && (/^\d{4}-\d{2}-\d{2}$/.test(e.endDate || '') ? e.endDate : e.startDate) < todayISO);
 
   return (
     <div className="erd" style={{ opacity: refreshing ? 0.85 : 1, transition: 'opacity .2s' }}>
       <div className="pg-hdr"><h2>Operations</h2><p>Project delivery, client pipeline &amp; consultant engagement</p></div>
       <SourceNote live={`${fyLong(LIVE_FROM_FY)} onward from the Engagement Calendar`} fixed="earlier years from Dashboard Report Data (12 Oct 2026)" />
+      {staleStatus.length > 0 && (
+        <div style={{ background: '#fff7ed', border: '1px solid #fbbf24', borderRadius: 8, padding: '8px 14px', margin: '0 0 12px', fontSize: 13 }}
+          title={staleStatus.slice(0, 15).map(e => `${clean(e.company)} · ${clean(e.topic)} · ${e.startDate} · ${clean(e.status)}`).join('\n')}>
+          ⚠ {staleStatus.length} session{staleStatus.length === 1 ? ' has' : 's have'} already ended but {staleStatus.length === 1 ? 'is' : 'are'} still marked Scheduled / Tentative — {staleStatus.length === 1 ? 'it is' : 'they are'} not counted as Delivered or Upcoming until the Status is updated in the Engagement Calendar.
+        </div>
+      )}
 
       <div className="erd-bar">
         <label>Count live years by</label>

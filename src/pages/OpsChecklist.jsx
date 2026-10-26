@@ -764,10 +764,11 @@ export default function OpsChecklist({ onRefreshed }) {
 
       {/* KPIs */}
       <div className="kpi-compact">
-        <div className="kpi-card accent"><div className="kpi-label">Total Sessions</div><div className="kpi-value">{data.length}</div></div>
-        <div className="kpi-card green"><div className="kpi-label">100% Ready</div><div className="kpi-value">{data.filter(r=>clScore(r)===100).length}</div></div>
-        <div className="kpi-card blue"><div className="kpi-label">In Progress</div><div className="kpi-value">{data.filter(r=>{const s=clScore(r);return s>0&&s<100;}).length}</div></div>
-        <div className="kpi-card purple"><div className="kpi-label">Delivered</div><div className="kpi-value">{data.filter(r=>r.status==='Delivered').length}</div></div>
+        {/* KPIs follow the search / status filter (same rows as the list) */}
+        <div className="kpi-card accent"><div className="kpi-label">{filtered.length === data.length ? 'Total Sessions' : 'Filtered Sessions'}</div><div className="kpi-value">{filtered.length}</div>{filtered.length !== data.length && <div className="kpi-sub">of {data.length} total</div>}</div>
+        <div className="kpi-card green"><div className="kpi-label">100% Ready</div><div className="kpi-value">{filtered.filter(r=>clScore(r)===100).length}</div></div>
+        <div className="kpi-card blue"><div className="kpi-label">In Progress</div><div className="kpi-value">{filtered.filter(r=>{const s=clScore(r);return s>0&&s<100;}).length}</div></div>
+        <div className="kpi-card purple"><div className="kpi-label">Delivered</div><div className="kpi-value">{filtered.filter(r=>normTxt(r.status)==='delivered').length}</div></div>
       </div>
 
       <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={canEdit('ops')} storageKey="ops" noun="session" />

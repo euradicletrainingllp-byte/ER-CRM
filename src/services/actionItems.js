@@ -402,7 +402,8 @@ export function cashSummary(eng, range) {
 
 /* ─── Pipeline ─────────────────────────────────────────────────────────────── */
 export function pipelineSummary(sol, range) {
-  const all = buildProposals(sol);
+  // Value = BD Proposal Value only (same as the BD Tracker it links to)
+  const all = buildProposals(sol).map(p => ({ ...p, value: p.bdValue }));
   const inP = all.filter(p => inRange(p.date, range) || (p.undated && range.to >= todayIso()));
   const sum = (list, k) => list.filter(p => p.pipeline === k);
   const won = sum(inP, 'closed'), lost = sum(inP, 'lost'), open = sum(inP, 'process');

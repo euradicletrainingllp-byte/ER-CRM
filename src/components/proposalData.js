@@ -102,6 +102,9 @@ export function buildProposalLines(solutions) {
   const out = [];
   byId.forEach((rows, id) => {
     const bdRow = rows.find(hasBdNo);
+    // One opportunity per proposal: its first BD S No (each version now has its own BD S No)
+    const bdNos = rows.map(r => Number(clean(r.bdSNo))).filter(n => clean(n) !== '' && Number.isFinite(n) && n > 0);
+    const oppKey = bdNos.length ? `bd-${Math.min(...bdNos)}` : `p-${id}`;
     const effVersion = r => (clean(r.proposalVersion) ? versionNo(r.proposalVersion) : versionNo(bdRow?.proposalVersion));
     const groups = new Map();
     rows.forEach(r => { const n = effVersion(r); if (!groups.has(n)) groups.set(n, []); groups.get(n).push(r); });
@@ -133,13 +136,16 @@ export function buildProposalLines(solutions) {
         topic: clean(anchor.programTopic) || clean(f('programTopic')) || clean(f('solutionTopic')),
         link: clean(fl('proposalV1Link')) || clean(f('proposalV1Link')),
         status: clean(anchor.bdStatus) || clean(f('bdStatus')),
-        oppKey: clean(f('bdSNo')) ? `bd-${clean(f('bdSNo'))}` : `p-${id}`,
+        oppKey,
+        bdNo: clean(anchor.bdSNo),   // this version's own BD S No
         date,
         undated: !date,
         // A line with no date at all is counted in the current FY (a recent BD line still being filled in)
         fy: date ? fyStartOf(date) : CURRENT_FY,
         quotedValue,
         value: quotedValue,
+        bdValue,     // BD Proposal Value only — used by the Sales tab (matches the BD Tracker)
+        solValue,    // Solution Values only — used by the Solutioning tab (matches the Solution Tracker)
         pipeline: pipelineOf(clean(anchor.bdStatus) || f('bdStatus'), f('status')),
         industry: clean(f('industry')) || industryFromConfig(client),
         developmentCategory: f('developmentCategory'), engagementType: f('engagementType'),

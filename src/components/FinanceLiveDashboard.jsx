@@ -21,6 +21,8 @@ import {
   CURRENT_FY, fyStartOf, fyLong, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
 import { normPayment } from '../services/syncWithEC.js';
+// Same stage / overdue rules as the Finance Tracker page, so the two always agree
+import { financeStage, overdueDays } from '../pages/FinanceTracker.jsx';
 import {
   LIVE_FROM_FY, FIN_REVENUE_L, FIN_INVOICES, FIN_BILLING_DAYS, FIN_AVG_PER_DAY, FIN_CREDIT_NOTES, FIN_TARGET_CR,
 } from '../config/dashboardBaseline.js';
@@ -29,7 +31,6 @@ const MONTHS = ['April', 'May', 'June', 'July', 'August', 'September', 'October'
 const COLORS = [TL, GD, NV, PU, GN, RD, '#3B82F6', '#0EA5A4', '#F97316', '#64748B', '#A855F7', '#84CC16'];
 const CREDIT_DAYS = 30;
 const slot = iso => (+iso.slice(5, 7) + 8) % 12;           // Apr = 0 … Mar = 11
-const NOW_SLOT = slot(todayISO);
 const num = v => { const n = Number(String(v ?? '').replace(/[^0-9.-]/g, '')); return Number.isNaN(n) ? 0 : n; };
 const L = v => v / 1e5;                                      // ₹ → Lakhs
 const fmtL = v => `Rs.${(Number(v) || 0).toFixed(2)}L`;
@@ -62,6 +63,7 @@ function fyMonthConfig(rows, months, totFmt) {
 }
 
 export default function FinanceLiveDashboard({ engagements, refreshing }) {
+  const NOW_SLOT = slot(todayISO);   // read each render (todayISO moves on at midnight)
   /* Engagement Calendar rows with their finance values */
   const rows = useMemo(() => (engagements || []).map(e => {
     const inv = toIso(e.invoice);
@@ -70,9 +72,10 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     const amount = num(e.price) + num(e.travelExpenses) + num(e.gst);
     const got = num(e.amountReceived);
     const received = p === 'Received' ? Math.max(got, amount) : got;
+    const stage = financeStage(e);
     return {
-      ...e, inv, end, p, amount, price: num(e.price), got: received,
-      cancelled: /cancel|lost|drop/i.test(clean(e.status)),
+      ...e, inv, end, p, amount, price: num(e.price), got: received, stage,
+      cancelled: stage === 'Cancelled',
       invFy: inv ? fyStartOf(inv) : null,
     };
   }), [engagements]);
@@ -116,11 +119,11 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
 
   /* ── Dues: every invoice not fully received (any year) ── */
   const dues = useMemo(() => rows
-    .filter(r => r.inv && !r.cancelled && r.p !== 'Received' && r.p !== 'NA' && r.amount - r.got > 0)
+    .filter(r => r.inv && ['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r.stage) && r.amount - r.got > 0)
     .map(r => {
       const due = addDays(r.inv, CREDIT_DAYS);
-      const past = daysBetween(due, todayISO);
-      return { r, dueDate: due, pastDays: past > 0 ? past : 0, open: r.amount - r.got, overdue: past > 0 };
+      const past = overdueDays(r);   // Finance Tracker rule: invoice date + 30 days
+      return { r, dueDate: due, pastDays: past, open: r.amount - r.got, overdue: past > 0 };
     })
     .sort((a, b) => b.pastDays - a.pastDays || b.open - a.open), [rows]);
   const dueTotal = L(dues.reduce((s, d) => s + d.open, 0));
@@ -141,16 +144,17 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   /* ── To be invoiced: ended sessions with no invoice date ── */
   const toInvoice = useMemo(() => {
     const m = new Map();
-    rows.filter(r => !r.inv && !r.cancelled && r.p !== 'NA' && r.p !== 'Received' && r.end && r.end < todayISO && r.amount > 0)
+    // Finance Tracker "To Invoice" + "Invoice Overdue" stages (engagement ended, no invoice yet)
+    rows.filter(r => ['Invoice Overdue', 'To Invoice'].includes(r.stage) && r.amount > 0)
       .forEach(r => {
         const k = `${keyOf(r.company)}|${keyOf(r.topic)}`;
         if (!m.has(k)) m.set(k, { client: clean(r.company), topic: clean(r.topic), amount: 0, first: r.end, last: r.end, po: clean(r.poStatus), sessions: 0 });
         const g = m.get(k);
         g.amount += r.amount; g.sessions++;
-        if (r.end < g.first) g.first = r.end; if (r.end > g.last) g.last = r.end;
+        if (r.end && (!g.first || r.end < g.first)) g.first = r.end; if (r.end > g.last) g.last = r.end;
         if (!g.po && clean(r.poStatus)) g.po = clean(r.poStatus);
       });
-    return [...m.values()].map(g => ({ ...g, waiting: daysBetween(g.last, todayISO) })).sort((a, b) => b.amount - a.amount);
+    return [...m.values()].map(g => ({ ...g, waiting: g.last ? daysBetween(g.last, todayISO) : null })).sort((a, b) => b.amount - a.amount);
   }, [rows]);
   const toInvoiceL = L(toInvoice.reduce((s, t) => s + t.amount, 0));
 
@@ -248,7 +252,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
               {toInvoice.map((t, i) => (
                 <tr key={i}><td style={{ fontWeight: 600 }}>{t.client}</td><td className="nr" style={{ whiteSpace: 'nowrap' }}>{L(t.amount).toFixed(2)}</td><td>{t.topic}{t.sessions > 1 ? ` (${t.sessions} sessions)` : ''}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{t.first === t.last ? fmtDate(t.first) : `${fmtDate(t.first)} – ${fmtDate(t.last)}`}</td>
-                  <td style={{ fontSize: 12, color: 'var(--e-text2)' }}>{t.po ? `PO: ${t.po} · ` : ''}Invoice not raised · {t.waiting} days since last session</td></tr>
+                  <td style={{ fontSize: 12, color: 'var(--e-text2)' }}>{t.po ? `PO: ${t.po} · ` : ''}Invoice not raised · {t.waiting != null ? `${t.waiting} days since last session` : 'no session date in the Engagement Calendar'}</td></tr>
               ))}
               {toInvoice.length > 0 && <tr className="tot"><td>Total</td><td className="nr">{toInvoiceL.toFixed(2)}</td><td /><td /><td /></tr>}
             </tbody>

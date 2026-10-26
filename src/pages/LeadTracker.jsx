@@ -322,10 +322,17 @@ export default function LeadTracker({ onRefreshed }) {
 
   const sel = selected ? data.find(l => l.leadId === selected) : null;
   const t = todayIso();
-  const open = data.filter(leadIsOpen);
+  // KPIs follow search, source and owner. The status filter is left out of the cards because the
+  // cards are a status breakdown (with the default "Open" filter, Converted would always read 0).
+  const kpiBase = useMemo(() => {
+    const q = norm(search);
+    return data.filter(l => (!q || [l.leadId, l.company, l.contactName, l.requirement, l.programInterest, l.sharedBy, l.owner, l.sourceDetail].some(v => norm(v).includes(q)))
+      && (sourceF === 'All' || l.source === sourceF) && (ownerF === 'All' || l.owner === ownerF));
+  }, [data, search, sourceF, ownerF]);
+  const open = kpiBase.filter(leadIsOpen);
   const overdue = open.filter(l => l.nextFollowUp && l.nextFollowUp < t).length;
-  const converted = data.filter(l => l.status === 'Converted to BD').length;
-  const decided = data.filter(l => !leadIsOpen(l)).length;
+  const converted = kpiBase.filter(l => l.status === 'Converted to BD').length;
+  const decided = kpiBase.filter(l => !leadIsOpen(l)).length;
 
   /* writes */
   const save = async (lead, isNew) => {
@@ -377,10 +384,10 @@ export default function LeadTracker({ onRefreshed }) {
       {modal && <LeadModal initial={modal === 'add' ? null : modal} names={names} me={me} saving={saving} onClose={() => setModal(null)} onSave={f => save(f, modal === 'add')} />}
 
       <div className="kpi-compact">
-        <div className="kpi-card accent"><div className="kpi-label">Open leads</div><div className="kpi-value">{open.length}</div><div className="kpi-sub">of {data.length} total</div></div>
+        <div className="kpi-card accent"><div className="kpi-label">Open leads</div><div className="kpi-value">{open.length}</div><div className="kpi-sub">of {kpiBase.length}{kpiBase.length !== data.length ? ` filtered · ${data.length} total` : ' total'}</div></div>
         <div className="kpi-card"><div className="kpi-label">Follow-ups overdue</div><div className="kpi-value" style={{ color: overdue ? 'var(--error)' : undefined }}>{overdue}</div><div className="kpi-sub">{open.filter(l => !l.nextFollowUp).length} with no follow-up date</div></div>
         <div className="kpi-card green"><div className="kpi-label">Converted to BD</div><div className="kpi-value">{converted}</div><div className="kpi-sub">{decided ? Math.round((converted / decided) * 100) : 0}% of closed leads</div></div>
-        <div className="kpi-card purple"><div className="kpi-label">New this month</div><div className="kpi-value">{data.filter(l => String(l.dateReceived).slice(0, 7) === t.slice(0, 7)).length}</div><div className="kpi-sub">{open.filter(l => l.status === 'New').length} not contacted yet</div></div>
+        <div className="kpi-card purple"><div className="kpi-label">New this month</div><div className="kpi-value">{kpiBase.filter(l => String(l.dateReceived).slice(0, 7) === t.slice(0, 7)).length}</div><div className="kpi-sub">{open.filter(l => l.status === 'New').length} not contacted yet</div></div>
       </div>
 
       <div className="filter-bar lv-filters" style={{ flexShrink: 0 }}>

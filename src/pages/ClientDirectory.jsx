@@ -710,7 +710,6 @@ export default function ClientDirectory({ onRefreshed }) {
     ...(showMoney ? [['dues', 'With dues']] : []), ['noowner', 'No owner']];
 
   const filtered = useMemo(() => {
-    const q = norm(search);
     const openCount = c => kidsOf(c.clientId).actions.filter(isOpenAction).length;
     const sorter = {
       id: (a, b) => idNum(a.clientId) - idNum(b.clientId),
@@ -719,21 +718,25 @@ export default function ClientDirectory({ onRefreshed }) {
       actions: (a, b) => openCount(b) - openCount(a) || idNum(a.clientId) - idNum(b.clientId),
       followup: (a, b) => String(a.nextFollowUp || '9999').localeCompare(String(b.nextFollowUp || '9999')),
     }[sortBy] || ((a, b) => idNum(a.clientId) - idNum(b.clientId));
-    return data.clients.filter(c => {
-      let mQ = true;
-      if (q) {
-        const kids = kidsOf(c.clientId);
-        const hay = [c.clientId, c.name, c.legalName, c.parentGroup, c.businessUnit, c.industry, c.subIndustry, c.hqCity, c.locations, c.owner,
-          c.delivered, c.activePrograms, c.opportunities, ...kids.contacts.map(p => p.fullName), ...kids.programs.map(p => p.program)].map(norm).join(' | ');
-        mQ = q.split(' ').every(w => hay.includes(w));
-      }
-      return mQ
-        && (industryF === 'All' || c.industry === industryF)
-        && (statusF === 'All' || c.relStatus === statusF)
-        && (ownerF === 'All' || c.owner === ownerF)
-        && (quickTests[quick] || quickTests.all)(c);
-    }).sort(sorter);
+    return data.clients.filter(c => baseMatch(c) && (quickTests[quick] || quickTests.all)(c)).sort(sorter);
   }, [data.clients, search, industryF, statusF, ownerF, quick, sortBy, kidsOf]);
+
+  // Search / industry / status / owner (everything except the quick type tabs). Used by the list
+  // above and by the KPI cards, so the cards follow the same filters.
+  function baseMatch(c) {
+    const q = norm(search);
+    let mQ = true;
+    if (q) {
+      const kids = kidsOf(c.clientId);
+      const hay = [c.clientId, c.name, c.legalName, c.parentGroup, c.businessUnit, c.industry, c.subIndustry, c.hqCity, c.locations, c.owner,
+        c.delivered, c.activePrograms, c.opportunities, ...kids.contacts.map(p => p.fullName), ...kids.programs.map(p => p.program)].map(norm).join(' | ');
+      mQ = q.split(' ').every(w => hay.includes(w));
+    }
+    return mQ
+      && (industryF === 'All' || c.industry === industryF)
+      && (statusF === 'All' || c.relStatus === statusF)
+      && (ownerF === 'All' || c.owner === ownerF);
+  }
 
   const sel = selected ? data.clients.find(c => c.clientId === selected) : null;
 
@@ -858,11 +861,17 @@ export default function ClientDirectory({ onRefreshed }) {
   if (loading) return <LoadingState message="Loading Client Directory from Excel…" />;
   if (error) return <ErrorState error={error} onRetry={load} />;
 
-  /* KPIs */
-  const openActs = data.actions.filter(isOpenAction);
+  /* KPIs — follow search / industry / status / owner. The quick type tabs are not applied to the
+     cards (the cards and tab counts are that breakdown). Contacts and actions count for the shown clients. */
+  const kpiClients = data.clients.filter(baseMatch);
+  const isFilteredKpi = kpiClients.length !== data.clients.length;
+  const kpiKids = isFilteredKpi ? kpiClients.map(c => kidsOf(c.clientId)) : null;
+  const kpiActions = isFilteredKpi ? kpiKids.flatMap(k => k.actions) : data.actions;
+  const kpiContacts = isFilteredKpi ? kpiKids.flatMap(k => k.contacts) : data.contacts;
+  const openActs = kpiActions.filter(isOpenAction);
   const overdueActs = openActs.filter(a => a.due && daysFromToday(a.due) < 0);
-  const outstanding = data.clients.reduce((t, c) => t + num(c.outstanding), 0);
-  const quickCount = Object.fromEntries(QUICK.map(([k]) => [k, data.clients.filter(quickTests[k]).length]));
+  const outstanding = kpiClients.reduce((t, c) => t + num(c.outstanding), 0);
+  const quickCount = Object.fromEntries(QUICK.map(([k]) => [k, kpiClients.filter(quickTests[k]).length]));
 
   const clientCols = Object.entries(TABLES.clients.cols).filter(([k]) => showMoney || !CLIENT_MONEY_KEYS.includes(k)).map(([key, label]) => ({ label, key }));
   const colsOf = kind => Object.entries(TABLES[kind].cols).filter(([k]) => showMoney || kind !== 'programs' || !PROGRAM_MONEY_KEYS.includes(k)).map(([key, label]) => ({ label, key }));
@@ -899,11 +908,11 @@ export default function ClientDirectory({ onRefreshed }) {
 
       {!(view === 'clients' && sel) && <>
         <div className="kpi-compact">
-          <div className="kpi-card"><div className="kpi-label">Existing clients</div><div className="kpi-value">{quickCount.existing}</div><div className="kpi-sub">{data.clients.length} in the directory · {quickCount.prospect} prospects</div></div>
-          <div className="kpi-card"><div className="kpi-label">Active relationships</div><div className="kpi-value">{data.clients.filter(c => c.relStatus === 'Active').length}</div><div className="kpi-sub">{data.clients.filter(c => c.health === 'Red').length} at risk (red)</div></div>
+          <div className="kpi-card"><div className="kpi-label">Existing clients</div><div className="kpi-value">{quickCount.existing}</div><div className="kpi-sub">{isFilteredKpi ? `${kpiClients.length} filtered · ` : ''}{data.clients.length} in the directory · {quickCount.prospect} prospects</div></div>
+          <div className="kpi-card"><div className="kpi-label">Active relationships</div><div className="kpi-value">{kpiClients.filter(c => c.relStatus === 'Active').length}</div><div className="kpi-sub">{kpiClients.filter(c => c.health === 'Red').length} at risk (red)</div></div>
           {showMoney
             ? <div className="kpi-card"><div className="kpi-label">Outstanding</div><div className="kpi-value">{inrShort(outstanding)}</div><div className="kpi-sub">{quickCount.dues} clients with dues</div></div>
-            : <div className="kpi-card"><div className="kpi-label">Contacts</div><div className="kpi-value">{data.contacts.length}</div><div className="kpi-sub">across all clients</div></div>}
+            : <div className="kpi-card"><div className="kpi-label">Contacts</div><div className="kpi-value">{kpiContacts.length}</div><div className="kpi-sub">{isFilteredKpi ? 'across the filtered clients' : 'across all clients'}</div></div>}
           <div className="kpi-card accent"><div className="kpi-label">Open actions</div><div className="kpi-value" style={{ color: overdueActs.length ? 'var(--error)' : undefined }}>{openActs.length}</div><div className="kpi-sub">{overdueActs.length} overdue</div></div>
         </div>
 

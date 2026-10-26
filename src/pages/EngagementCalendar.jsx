@@ -1236,7 +1236,7 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
         </div>
         <div className="kpi-card purple">
           <div className="kpi-label">Delivered</div>
-          <div className="kpi-value">{rangeLoading ? '…' : filtered.filter(e => e.status === 'Delivered').length}</div>
+          <div className="kpi-value">{rangeLoading ? '…' : filtered.filter(e => /^delivered$/i.test(String(e.status ?? '').trim())).length}</div>
         </div>
       </div>}
 
