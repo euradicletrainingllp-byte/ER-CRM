@@ -1,5 +1,7 @@
 import { useMsal, useAccount } from '@azure/msal-react';
+import { Compass } from 'lucide-react';
 import { logEvent, flushSoon, endAuditSession } from '../services/auditLogger.js';
+import { useTour } from './tour/TourProvider.jsx';
 
 const TITLES = {
   '/':           'Dashboard',
@@ -19,6 +21,7 @@ export default function TopBar({ path, lastRefreshed, onRefresh, loading }) {
   const title                  = TITLES[path] ?? 'EuRadicle CRM';
   const { instance, accounts } = useMsal();
   const account                = useAccount(accounts[0] || {});
+  const tour                   = useTour();
 
   const email       = account?.username || account?.idTokenClaims?.email || '';
   const displayName = account?.name || email.split('@')[0] || 'User';
@@ -59,6 +62,19 @@ export default function TopBar({ path, lastRefreshed, onRefresh, loading }) {
             {loading ? '⏳' : '↺'} Refresh
           </button>
         )}
+
+        {/* Platform Tour — replay the walkthrough any time */}
+        <button
+          type="button"
+          className="tour-launch"
+          data-tour="tour-button"
+          onClick={tour.openWelcome}
+          title="Platform tour: a guided walkthrough of the trackers opened for this account"
+        >
+          <Compass size={15} strokeWidth={1.9} />
+          <span>Tour</span>
+          {tour.hasNew && <i className="tour-launch-dot" aria-label="New pages to explore" />}
+        </button>
 
         <span className="pill">Live Excel</span>
 

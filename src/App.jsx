@@ -14,6 +14,7 @@ import TaskTracker        from './pages/TaskTracker.jsx';
 import ConsultantDirectory from './pages/ConsultantDirectory.jsx';
 import ClientDirectory from './pages/ClientDirectory.jsx';
 import TaskFloat          from './components/TaskFloat.jsx';
+import { TourProvider }   from './components/tour/TourProvider.jsx';
 import EngagementPage     from './pages/EngagementPage.jsx';
 import OpsChecklist          from './pages/OpsChecklist.jsx';
 import ContentDevelopmentTracker from './pages/ContentDevelopmentTracker.jsx';
@@ -187,7 +188,10 @@ export default function App() {
       <BrowserRouter>
         <AuthGuard>
           <PermissionsProvider>
-            <Shell />
+            {/* Platform Tour: welcome screen + guided spotlight tour, shaped by each person's access */}
+            <TourProvider>
+              <Shell />
+            </TourProvider>
           </PermissionsProvider>
         </AuthGuard>
       </BrowserRouter>

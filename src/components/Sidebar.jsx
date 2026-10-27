@@ -61,6 +61,7 @@ export default function Sidebar() {
           visibleNav.map(n => (
             <div
               key={n.path}
+              data-tour-nav={n.page}
               className={`nav-item ${location.pathname === n.path ? 'active' : ''}`}
               onClick={() => navigate(n.path)}
             >
@@ -80,6 +81,7 @@ export default function Sidebar() {
           <div className="sidebar-section-label">Admin</div>
           <nav>
             <div
+              data-tour-nav="admin"
               className={`nav-item ${location.pathname === '/admin' ? 'active' : ''}`}
               onClick={() => navigate('/admin')}
             >
