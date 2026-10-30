@@ -128,6 +128,7 @@ export function buildProposalLines(solutions) {
       const client = clean(anchor.clientName) || clean(f('clientName'));
       const bdValue = toRupees(anchor.bdProposalValue) || Math.max(0, ...vr.map(r => toRupees(r.bdProposalValue)));
       const solValue = vr.reduce((sum, r) => sum + toRupees(r.solutionValue), 0);
+      const solCount = vr.filter(r => clean(r.solutionTopic)).length;   // solution items in this version
       const quotedValue = bdValue || solValue;
       const isLatest = n === top;
       out.push({
@@ -145,6 +146,7 @@ export function buildProposalLines(solutions) {
         quotedValue,
         value: quotedValue,
         bdValue,     // BD Proposal Value only — used by the Sales tab (matches the BD Tracker)
+        solCount,    // number of solution items (rows with a Solution Topic) in this version
         solValue,    // Solution Values only — used by the Solutioning tab (matches the Solution Tracker)
         pipeline: pipelineOf(clean(anchor.bdStatus) || f('bdStatus'), f('status')),
         industry: clean(f('industry')) || industryFromConfig(client),
