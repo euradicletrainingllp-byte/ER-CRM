@@ -7,7 +7,9 @@
  *  - Drag the panel by its header; position, open/closed state and tab are remembered.
  *  - Tabs: Mine (overdue / today / this week / later / no date), Assigned by me, Done today.
  *  - Tick = Done. Expand a task to change status, add a progress note or open it in full.
- *  - Quick add: "Add a task for myself…" + due date.
+ *  - New task: for myself or any CRM user (Admin Panel), in a project or standalone, with team,
+ *    due date and priority. The assignee is emailed (CRM Notify). "+ Task in this project" on any
+ *    task opens the same form with its project filled in; the assigner can re-assign a task.
  * Shares its data with the Project Management page (both update straight away).
  */
 import { useState, useEffect, useMemo, useRef } from 'react';
@@ -15,9 +17,11 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { usePermissions } from '../hooks/usePermissions.js';
 import { onListChange } from '../services/api.js';
 import { getTasks, peekTasks, cacheTasks, addTask, updateTask, nextTaskId, tasksConfigured } from '../services/tasksApi.js';
-import { taskIsOpen } from '../config/taskOptions.js';
+import { taskIsOpen, TASK_TEAMS, TASK_PRIORITIES } from '../config/taskOptions.js';
+import { PROJECT_KEYS } from '../services/tasksApi.js';
 import {
   useTaskUser, useTaskRights, dueInfo, DueChip, StatusPill, byDue, withStatus, todayIso, newId,
+  groupProjects, notifyAssignee, mailNote, PersonPicker, norm,
 } from './tasksShared.jsx';
 import '../styles/tasks.css';
 
@@ -49,6 +53,13 @@ export default function TaskFloat() {
   const [note, setNote] = useState('');
   const [quick, setQuick] = useState('');
   const [quickDue, setQuickDue] = useState(todayIso());
+  const [full, setFull] = useState(false);                 // full "New task" form open
+  const [qTo, setQTo] = useState('');                     // assignee ('' = me)
+  const [qProject, setQProject] = useState('');
+  const [qTeam, setQTeam] = useState('');
+  const [qPrio, setQPrio] = useState('Medium');
+  const [qDesc, setQDesc] = useState('');
+  const [info, setInfo] = useState('');
   const drag = useRef(null);
   const panel = useRef(null);
 
@@ -74,6 +85,7 @@ export default function TaskFloat() {
   const mine = useMemo(() => tasks.filter(t => user.isMe(t.assignedTo) && taskIsOpen(t)).sort(byDue), [tasks, user]);
   const delegated = useMemo(() => tasks.filter(t => user.isMe(t.assignedBy) && !user.isMe(t.assignedTo) && taskIsOpen(t)).sort(byDue), [tasks, user]);
   const doneToday = useMemo(() => tasks.filter(t => user.isMe(t.assignedTo) && t.status === 'Done' && t.completedDate === todayIso()), [tasks, user]);
+  const projects = useMemo(() => groupProjects(tasks).filter(p => !['Completed', 'Cancelled'].includes(p.status)), [tasks]);
   const overdueN = mine.filter(t => dueInfo(t)?.bucket === 'overdue').length;
   const todayN = mine.filter(t => dueInfo(t)?.bucket === 'today').length;
 
@@ -107,22 +119,47 @@ export default function TaskFloat() {
     setNote('');
     save({ ...t, updates: [...(t.updates || []), { id: newId(), at: new Date().toISOString(), by: user.name, text, status: t.status }] });
   };
+  const resetQuick = () => { setQuick(''); setQDesc(''); setQTo(''); setQProject(''); setQTeam(''); setQPrio('Medium'); setQuickDue(todayIso()); };
+  const startInProject = t => {               // "+ Task in this project"
+    setFull(true); setQProject(t.projectId || ''); setQTeam(t.team || ''); setQTo(''); setQuick(''); setQDesc('');
+    setTimeout(() => panel.current?.querySelector('.tkf-q-title')?.focus(), 0);
+  };
   const quickAdd = async () => {
     const title = quick.trim();
     if (!title || busy) return;
-    setBusy('add'); setErr('');
+    setBusy('add'); setErr(''); setInfo('');
     try {
       const fresh = await getTasks().catch(() => tasks);      // fresh list → no duplicate Task ID
+      const proj = full && qProject ? groupProjects(fresh).find(p => p.projectId === qProject) || projects.find(p => p.projectId === qProject) : null;
+      const projectCols = Object.fromEntries(PROJECT_KEYS.map(k => [k, proj?.[k] || '']));
+      const to = (full && qTo) || user.name;
       const row = {
-        taskId: nextTaskId(fresh), projectId: '', projectName: '', projectType: '', team: '', client: '', projectOwner: '', projectDue: '',
-        title, description: '', assignedTo: user.name, assignedBy: user.name, assignedDate: todayIso(), dueDate: quickDue,
-        priority: 'Medium', status: 'To do', waitingOn: '', completedDate: '', outputLink: '', updates: [], remarks: '', createdBy: user.name,
+        taskId: nextTaskId(fresh), ...projectCols, team: full ? qTeam : '',
+        title, description: full ? qDesc.trim() : '', assignedTo: to, assignedBy: user.name, assignedDate: todayIso(), dueDate: quickDue,
+        priority: full ? qPrio : 'Medium', status: 'To do', waitingOn: '', completedDate: '', outputLink: '', updates: [], remarks: '', createdBy: user.name,
       };
       await addTask(row);
       cacheTasks([...fresh, row]);
-      setQuick(''); setTab('mine');
+      const mail = notifyAssignee(row, user);
+      const self = user.isMe(to);
+      setInfo(`✓ ${row.taskId} ${self ? 'added to your tasks' : `assigned to ${to}`}${self ? '' : mailNote(mail, to)}`);
+      setTimeout(() => setInfo(''), 6000);
+      resetQuick();
+      setTab(self ? 'mine' : 'delegated');
     } catch (e) { setErr('❌ Not added: ' + e.message); }
     finally { setBusy(''); }
+  };
+  const reassign = async (t, to) => {
+    if (!to || norm(to) === norm(t.assignedTo)) return;
+    const next = { ...t, assignedTo: to, assignedBy: user.name, assignedDate: todayIso() };
+    const prevList = tasks;
+    cacheTasks(prevList.map(x => (x.taskId === t.taskId ? next : x)));
+    try {
+      await updateTask(next); setErr('');
+      const mail = notifyAssignee(next, user, true);
+      setInfo(`✓ ${t.taskId} re-assigned to ${to}${user.isMe(to) ? '' : mailNote(mail, to)}`);
+      setTimeout(() => setInfo(''), 6000);
+    } catch (e) { cacheTasks(prevList); setErr('❌ Not re-assigned: ' + e.message); }
   };
 
   if (!allowed) return null;
@@ -169,7 +206,20 @@ export default function TaskFloat() {
                 <button type="button" className="btn btn-outline btn-sm" disabled={!note.trim()} onClick={() => addNote(t)}>Add</button>
               </div>
             )}
-            <button type="button" className="tkf-link" onClick={() => openFull(t)}>Open {t.taskId} in Project Management ↗</button>
+            {rights.canEdit(t) && (
+              <div className="tkf-reassign">
+                <span>Assigned to</span>
+                <PersonPicker className="form-input" value={t.assignedTo} users={user.users} blank={null} onChange={v => reassign(t, v)} title="Re-assign (the new person is emailed)" />
+              </div>
+            )}
+            <div className="tkf-links">
+              {rights.canAdd && (
+                <button type="button" className="tkf-link" onClick={() => startInProject(t)}>
+                  + {t.projectId ? `Task in ${t.projectName || t.projectId}` : 'New task'}
+                </button>
+              )}
+              <button type="button" className="tkf-link" onClick={() => openFull(t)}>Open {t.taskId} ↗</button>
+            </div>
           </div>
         )}
       </div>
@@ -206,6 +256,7 @@ export default function TaskFloat() {
       </div>
 
       {err && <div className="tkf-err">{err}</div>}
+      {info && <div className="tkf-info">{info}</div>}
 
       <div className="tkf-body">
         {!loaded && !err ? <div className="tkf-empty">Loading tasks…</div>
@@ -226,11 +277,63 @@ export default function TaskFloat() {
       </div>
 
       {rights.canAdd && (
-        <div className="tkf-quick">
-          <input className="form-input" placeholder="+ Add a task for myself…" value={quick} onChange={e => setQuick(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') quickAdd(); }} disabled={busy === 'add'} />
-          <input className="form-input tkf-date" type="date" value={quickDue} onChange={e => setQuickDue(e.target.value)} title="Due date" />
-          <button type="button" className="btn btn-primary btn-sm" disabled={!quick.trim() || busy === 'add'} onClick={quickAdd}>{busy === 'add' ? '…' : 'Add'}</button>
+        <div className={`tkf-quick${full ? ' full' : ''}`}>
+          {full && (
+            <div className="tkf-q-head">
+              <b>New task</b>
+              <button type="button" className="tkf-icon" onClick={() => { setFull(false); resetQuick(); }} title="Close">✕</button>
+            </div>
+          )}
+          <div className="tkf-q-line">
+            <input className="form-input tkf-q-title" placeholder={full ? 'Task title — start with a verb' : '+ Add a task for myself…'} value={quick}
+              onChange={e => setQuick(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') quickAdd(); }} disabled={busy === 'add'} />
+            {!full && <input className="form-input tkf-date" type="date" value={quickDue} onChange={e => setQuickDue(e.target.value)} title="Due date" />}
+            {!full && <button type="button" className="btn btn-primary btn-sm" disabled={!quick.trim() || busy === 'add'} onClick={quickAdd}>{busy === 'add' ? '…' : 'Add'}</button>}
+          </div>
+          {full ? (
+            <>
+              <div className="tkf-q-grid">
+                <label>Assign to
+                  <PersonPicker value={qTo || user.pickName} users={user.users} blank={null} onChange={setQTo} />
+                </label>
+                <label>Project
+                  <select className="form-input" value={qProject} onChange={e => {
+                    const id = e.target.value; setQProject(id);
+                    const p = projects.find(x => x.projectId === id);
+                    if (p && !qTeam && p.teams?.[0]) setQTeam(p.teams[0]);
+                  }}>
+                    <option value="">— No project —</option>
+                    {projects.map(p => <option key={p.projectId} value={p.projectId}>{p.projectId} · {p.projectName}</option>)}
+                  </select>
+                </label>
+                <label>Team
+                  <select className="form-input" value={qTeam} onChange={e => setQTeam(e.target.value)}>
+                    <option value="">— Team —</option>
+                    {TASK_TEAMS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </label>
+                <label>Due date
+                  <input className="form-input" type="date" value={quickDue} onChange={e => setQuickDue(e.target.value)} />
+                </label>
+                <label>Priority
+                  <select className="form-input" value={qPrio} onChange={e => setQPrio(e.target.value)}>
+                    {TASK_PRIORITIES.map(p => <option key={p}>{p}</option>)}
+                  </select>
+                </label>
+              </div>
+              <textarea className="form-input tkf-q-desc" rows={2} placeholder="Details (optional) — what does “done” look like?" value={qDesc} onChange={e => setQDesc(e.target.value)} />
+              <div className="tkf-q-foot">
+                <span className="tkf-q-hint">
+                  {qTo && !user.isMe(qTo) ? (user.emailOf(qTo) ? `✉ ${qTo} will be emailed` : `⚠ No email for ${qTo} in Admin Panel`) : 'For myself'}
+                </span>
+                <button type="button" className="btn btn-cta btn-sm" disabled={!quick.trim() || busy === 'add'} onClick={quickAdd}>
+                  {busy === 'add' ? 'Saving…' : qTo && !user.isMe(qTo) ? 'Assign task' : 'Add task'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <button type="button" className="tkf-link tkf-q-more" onClick={() => setFull(true)}>+ Assign to someone / add to a project</button>
+          )}
         </div>
       )}
     </div>

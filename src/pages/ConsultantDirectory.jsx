@@ -64,14 +64,27 @@ const Field = ({ label, full, k, children }) => (
   <div className={`form-field${full ? ' full' : ''}`} data-pf={k}><label className="form-label">{label}</label>{children}</div>
 );
 
-function Avatar({ c, size = 40, square = false }) {
-  const [bad, setBad] = useState(false);
-  useEffect(() => setBad(false), [c.photoLink]);
+/** Photo order: Excel "Photo Link" → saved headshot public/consultants/<Consultant ID>.webp → initials. */
+function photoSources(c) {
+  const out = [];
   const link = String(c.photoLink || '').trim();
-  const src = /^(https?:\/\/|\/)\S+\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(link) ? link : '';
+  if (/^(https?:\/\/|\/)\S+\.(png|jpe?g|webp|gif)(\?.*)?$/i.test(link)) out.push(link);
+  const id = String(c.consultantId || '').trim().toUpperCase();
+  const m = id.match(/^CN-?(\d+)$/);
+  if (m) {
+    const std = `/consultants/CN-${m[1].padStart(3, '0')}.webp`;
+    if (!out.includes(std)) out.push(std);
+  }
+  return out;
+}
+function Avatar({ c, size = 40, square = false }) {
+  const srcs = photoSources(c);
+  const [tried, setTried] = useState(0);
+  useEffect(() => setTried(0), [c.photoLink, c.consultantId]);
+  const src = srcs[tried] || '';
   return (
-    <span className={`cd-avatar${square ? ' sq' : ''}${src && !bad ? ' has-img' : ''}`} style={{ width: size, height: size, fontSize: size * 0.36 }}>
-      {src && !bad ? <img src={src} alt="" onError={() => setBad(true)} /> : initials(c.fullName)}
+    <span className={`cd-avatar${square ? ' sq' : ''}${src ? ' has-img' : ''}`} style={{ width: size, height: size, fontSize: size * 0.36 }}>
+      {src ? <img src={src} alt={c.fullName || ''} loading="lazy" onError={() => setTried(t => t + 1)} /> : initials(c.fullName)}
     </span>
   );
 }

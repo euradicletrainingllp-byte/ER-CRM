@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { usePermissionsContext } from '../context/PermissionsContext.jsx';
 import { usePermissions } from '../hooks/usePermissions.js';
-import { emailPerson } from '../services/notifier.js';
+import { emailPerson, emailForPerson } from '../services/notifier.js';
 import { taskIsOpen, TASK_CLOSED } from '../config/taskOptions.js';
 
 /* ─── Dates & text ─── */
@@ -69,8 +69,24 @@ export function useTaskUser() {
     const name = msalName || permName || local;
     const keys = new Set([permName, msalName, msalName.split(' ')[0], permName.split(' ')[0], email, local, local.split('.')[0]].map(norm).filter(Boolean));
     const isMe = v => { const n = norm(v); return !!n && (keys.has(n) || keys.has(n.split(' ')[0])); };
-    const people = [...new Set(Object.values(permissions || {}).map(p => p?.name).filter(Boolean))].sort();
-    return { email, name, isMe, people };
+    // Platform users = everyone in the Admin Panel (PermissionsTable), with the email saved there
+    const users = Object.entries(permissions || {})
+      .map(([em, p]) => ({ email: String(em || '').toLowerCase().trim(), name: String(p?.name || '').trim() || String(em).split('@')[0] }))
+      .filter(u => u.email.includes('@'))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const people = [...new Set(users.map(u => u.name))];
+    /** Email for a person picked in a task (exact Admin Panel name first, then the notifier's lookup). */
+    const emailOf = v => {
+      const n = norm(v);
+      if (!n) return '';
+      if (n.includes('@')) return n;
+      const exact = users.filter(u => norm(u.name) === n);
+      if (exact.length === 1) return exact[0].email;
+      return emailForPerson(v);
+    };
+    // Name as saved in the Admin Panel (used when assigning to myself), else the Microsoft name
+    const pickName = permName || name;
+    return { email, name, pickName, isMe, people, users, emailOf };
   }, [acc.username, acc.name, permissions]);
 }
 
@@ -120,8 +136,15 @@ export function groupProjects(tasks) {
 
 /* ─── Assignment email (assignee only, never for self-assigned tasks) ─── */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/**
+ * Returns 'sent' | 'self' | 'no-email' | 'no-flow' | 'none'.
+ * The email address comes from the Admin Panel (PermissionsTable) entry of the assignee.
+ */
 export function notifyAssignee(task, user, reassigned = false) {
-  if (!task?.assignedTo || user.isMe(task.assignedTo)) return false;
+  if (!task?.assignedTo) return 'none';
+  if (user.isMe(task.assignedTo)) return 'self';
+  const to = user.emailOf ? user.emailOf(task.assignedTo) : '';
+  if (!to) return 'no-email';
   const link = `${window.location.origin}/tasks?task=${encodeURIComponent(task.taskId)}`;
   const row = (k, v) => (v ? `<tr><td style="padding:4px 12px 4px 0;color:#6b7280">${k}</td><td style="padding:4px 0"><b>${esc(v)}</b></td></tr>` : '');
   const html = `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#2D3047">
@@ -129,16 +152,42 @@ export function notifyAssignee(task, user, reassigned = false) {
     <p><b>${esc(user.name)}</b> ${reassigned ? 'has re-assigned' : 'has assigned'} a task to you in the EuRadicle CRM.</p>
     <table style="border-collapse:collapse;margin:8px 0 14px">
       ${row('Task', task.title)}${row('Project', task.projectName && `${task.projectName} (${task.projectId})`)}
-      ${row('Due date', task.dueDate && fmtD(task.dueDate))}${row('Priority', task.priority)}${row('Details', task.description)}
+      ${row('Team', task.team)}${row('Due date', task.dueDate && fmtD(task.dueDate))}${row('Priority', task.priority)}${row('Details', task.description)}
     </table>
     <p><a href="${link}" style="background:#2D3047;color:#fff;padding:8px 16px;border-radius:6px;text-decoration:none">Open task</a></p>
     <p style="color:#6b7280;font-size:12px">Tip: keep the “My Tasks” panel open (bottom-right of every CRM page) to track your daily tasks.</p>
   </div>`;
-  return emailPerson({
-    to: task.assignedTo,
+  const ok = emailPerson({
+    to,
     subject: `${reassigned ? 'Task re-assigned' : 'New task'}: ${task.title}${task.dueDate ? ` · due ${fmtD(task.dueDate)}` : ''}`,
     html, actor: { email: user.email, name: user.name },
   });
+  return ok ? 'sent' : 'no-flow';
+}
+/** Toast text for a notifyAssignee() result. */
+export function mailNote(result, name) {
+  if (result === 'sent') return ` · email sent to ${name}`;
+  if (result === 'no-email') return ` · ⚠ no email for “${name}” in the Admin Panel, so no email was sent`;
+  if (result === 'no-flow') return ' · ⚠ email not sent (CRM Notify flow not set up)';
+  return '';
+}
+
+/**
+ * Pick a person from the CRM's users (Admin Panel → User Access Control).
+ * Stores the name (as before); a value that is not a platform user is kept and marked.
+ */
+export function PersonPicker({ value, users, onChange, blank = '— select a person —', disabled, className = 'form-input', title }) {
+  const v = String(value || '');
+  const known = users.some(u => norm(u.name) === norm(v));
+  const dupe = n => users.filter(u => norm(u.name) === norm(n)).length > 1;
+  return (
+    <select className={className} value={known ? users.find(u => norm(u.name) === norm(v)).name : v} disabled={disabled} title={title}
+      onChange={e => onChange(e.target.value)}>
+      {blank !== null && <option value="">{blank}</option>}
+      {users.map(u => <option key={u.email} value={u.name}>{u.name}{dupe(u.name) ? ` (${u.email})` : ''}</option>)}
+      {v && !known && <option value={v}>{v} (not a CRM user)</option>}
+    </select>
+  );
 }
 
 /* ─── Small form parts ─── */

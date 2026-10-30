@@ -21,7 +21,7 @@ import {
 } from '../config/taskOptions.js';
 import {
   useTaskUser, useTaskRights, StatusPill, PrioPill, DueChip, Avatar, dueInfo, isOverdue, byDue, withStatus, groupProjects,
-  notifyAssignee, todayIso, addDays, daysFrom, fmtD, fmtAt, norm, newId, Select, Field,
+  notifyAssignee, mailNote, PersonPicker, todayIso, addDays, daysFrom, fmtD, fmtAt, norm, newId, Select, Field,
 } from '../components/tasksShared.jsx';
 import '../styles/leadsVendors.css';
 import '../styles/tasks.css';
@@ -66,14 +66,14 @@ function TaskModal({ initial, preset, projects, people, user, saving, onSave, on
         <div className="form-grid">
           <Field label="Task Title *" full><input autoFocus className="form-input" value={f.title} onChange={e => set('title', e.target.value)} placeholder="Start with a verb: “Send welcome email”, “Print 20 manuals”" /></Field>
           <Field label="Description" full><textarea className="form-input" rows={2} value={f.description} onChange={e => set('description', e.target.value)} placeholder="What does “done” look like?" /></Field>
-          <Field label="Assigned To *"><input className="form-input" list="tk-people" value={f.assignedTo} onChange={e => set('assignedTo', e.target.value)} placeholder="One person" /></Field>
+          <Field label="Assigned To *"><PersonPicker value={f.assignedTo} users={user.users} onChange={v => set('assignedTo', v)} /></Field>
           <Field label="Team"><Select value={f.team} options={TASK_TEAMS} onChange={v => set('team', v)} /></Field>
           <Field label="Due Date"><input className="form-input" type="date" value={f.dueDate} onChange={e => set('dueDate', e.target.value)} /></Field>
           <Field label="Priority"><Select value={f.priority} options={TASK_PRIORITIES} onChange={v => set('priority', v)} blank={null} /></Field>
           <Field label="Status"><Select value={f.status} options={TASK_STATUSES} onChange={v => setF(x => withStatus(x, v))} blank={null} /></Field>
           {f.status === 'Waiting on someone'
             ? <Field label="Waiting On"><input className="form-input" list="tk-people" value={f.waitingOn} onChange={e => set('waitingOn', e.target.value)} placeholder="Who / what is it blocked by?" /></Field>
-            : <Field label="Assigned By"><input className="form-input" list="tk-people" value={f.assignedBy} onChange={e => set('assignedBy', e.target.value)} /></Field>}
+            : <Field label="Assigned By"><PersonPicker value={f.assignedBy} users={user.users} onChange={v => set('assignedBy', v)} /></Field>}
           <Field label="Output Link" full><input className="form-input" value={f.outputLink} onChange={e => set('outputLink', e.target.value.trim())} placeholder="SharePoint / OneDrive link to the deliverable" /></Field>
           <Field label="Remarks" full><textarea className="form-input" rows={2} value={f.remarks} onChange={e => set('remarks', e.target.value)} /></Field>
         </div>
@@ -82,6 +82,9 @@ function TaskModal({ initial, preset, projects, people, user, saving, onSave, on
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
           <button className="btn btn-cta" disabled={!valid || saving} onClick={() => onSave(f)}>{saving ? 'Saving…' : isEdit ? 'Update Task' : 'Assign Task'}</button>
           {!valid && <span className="lv-req">Task title and Assigned To are required</span>}
+          {valid && !user.isMe(f.assignedTo) && (!initial || norm(initial.assignedTo) !== norm(f.assignedTo)) && (
+            <span className="lv-muted">{user.emailOf(f.assignedTo) ? `✉ ${f.assignedTo} will be emailed (${user.emailOf(f.assignedTo)})` : `⚠ ${f.assignedTo} has no email in the Admin Panel`}</span>
+          )}
         </div>
       </div>
     </div>
@@ -106,7 +109,7 @@ function ProjectModal({ initial, people, user, saving, onSave, onClose }) {
           <Field label="Project Name *" full><input autoFocus className="form-input" value={p.projectName} onChange={e => set('projectName', e.target.value)} placeholder="e.g. Zscaler CS Training – Wave 1" /></Field>
           <Field label="Project Type"><Select value={p.projectType} options={PROJECT_TYPES} onChange={v => set('projectType', v)} /></Field>
           <Field label="Client"><input className="form-input" value={p.client} onChange={e => set('client', e.target.value)} placeholder="Blank for internal work" /></Field>
-          <Field label="Project Owner *"><input className="form-input" list="tk-people" value={p.projectOwner} onChange={e => set('projectOwner', e.target.value)} placeholder="One accountable person" /></Field>
+          <Field label="Project Owner *"><PersonPicker value={p.projectOwner} users={user.users} onChange={v => set('projectOwner', v)} /></Field>
           <Field label="Project Due Date"><input className="form-input" type="date" value={p.projectDue} onChange={e => set('projectDue', e.target.value)} /></Field>
         </div>
         {isEdit ? (
@@ -116,7 +119,7 @@ function ProjectModal({ initial, people, user, saving, onSave, onClose }) {
             <div className="lv-form-section">First task</div>
             <div className="form-grid">
               <Field label="Task Title *" full><input className="form-input" value={first.title} onChange={e => setFirst(x => ({ ...x, title: e.target.value }))} /></Field>
-              <Field label="Assigned To *"><input className="form-input" list="tk-people" value={first.assignedTo} onChange={e => setFirst(x => ({ ...x, assignedTo: e.target.value }))} /></Field>
+              <Field label="Assigned To *"><PersonPicker value={first.assignedTo} users={user.users} onChange={v => setFirst(x => ({ ...x, assignedTo: v }))} /></Field>
               <Field label="Team"><Select value={first.team} options={TASK_TEAMS} onChange={v => setFirst(x => ({ ...x, team: v }))} /></Field>
               <Field label="Due Date"><input className="form-input" type="date" value={first.dueDate} onChange={e => setFirst(x => ({ ...x, dueDate: e.target.value }))} /></Field>
             </div>
@@ -296,14 +299,14 @@ export default function TaskTracker({ onRefreshed }) {
         const row = { ...t, taskId: nextTaskId(fresh), assignedBy: t.assignedBy || user.name, assignedDate: t.assignedDate || todayIso(), createdBy: t.createdBy || user.name };
         await addTask(row);
         cacheTasks([...fresh, row]);
-        const mailed = notifyAssignee(row, user);
-        showToast(`✓ Task ${row.taskId} assigned to ${row.assignedTo}${mailed ? ' · email sent' : ''}`);
+        const mail = notifyAssignee(row, user);
+        showToast(`✓ Task ${row.taskId} assigned to ${row.assignedTo}${mailNote(mail, row.assignedTo)}`);
       } else {
         const prev = tasks.find(x => x.taskId === t.taskId);
         await updateTask(t);
         cacheTasks(tasks.map(x => (x.taskId === t.taskId ? t : x)));
-        const mailed = prev && norm(prev.assignedTo) !== norm(t.assignedTo) && notifyAssignee(t, user, true);
-        showToast(`✓ Task updated${mailed ? ` · ${t.assignedTo} emailed` : ''}`);
+        const mail = prev && norm(prev.assignedTo) !== norm(t.assignedTo) ? notifyAssignee(t, user, true) : 'none';
+        showToast(`✓ Task updated${mailNote(mail, t.assignedTo)}`);
       }
       setModal(null);
     } catch (e) { showToast('❌ ' + e.message); }
@@ -335,10 +338,10 @@ export default function TaskTracker({ onRefreshed }) {
         const row = { ...EMPTY_TASK, ...p, projectId, ...first, taskId: nextTaskId(fresh), assignedBy: user.name, assignedDate: todayIso(), createdBy: user.name };
         await addTask(row);
         cacheTasks([...fresh, row]);
-        notifyAssignee(row, user);
+        const mail = notifyAssignee(row, user);
         setOpenProj(s => new Set(s).add(projectId));
         setView('projects');
-        showToast(`✓ Project ${projectId} created`);
+        showToast(`✓ Project ${projectId} created${mailNote(mail, row.assignedTo)}`);
       } else {
         const rows = tasks.filter(t => t.projectId === modal.initial.projectId);
         const changed = rows.map(t => ({ ...t, ...p, projectId: t.projectId }));

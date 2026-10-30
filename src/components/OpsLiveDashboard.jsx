@@ -223,11 +223,11 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="kg g4">
-        <Kpi tone="tl" label={`FY ${fyShort(CURRENT_FY).slice(2)} Delivered`} value={curRow.total} sub={`${unit} completed this FY`} />
-        <Kpi tone="gd" label={`FY ${fyShort(CURRENT_FY).slice(2)} Upcoming`} value={curRow.upcoming} sub={`${unit} in pipeline`} />
-        <Kpi tone="gn" label="Best Year (Delivered)" value={best.total} sub={`FY ${fyShort(best.fy)}`} tag="▲ Record" tagTone="up" />
+        <Kpi tone="tl" label={`FY ${fyShort(CURRENT_FY).slice(2)} Delivered`} value={curRow.total} sub={`${unit} completed this FY`} how={`Engagement Calendar rows with Status = Delivered and a start date in this FY, counted once per ${countBy === 'sessions' ? 'session (row)' : 'project (EG ID)'}.`} />
+        <Kpi tone="gd" label={`FY ${fyShort(CURRENT_FY).slice(2)} Upcoming`} value={curRow.upcoming} sub={`${unit} in pipeline`} how={`Status Scheduled / Tentative / Re-schedule with a start date from today onward in this FY, counted once per ${countBy === 'sessions' ? 'session (row)' : 'project (EG ID)'}.`} />
+        <Kpi tone="gn" label="Best Year (Delivered)" value={best.total} sub={`FY ${fyShort(best.fy)}`} tag="▲ Record" tagTone="up" how="Highest Delivered count of any FY — earlier years from the Dashboard Report Data, live years from the Engagement Calendar." />
         <Kpi tone="nv" label="Key Account" value={keyAccount && keyAccount.upcoming > 0 ? keyAccount.label : '--'}
-             sub={keyAccount && keyAccount.upcoming > 0 ? `${keyAccount.upcoming} upcoming ${unit.toLowerCase()}` : 'Largest upcoming pipeline'} tag="Top Client" />
+             sub={keyAccount && keyAccount.upcoming > 0 ? `${keyAccount.upcoming} upcoming ${unit.toLowerCase()}` : 'Largest upcoming pipeline'} tag="Top Client" how="Client with the most upcoming (Scheduled / Tentative / Re-schedule, today onward) projects or sessions." />
       </div>
 
       <div className="cg c11">

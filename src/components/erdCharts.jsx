@@ -142,14 +142,15 @@ export const fyTiny  = y => `FY ${pad2(y % 100)}-${pad2((y + 1) % 100)}`; // FY 
 export const clean = v => String(v ?? '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
 export const keyOf = v => clean(v).toLowerCase();
 
-/** Small KPI tile, same look as the HTML report. */
-export function Kpi({ tone, label, value, sub, tag, tagTone = 'info' }) {
+/** Small KPI tile, same look as the HTML report. `how` = one line saying how the figure is calculated. */
+export function Kpi({ tone, label, value, sub, tag, tagTone = 'info', how }) {
   return (
     <div className={`kpi ${tone}`}>
       <div className="lb">{label}</div>
       <div className="vl">{value}</div>
       <div className="sb">{sub}</div>
       {tag && <span className={`tg ${tagTone}`}>{tag}</span>}
+      {how && <div className="how" title={how}>How: {how}</div>}
     </div>
   );
 }

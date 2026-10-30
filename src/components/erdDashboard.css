@@ -70,3 +70,6 @@
 .erd .g3{grid-template-columns:repeat(3,1fr)}
 .erd .tg.warn{background:#FFF3E0;color:#B45309}.erd .tg.bad{background:#FEF0EE;color:#C03A2B}
 @media(max-width:900px){.erd .g3{grid-template-columns:1fr 1fr}}
+
+/* One-line 'how it is calculated' note on every KPI card */
+.erd .kpi .how{font-size:11px;line-height:1.4;color:#8A93A3;margin-top:8px;padding-top:6px;border-top:1px dashed var(--e-border)}

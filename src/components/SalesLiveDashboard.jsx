@@ -219,12 +219,12 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
                   fixed="earlier quarterly revenue, targets and client history from Dashboard Report Data (12 Oct 2026)" />
 
       <div className="kg g5">
-        <Kpi tone="tl" label="Total Proposals (YTD)" value={tot.n} sub={`${uniqueProposals(curProps)} unique proposals${tot.n > uniqueProposals(curProps) ? ` · ${tot.n - uniqueProposals(curProps)} revisions` : ''}`} />
-        <Kpi tone="gn" label="Won Value (YTD)" value={fmtInr(tot.wonV)} sub={`${tot.wonC} proposals won`} tag="Closed" tagTone="up" />
-        <Kpi tone="gd" label="In-Process Value" value={fmtInr(tot.ipV)} sub={`${tot.ipC} proposals active`} tag="In negotiation" />
+        <Kpi tone="tl" label="Total Proposals (YTD)" value={tot.n} sub={`${uniqueProposals(curProps)} unique proposals${tot.n > uniqueProposals(curProps) ? ` · ${tot.n - uniqueProposals(curProps)} revisions` : ''}`} how="Proposal lines (Proposal ID + version) dated in this FY — month from Date of Discussion, else BD Month, else submission dates; each revision counts again." />
+        <Kpi tone="gn" label="Won Value (YTD)" value={fmtInr(tot.wonV)} sub={`${tot.wonC} proposals won`} tag="Closed" tagTone="up" how="Sum of BD Proposal Value of this FY's lines with BD Status = Won (BD value only — Solution values not used)." />
+        <Kpi tone="gd" label="In-Process Value" value={fmtInr(tot.ipV)} sub={`${tot.ipC} proposals active`} tag="In negotiation" how="Sum of BD Proposal Value of this FY's lines still In Process in the BD Tracker." />
         <Kpi tone="nv" label={`${curTarget?.q || `Q${curQ + 1}`} Target Achieved`} value={curTarget?.target ? `${curTarget.pct.toFixed(1)}%` : '--'}
-             sub={curTarget?.target ? `of ${fmtInr(curTarget.target)} ${curTarget.q} target` : 'no target set for this quarter'} />
-        <Kpi tone="pu" label="Total Unique Clients" value={clientYears.unique} sub="Since inception, till date" tag="All-time" />
+             sub={curTarget?.target ? `of ${fmtInr(curTarget.target)} ${curTarget.q} target` : 'no target set for this quarter'} how="Engagement Calendar Price (INR) of sessions starting this quarter (cancelled / lost / on hold excluded) ÷ the quarter's revenue target." />
+        <Kpi tone="pu" label="Total Unique Clients" value={clientYears.unique} sub="Since inception, till date" tag="All-time" how="Distinct client names — earlier years from the baseline report plus every Engagement Calendar company from FY 2026-27 (name variants merged)." />
       </div>
 
       <div className="cg c1">

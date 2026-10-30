@@ -583,3 +583,6 @@ select.form-input   { cursor: pointer; }
   100%    { box-shadow: 0 0 0 0 transparent; }
 }
 @media (max-width: 600px) { .pf-launch, .pf-card { right: 12px; bottom: 12px; } .pf-launch .pf-word { display: none; } }
+
+/* One-line 'how it is calculated' note on KPI cards */
+.kpi-how { font-size: 11px; line-height: 1.4; color: #8A93A3; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border); }

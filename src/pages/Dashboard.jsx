@@ -244,10 +244,10 @@ export default function Dashboard({ onRefreshed }) {
       <>
       {/* KPIs */}
       <div className="kpi-grid">
-        <KPICard label="Total Engagements" value={engData.length} sub="All time from Excel" icon="📋" variant="accent" />
-        <KPICard label="Revenue — Delivered" value={fmt(revenue)} sub={`${delivered.length} delivered sessions`} icon="💰" variant="green" />
-        <KPICard label="Scheduled Sessions" value={scheduled} sub={`${tentative} tentative`} icon="🗓" variant="blue" />
-        <KPICard label="BD Prospects" value={solData ? bdCount : '…'} sub={solData ? `Unique proposals in BD Tracker${bdLines.length > bdCount ? ` · ${bdLines.length} incl. revisions` : ''}` : 'Loading BD Tracker…'} icon="🎯" variant="purple" />
+        <KPICard label="Total Engagements" value={engData.length} sub="All time from Excel" icon="📋" variant="accent" how="Count of every Engagement Calendar row with a company — all years, all statuses." />
+        <KPICard label="Revenue — Delivered" value={fmt(revenue)} sub={`${delivered.length} delivered sessions`} icon="💰" variant="green" how="Sum of Price (INR) of rows with Status = Delivered, all years; GST and travel excluded." />
+        <KPICard label="Scheduled Sessions" value={scheduled} sub={`${tentative} tentative`} icon="🗓" variant="blue" how="Rows with Status = Scheduled (any date); the sub-line counts Status = Tentative." />
+        <KPICard label="BD Prospects" value={solData ? bdCount : '…'} sub={solData ? `Unique proposals in BD Tracker${bdLines.length > bdCount ? ` · ${bdLines.length} incl. revisions` : ''}` : 'Loading BD Tracker…'} icon="🎯" variant="purple" how="Unique Proposal IDs in the BD Tracker; revisions (V2, V3 …) of the same proposal count once." />
       </div>
 
       <div className="grid-2">

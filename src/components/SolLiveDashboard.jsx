@@ -250,10 +250,10 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
       <SourceNote live={`${fyLong(LIVE_FROM_FY)} onward from the Solution Tracker`} fixed="FY 2025-26 from Dashboard Report Data (12 Oct 2026)" />
 
       <div className="kg g4">
-        <Kpi tone="tl" label={`FY ${curTiny} Total Proposals`} value={Cd.summary?.total ?? 0} sub={Cd.summary ? `${Cd.summary.unique} unique proposals${Cd.summary.total > Cd.summary.unique ? ` · ${Cd.summary.total - Cd.summary.unique} revisions` : ''}` : 'Submitted this financial year'} />
-        <Kpi tone="gn" label="Journey Engagements" value={journey.curCount} sub={engTotal > 0 ? `${Math.round((journey.curCount / engTotal) * 100)}% of ${engTotal} total` : '--'} tag="Demand shift" tagTone="up" />
-        <Kpi tone="gd" label="Top Industry" value={topInd?.curCount ? topInd.label : '--'} sub={topInd?.curCount ? `${topInd.curCount} opportunities this FY` : 'most active sector'} />
-        <Kpi tone="nv" label="Customization Rate" value={`${custTotal ? Math.round((custRow.curCount / custTotal) * 100) : 0}%`} sub={`${custRow.curCount} of ${custTotal} proposals`} tag="Fully custom" />
+        <Kpi tone="tl" label={`FY ${curTiny} Total Proposals`} value={Cd.summary?.total ?? 0} sub={Cd.summary ? `${Cd.summary.unique} unique proposals${Cd.summary.total > Cd.summary.unique ? ` · ${Cd.summary.total - Cd.summary.unique} revisions` : ''}` : 'Submitted this financial year'} how="Proposal lines (Proposal ID + version) dated in this FY in the Solution Tracker; each revision counts again." />
+        <Kpi tone="gn" label="Journey Engagements" value={journey.curCount} sub={engTotal > 0 ? `${Math.round((journey.curCount / engTotal) * 100)}% of ${engTotal} total` : '--'} tag="Demand shift" tagTone="up" how="This FY's proposals whose Engagement Type is a learning journey ÷ all proposals with an Engagement Type." />
+        <Kpi tone="gd" label="Top Industry" value={topInd?.curCount ? topInd.label : '--'} sub={topInd?.curCount ? `${topInd.curCount} opportunities this FY` : 'most active sector'} how="Industry with the most opportunities this FY (one per proposal — revisions merged; blank industry ignored)." />
+        <Kpi tone="nv" label="Customization Rate" value={`${custTotal ? Math.round((custRow.curCount / custTotal) * 100) : 0}%`} sub={`${custRow.curCount} of ${custTotal} proposals`} tag="Fully custom" how="Proposals with Program Type = Customized ÷ proposals with a Program Type filled, this FY." />
       </div>
 
       <SolPair title="Development Category Mix" sub={`${vs} — Count and Value`} rows={mixes.developmentCategory} prevLabel={prevLabel} curLabel={curLabel} trunc={24} />

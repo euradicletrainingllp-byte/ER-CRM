@@ -23,7 +23,7 @@ import { getTasks, tasksConfigured } from '../services/tasksApi.js';
 import { getConsultants, consultantsConfigured } from '../services/consultantsApi.js';
 import { getClientDirectory, peekClientDirectory, clientsConfigured } from '../services/clientsApi.js';
 import {
-  TRACKERS, PERIODS, periodRange, inRange, todayIso, addDaysIso, openTasks, completedWork, missingByTracker,
+  TRACKERS, PERIODS, periodRange, periodLabelOf, inRange, todayIso, addDaysIso, openTasks, completedWork, missingByTracker,
   cashSummary, pipelineSummary, upcomingDeliveries, fmtL, clientSummary, projectSummary, consultantSummary, daysBetween,
 } from '../services/actionItems.js';
 import '../styles/founder.css';
@@ -122,12 +122,13 @@ function Seg({ value, options, onChange, size }) {
   );
 }
 
-function Stat({ label, value, sub, tone, onClick }) {
+function Stat({ label, value, sub, tone, onClick, how }) {
   return (
     <div className={`fd-stat${tone ? ' fd-' + tone : ''}${onClick ? ' fd-click' : ''}`} onClick={onClick} title={onClick ? 'Go to section' : undefined}>
       <div className="fd-stat-label">{label}</div>
       <div className="fd-stat-value">{value}</div>
       {sub && <div className="fd-stat-sub">{sub}</div>}
+      {how && <div className="fd-stat-how" title={how}>How: {how}</div>}
     </div>
   );
 }
@@ -201,7 +202,7 @@ export default function FounderDashboard({ onRefreshed }) {
 
   const data = useMemo(() => ({ sol, eng, ops, cdt, leads, vendors, tasks: projTasks, consultants, clients }),
     [sol, eng, ops, cdt, leads, vendors, projTasks, consultants, clients]);
-  const range = useMemo(() => periodRange(layout.period), [layout.period]);
+  const range = useMemo(() => periodRange(layout.period, undefined, layout.custom), [layout.period, layout.custom]);
   const tasks = useMemo(() => openTasks(data), [data]);
   const done = useMemo(() => completedWork(data), [data]);
   const missing = useMemo(() => missingByTracker(data), [data]);
@@ -214,7 +215,15 @@ export default function FounderDashboard({ onRefreshed }) {
 
   const overdue = useMemo(() => tasks.filter(t => t.days < 0), [tasks]);
   const soon = useMemo(() => tasks.filter(t => t.days >= 0 && t.days <= 7), [tasks]);
-  const periodLabel = PERIODS.find(p => p.id === layout.period)?.label || '';
+  const periodLabel = periodLabelOf(layout.period, layout.custom);
+  const setCustom = (k, v) => setLayout(l => ({ ...l, custom: { ...range, ...(l.custom || {}), [k]: v } }));
+  const customInputs = layout.period === 'custom' && (
+    <span className="fd-period-dates" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <input type="date" className="fd-select" value={range.from} max={range.to} onChange={e => setCustom('from', e.target.value)} title="From" />
+      <span className="fd-muted">to</span>
+      <input type="date" className="fd-select" value={range.to} min={range.from} onChange={e => setCustom('to', e.target.value)} title="To" />
+    </span>
+  );
   const go = id => {
     if (layout.collapsed[id]) setLayout(l => ({ ...l, collapsed: { ...l.collapsed, [id]: false } }));
     setTimeout(() => document.getElementById(`fd-sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
@@ -227,16 +236,16 @@ export default function FounderDashboard({ onRefreshed }) {
     pulse: () => (
       <Section id="pulse" {...sp}>
         <div className="fd-stats fd-stats-5">
-          <Stat label={`Revenue booked · ${periodLabel}`} value={fmtL(cash.booked)} sub={`${fmtL(cash.delivered)} delivered`} tone="navy" />
-          <Stat label={`Collected · ${periodLabel}`} value={fmtL(cash.collected)} sub={`${fmtL(cash.invoiced)} invoiced`} tone="green" onClick={() => go('cash')} />
-          <Stat label="Outstanding" value={fmtL(cash.outstanding)} sub={cash.overdueOut ? `${fmtL(cash.overdueOut)} overdue` : 'Nothing overdue'} tone={cash.overdueOut ? 'coral' : 'green'} onClick={() => go('cash')} />
-          <Stat label="To invoice" value={cash.toInvoiceN} sub={`${fmtL(cash.toInvoice)}${cash.overdueInvoiceN ? ` · ${cash.overdueInvoiceN} late` : ''}`} tone={cash.overdueInvoiceN ? 'coral' : 'gold'} onClick={() => go('cash')} />
-          <Stat label="Open pipeline" value={fmtL(pipe.pipelineAllV)} sub={`${plural(pipe.pipelineAll, 'proposal')} in process`} tone="mauve" onClick={() => go('pipeline')} />
-          <Stat label={`Win rate · ${periodLabel}`} value={pipe.winRate == null ? '—' : pipe.winRate + '%'} sub={`${pipe.won} won · ${pipe.lost} lost`} tone="navy" onClick={() => go('pipeline')} />
-          <Stat label="Sessions next 7 days" value={upcoming30.filter(e => e._start <= addDaysIso(todayIso(), 7)).length} sub={`${upcoming30.length} in next 30 days`} tone="navy" onClick={() => go('calendar')} />
-          <Stat label="Overdue tasks" value={overdue.length} sub={`across ${plural(new Set(overdue.map(t => t.tracker)).size, 'tracker')}`} tone={overdue.length ? 'coral' : 'green'} onClick={() => go('attention')} />
-          <Stat label="Due this week" value={soon.length} sub="today + next 7 days" tone="gold" onClick={() => go('attention')} />
-          <Stat label="Missing fields" value={missing.reduce((t, m) => t + m.fields, 0)} sub={`in ${missing.reduce((t, m) => t + m.records, 0)} records`} tone="mauve" onClick={() => go('health')} />
+          <Stat label={`Revenue booked · ${periodLabel}`} value={fmtL(cash.booked)} sub={`${fmtL(cash.delivered)} delivered`} tone="navy" how="Price (INR) of sessions starting in the period, not cancelled / lost / postponed / on hold; sub-line = those marked Delivered. GST & travel excluded." />
+          <Stat label={`Collected · ${periodLabel}`} value={fmtL(cash.collected)} sub={`${fmtL(cash.invoiced)} invoiced`} tone="green" onClick={() => go('cash')} how="Amount Received on the Received Date in the period (Invoice date if blank); Price + GST only, never above the invoice." />
+          <Stat label="Outstanding" value={fmtL(cash.outstanding)} sub={cash.overdueOut ? `${fmtL(cash.overdueOut)} overdue` : 'Nothing overdue'} tone={cash.overdueOut ? 'coral' : 'green'} onClick={() => go('cash')} how="(Price + GST − TDS + travel) − amount received on every invoice not marked Received / NA (any date); overdue = invoice date + 30 days passed." />
+          <Stat label="To invoice" value={cash.toInvoiceN} sub={`${fmtL(cash.toInvoice)}${cash.overdueInvoiceN ? ` · ${cash.overdueInvoiceN} late` : ''}`} tone={cash.overdueInvoiceN ? 'coral' : 'gold'} onClick={() => go('cash')} how="Engagements that have ended with no Invoice date (Finance stage To Invoice / Invoice Overdue); value = Price." />
+          <Stat label="Open pipeline" value={fmtL(pipe.pipelineAllV)} sub={`${plural(pipe.pipelineAll, 'proposal')} in process`} tone="mauve" onClick={() => go('pipeline')} how="BD Proposal Value of the latest version of every proposal still In Process (any date)." />
+          <Stat label={`Win rate · ${periodLabel}`} value={pipe.winRate == null ? '—' : pipe.winRate + '%'} sub={`${pipe.won} won · ${pipe.lost} lost`} tone="navy" onClick={() => go('pipeline')} how="Won ÷ (Won + Lost) unique proposals dated in the period; In Process not counted." />
+          <Stat label="Sessions next 7 days" value={upcoming30.filter(e => e._start <= addDaysIso(todayIso(), 7)).length} sub={`${upcoming30.length} in next 30 days`} tone="navy" onClick={() => go('calendar')} how="Engagement Calendar sessions starting today to 7 days ahead, cancelled excluded." />
+          <Stat label="Overdue tasks" value={overdue.length} sub={`across ${plural(new Set(overdue.map(t => t.tracker)).size, 'tracker')}`} tone={overdue.length ? 'coral' : 'green'} onClick={() => go('attention')} how="Open tasks across all trackers whose due date / TAT has passed (same rules as the Reminders popup)." />
+          <Stat label="Due this week" value={soon.length} sub="today + next 7 days" tone="gold" onClick={() => go('attention')} how="Open tasks across all trackers due today or within the next 7 days." />
+          <Stat label="Missing fields" value={missing.reduce((t, m) => t + m.fields, 0)} sub={`in ${missing.reduce((t, m) => t + m.records, 0)} records`} tone="mauve" onClick={() => go('health')} how="Empty fields that should be filled by now, per tracker rules (same as the Missing tab of the Reminders popup)." />
         </div>
       </Section>
     ),
@@ -248,10 +257,10 @@ export default function FounderDashboard({ onRefreshed }) {
     pipeline: () => (
       <Section id="pipeline" {...sp} right={<span className="fd-muted">{periodLabel}</span>}>
         <div className="fd-stats fd-stats-4">
-          <Stat label="Proposals" value={pipe.count} sub={fmtL(pipe.totalV)} />
-          <Stat label="Won" value={pipe.won} sub={fmtL(pipe.wonV)} tone="green" />
-          <Stat label="In process" value={pipe.open} sub={fmtL(pipe.openV)} tone="gold" />
-          <Stat label="Lost" value={pipe.lost} sub={fmtL(pipe.lostV)} tone="coral" />
+          <Stat label="Proposals" value={pipe.count} sub={fmtL(pipe.totalV)} how="Unique proposals dated in the period (latest version); value = BD Proposal Value." />
+          <Stat label="Won" value={pipe.won} sub={fmtL(pipe.wonV)} tone="green" how="Proposals in the period with BD Status = Won; BD Proposal Value." />
+          <Stat label="In process" value={pipe.open} sub={fmtL(pipe.openV)} tone="gold" how="Proposals in the period still In Process; BD Proposal Value." />
+          <Stat label="Lost" value={pipe.lost} sub={fmtL(pipe.lostV)} tone="coral" how="Proposals in the period with BD Status = Lost; BD Proposal Value." />
         </div>
         {pipe.totalV > 0 && (
           <div className="fd-funnel" title="Share of proposal value: won · in process · lost">
@@ -285,11 +294,17 @@ export default function FounderDashboard({ onRefreshed }) {
       return (
         <Section id="cash" {...sp} right={<span className="fd-muted">{periodLabel}</span>}>
           <div className="fd-stats fd-stats-4">
-            <Stat label="Invoiced" value={fmtL(cash.invoiced)} />
-            <Stat label="Collected" value={fmtL(cash.collected)} tone="green" />
-            <Stat label="Outstanding" value={fmtL(cash.outstanding)} tone="gold" />
-            <Stat label="Overdue (30d+)" value={fmtL(cash.overdueOut)} tone={cash.overdueOut ? 'coral' : 'green'} />
+            <Stat label="Invoiced" value={fmtL(cash.invoiced)} how="Price + GST (18%) of rows whose Invoice date is in the period; travel excluded." />
+            <Stat label="Collected" value={fmtL(cash.collected)} sub={cash.invoiced ? `${Math.round((cash.collected / cash.invoiced) * 100)}% of invoiced` : `${cash.collectedN} payment(s)`} tone="green" how="Amount Received on the Received Date in the period (Invoice date if blank); Price + GST only." />
+            <Stat label="Outstanding" value={fmtL(cash.outstanding)} tone="gold" how="(Price + GST − TDS + travel) − amount received on all invoices not marked Received / NA, any date." />
+            <Stat label="Overdue (30d+)" value={fmtL(cash.overdueOut)} tone={cash.overdueOut ? 'coral' : 'green'} how="Part of Outstanding whose Invoice date + 30 days has passed." />
           </div>
+          {cash.suspects.length > 0 && (
+            <div className="fd-alert" style={{ marginTop: 8 }}>
+              {cash.suspects.length} "Amount Received" cell{cash.suspects.length > 1 ? 's' : ''} need{cash.suspects.length > 1 ? '' : 's'} checking (capped at the row's bill meanwhile) — fix in the Finance Tracker:{' '}
+              {cash.suspects.slice(0, 5).map(x => `${x.company}${x.sno ? ` (S No ${x.sno})` : ''}: "${x.raw}" — ${x.reason}`).join(' · ')}{cash.suspects.length > 5 ? ' …' : ''}
+            </div>
+          )}
           <div className="fd-sub-title">Receivables ageing · days since invoice (all open invoices)</div>
           <div className="fd-bars">
             {Object.entries(cash.aging).map(([k, v]) => (
@@ -325,9 +340,9 @@ export default function FounderDashboard({ onRefreshed }) {
       return (
         <Section id="ops" {...sp} count={list.length}>
           <div className="fd-stats fd-stats-3">
-            <Stat label="Sessions · next 30 days" value={upcoming30.length} />
-            <Stat label="Average readiness" value={avg == null ? '—' : avg + '%'} tone={avg == null ? '' : avg >= 80 ? 'green' : avg >= 50 ? 'gold' : 'coral'} />
-            <Stat label="Not in Ops Checklist" value={upcoming30.filter(e => !e._ops).length} tone={upcoming30.some(e => !e._ops) ? 'coral' : 'green'} />
+            <Stat label="Sessions · next 30 days" value={upcoming30.length} how="Engagement Calendar sessions starting today to 30 days ahead, cancelled excluded." />
+            <Stat label="Average readiness" value={avg == null ? '—' : avg + '%'} tone={avg == null ? '' : avg >= 80 ? 'green' : avg >= 50 ? 'gold' : 'coral'} how="Average Ops Checklist completion (items Yes / NA ÷ all items) of those sessions that have an Ops row." />
+            <Stat label="Not in Ops Checklist" value={upcoming30.filter(e => !e._ops).length} tone={upcoming30.some(e => !e._ops) ? 'coral' : 'green'} how="Sessions in the next 30 days with no Ops Checklist row of the same Index." />
           </div>
           {list.length ? (
             <ExpandList rows={list.slice(0, 12).map(e => ({
@@ -348,9 +363,9 @@ export default function FounderDashboard({ onRefreshed }) {
       return (
         <Section id="content" {...sp} count={ct.length}>
           <div className="fd-stats fd-stats-3">
-            <Stat label="Open entries" value={openEntries} sub={`of ${cdt.length}`} />
-            <Stat label="Overdue items" value={ct.filter(t => t.days < 0).length} tone={ct.some(t => t.days < 0) ? 'coral' : 'green'} />
-            <Stat label="Due this week" value={ct.filter(t => t.days >= 0).length} tone="gold" />
+            <Stat label="Open entries" value={openEntries} sub={`of ${cdt.length}`} how="Content Dev Tracker entries with no Completion Date." />
+            <Stat label="Overdue items" value={ct.filter(t => t.days < 0).length} tone={ct.some(t => t.days < 0) ? 'coral' : 'green'} how="Open content work items and entries whose deadline / due date has passed." />
+            <Stat label="Due this week" value={ct.filter(t => t.days >= 0).length} tone="gold" how="Open content work due today or within 7 days." />
           </div>
           {ct.length ? <TaskList tasks={ct.slice(0, 12)} open={open} /> : <Empty>No content work overdue or due this week</Empty>}
         </Section>
@@ -422,10 +437,10 @@ export default function FounderDashboard({ onRefreshed }) {
       return (
         <Section id="clients" {...sp} count={c.watch.length}>
           <div className="fd-stats fd-stats-4">
-            <Stat label="Existing clients" value={c.existing} sub={`${c.prospects} prospects · ${c.total} in directory`} tone="navy" />
-            <Stat label="At risk" value={c.atRisk} sub="amber / red health" tone={c.atRisk ? 'coral' : 'green'} />
-            <Stat label={`No contact ${c.coldDays}d+`} value={c.cold} sub="active / existing accounts" tone={c.cold ? 'gold' : 'green'} />
-            <Stat label="Follow-ups ≤ 7 days" value={c.followWeek} sub={`${c.openActions} open client actions`} tone="mauve" />
+            <Stat label="Existing clients" value={c.existing} sub={`${c.prospects} prospects · ${c.total} in directory`} tone="navy" how="Client Directory records with Client Type = Existing." />
+            <Stat label="At risk" value={c.atRisk} sub="amber / red health" tone={c.atRisk ? 'coral' : 'green'} how="Active / existing clients whose Relationship Health is Amber or Red." />
+            <Stat label={`No contact ${c.coldDays}d+`} value={c.cold} sub="active / existing accounts" tone={c.cold ? 'gold' : 'green'} how={`Active / existing clients whose last interaction is older than ${c.coldDays} days (or never logged).`} />
+            <Stat label="Follow-ups ≤ 7 days" value={c.followWeek} sub={`${c.openActions} open client actions`} tone="mauve" how="Clients whose Next Follow-up date is within the next 7 days (or already passed)." />
           </div>
           <div className="fd-flags">
             {c.noOwner > 0 && <span className="fd-flag gold">{plural(c.noOwner, 'client')} without an account owner</span>}
@@ -458,10 +473,10 @@ export default function FounderDashboard({ onRefreshed }) {
       return (
         <Section id="projects" {...sp} count={p.atRisk} right={<span className="fd-muted">done · {periodLabel}</span>}>
           <div className="fd-stats fd-stats-4">
-            <Stat label="Active projects" value={p.activeProjects} sub={`${p.atRisk} at risk`} tone={p.atRisk ? 'coral' : 'navy'} />
-            <Stat label="Open tasks" value={p.open} sub={`${p.waiting} waiting on someone`} />
-            <Stat label="Overdue tasks" value={p.overdue} sub={`${p.dueWeek} due this week`} tone={p.overdue ? 'coral' : 'green'} onClick={() => { setLayout(l => ({ ...l, tracker: 'tasks' })); go('attention'); }} />
-            <Stat label="Tasks done" value={p.done} sub={periodLabel} tone="green" />
+            <Stat label="Active projects" value={p.activeProjects} sub={`${p.atRisk} at risk`} tone={p.atRisk ? 'coral' : 'navy'} how="Projects with at least one open task; at risk = overdue tasks or past the project due date." />
+            <Stat label="Open tasks" value={p.open} sub={`${p.waiting} waiting on someone`} how="Tasks not Done / Cancelled across all projects." />
+            <Stat label="Overdue tasks" value={p.overdue} sub={`${p.dueWeek} due this week`} tone={p.overdue ? 'coral' : 'green'} onClick={() => { setLayout(l => ({ ...l, tracker: 'tasks' })); go('attention'); }} how="Open project tasks whose Due Date has passed." />
+            <Stat label="Tasks done" value={p.done} sub={periodLabel} tone="green" how="Tasks with a Completed Date in the period." />
           </div>
           {p.projects.length ? (
             <ExpandList rows={p.projects.map(x => ({
@@ -482,10 +497,10 @@ export default function FounderDashboard({ onRefreshed }) {
       return (
         <Section id="consultants" {...sp} count={b.renewals.length}>
           <div className="fd-stats fd-stats-4">
-            <Stat label="Active consultants" value={b.active} sub={`${b.onboarding} onboarding · ${b.total} listed`} tone="navy" />
-            <Stat label="Contracts valid" value={b.alerts.ok} tone="green" />
-            <Stat label="Renew / expired" value={b.alerts.renew + b.alerts.expired} sub={`${b.alerts.expired} expired`} tone={b.alerts.renew + b.alerts.expired ? 'coral' : 'green'} />
-            <Stat label="No contract date" value={b.alerts.none} tone={b.alerts.none ? 'gold' : 'green'} />
+            <Stat label="Active consultants" value={b.active} sub={`${b.onboarding} onboarding · ${b.total} listed`} tone="navy" how="Consultant Directory records with Status = Active." />
+            <Stat label="Contracts valid" value={b.alerts.ok} tone="green" how="Contract end date further away than the renewal notice days." />
+            <Stat label="Renew / expired" value={b.alerts.renew + b.alerts.expired} sub={`${b.alerts.expired} expired`} tone={b.alerts.renew + b.alerts.expired ? 'coral' : 'green'} how="Contracts inside the renewal notice window or already past their end date." />
+            <Stat label="No contract date" value={b.alerts.none} tone={b.alerts.none ? 'gold' : 'green'} how="Consultants (inactive skipped) with no Contract End date." />
           </div>
           <div className="fd-sub-title">Sessions in the next {b.days} days · lead + co-consultant</div>
           {b.bench.length ? (
@@ -545,6 +560,7 @@ export default function FounderDashboard({ onRefreshed }) {
           <select className="fd-select" value={layout.period} onChange={e => setLayout(l => ({ ...l, period: e.target.value }))} title="Period for revenue, pipeline and completed work">
             {PERIODS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
+          {customInputs}
           <button type="button" className="fd-btn" onClick={load} disabled={refreshing}><RefreshCw size={14} className={refreshing ? 'fd-spin' : ''} /> {refreshing ? 'Refreshing…' : 'Refresh'}</button>
           <button type="button" className="fd-btn fd-btn-primary" onClick={() => setCustomising(true)}><Settings2 size={14} /> Customise</button>
         </div>
@@ -785,6 +801,7 @@ function CustomisePanel({ layout, setLayout, customise, onClose }) {
           <select className="fd-select" value={layout.period} onChange={e => setLayout(l => ({ ...l, period: e.target.value }))}>
             {PERIODS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
+          {layout.period === 'custom' && <div className="fd-muted" style={{ marginTop: 4 }}>Set the dates in the header, next to the period list.</div>}
 
           <div className="fd-drawer-label">Collapse</div>
           <div className="fd-row-btns">

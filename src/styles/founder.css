@@ -197,3 +197,6 @@
   .fd-item-owner, .fd-item-amt { display: none; }
   .fd-header-right { width: 100%; }
 }
+
+/* One-line 'how it is calculated' note on every stat */
+.fd-stat-how { font-size: 10.5px; line-height: 1.35; color: #8A93A3; margin-top: 6px; padding-top: 5px; border-top: 1px dashed var(--border); white-space: normal; }

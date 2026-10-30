@@ -16,6 +16,7 @@ import { leadIsOpen, isBillable, VENDOR_INVOICE_EXPECTED_DAYS, CLIENT_BILLING_DA
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { buildProposals, toRupees } from '../components/proposalData.js';
 import { normPayment } from './syncWithEC.js';
+import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts } from './money.js';
 
 export const TRACKERS = {
   bd:          { label: 'BD Tracker',          short: 'BD',       route: '/bd-tracker' },
@@ -35,7 +36,8 @@ const vToBill = v => isBillable(v.billable) && !['Billed', 'Not applicable'].inc
 const vToPay = v => ['To pay', 'Partly paid'].includes(s(v.paymentStatus));
 
 const s = v => String(v ?? '').replace(/\s+/g, ' ').trim();
-const num = v => { const n = Number(String(v ?? '').replace(/[^0-9.-]/g, '')); return Number.isFinite(n) ? n : 0; };
+// Amounts: money() reads Indian formats and ignores dates typed next to the amount
+const num = v => money(v);
 const pad2 = n => String(n).padStart(2, '0');
 export const todayIso = () => { const t = new Date(); return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`; };
 export const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
@@ -45,14 +47,27 @@ const owner = v => s(v) || 'Unassigned';
 
 /* ─── Periods ─────────────────────────────────────────────────────────────── */
 export const PERIODS = [
-  { id: 'month',   label: 'This month' },
-  { id: 'quarter', label: 'This quarter' },
-  { id: 'fy',      label: 'This FY' },
-  { id: '30d',     label: 'Last 30 days' },
-  { id: 'lastfy',  label: 'Last FY' },
-  { id: 'all',     label: 'All time' },
+  { id: 'month',       label: 'This month' },
+  { id: 'lastmonth',   label: 'Last month' },
+  { id: 'quarter',     label: 'This quarter' },
+  { id: 'lastquarter', label: 'Last quarter' },
+  { id: 'fy',          label: 'This FY' },
+  { id: '30d',         label: 'Last 30 days' },
+  { id: '90d',         label: 'Last 90 days' },
+  { id: 'lastfy',      label: 'Last FY' },
+  { id: 'all',         label: 'All time' },
+  { id: 'custom',      label: 'Custom dates…' },
 ];
-export function periodRange(id, today = todayIso()) {
+/** Label for a period, with the dates for "Custom dates". */
+export function periodLabelOf(id, custom) {
+  if (id === 'custom') {
+    const r = periodRange('custom', undefined, custom);
+    const f = iso => (iso && iso.length === 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(2, 4)}` : '…');
+    return `${f(r.from)} – ${f(r.to)}`;
+  }
+  return PERIODS.find(p => p.id === id)?.label || '';
+}
+export function periodRange(id, today = todayIso(), custom = null) {
   const y = +today.slice(0, 4), m = +today.slice(5, 7);
   const fy = m >= 4 ? y : y - 1;
   const iso = (yy, mm, dd) => `${yy}-${pad2(mm)}-${pad2(dd)}`;
@@ -63,6 +78,22 @@ export function periodRange(id, today = todayIso()) {
       const qStart = [1, 1, 1, 4, 4, 4, 7, 7, 7, 10, 10, 10][m - 1];
       const endM = qStart + 2;
       return { from: iso(y, qStart, 1), to: iso(y, endM, lastDay(y, endM)) };
+    }
+    case 'lastmonth': {
+      const ly = m === 1 ? y - 1 : y, lm = m === 1 ? 12 : m - 1;
+      return { from: iso(ly, lm, 1), to: iso(ly, lm, lastDay(ly, lm)) };
+    }
+    case 'lastquarter': {
+      const qStart = [1, 1, 1, 4, 4, 4, 7, 7, 7, 10, 10, 10][m - 1];
+      const sy = qStart === 1 ? y - 1 : y, sm = qStart === 1 ? 10 : qStart - 3;
+      return { from: iso(sy, sm, 1), to: iso(sy, sm + 2, lastDay(sy, sm + 2)) };
+    }
+    case '90d':     return { from: addDaysIso(today, -89), to: today };
+    case 'custom': {
+      const ok = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+      const from = ok(custom?.from) ? custom.from : iso(fy, 4, 1);
+      const to = ok(custom?.to) ? custom.to : today;
+      return from <= to ? { from, to } : { from: to, to: from };
     }
     case 'fy':      return { from: iso(fy, 4, 1), to: iso(fy + 1, 3, 31) };
     case 'lastfy':  return { from: iso(fy - 1, 4, 1), to: iso(fy, 3, 31) };
@@ -144,7 +175,7 @@ export function openTasks({ sol = [], eng = [], ops = [], cdt = [], leads = [], 
       tracker: 'finance', record: s(e.company) || '(no company)', serial: e.engagementKey, sub: [s(e.egId), s(e.topic)].filter(Boolean).join(' · '),
       owner: owner(oc?.invoicePoc), amount: totalOf(e),
       details: [['Engagement', `${s(e.company)} — ${s(e.topic)}`], ['Dates', [toIso(e.startDate), toIso(e.endDate)].filter(Boolean).join(' → ')],
-        ['Total (price + travel + GST)', totalOf(e) ? '₹ ' + totalOf(e).toLocaleString('en-IN') : ''], ['Payment status', s(e.payment)],
+        ['To receive (price + GST − TDS + travel)', totalOf(e) ? '₹ ' + totalOf(e).toLocaleString('en-IN') : ''], ['Payment status', s(e.payment)],
         ['Invoice date', toIso(e.invoice)], ['Amount received', num(e.amountReceived) ? '₹ ' + num(e.amountReceived).toLocaleString('en-IN') : ''],
         ['Invoice POC', s(oc?.invoicePoc)], ['Invoice comment', s(oc?.invoiceComment)]],
     };
@@ -152,7 +183,7 @@ export function openTasks({ sol = [], eng = [], ops = [], cdt = [], leads = [], 
       out.push({ ...base, id: `fin|${e.engagementKey}|inv`, label: 'Raise invoice', due: invDue });
     if (['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(stage) && payDue)
       out.push({ ...base, id: `fin|${e.engagementKey}|pay`, label: stage === 'Partly Received' ? 'Collect balance' : 'Collect payment', due: payDue,
-        amount: Math.max(0, totalOf(e) - num(e.amountReceived)) });
+        amount: Math.max(0, totalOf(e) - collectedOf(e).gross) });
   });
 
   // Engagement Calendar — finished but never marked Delivered
@@ -296,7 +327,7 @@ export function completedWork({ sol = [], eng = [], ops = [], cdt = [], leads = 
     const inv = toIso(e.invoice);
     if (inv) out.push({ id: `fin|${e.engagementKey}|inv`, tracker: 'finance', record: s(e.company), sub: s(e.topic), label: 'Invoice raised', date: inv, amount: totalOf(e) });
     const rec = toIso(e.receivedDate);
-    if (rec) out.push({ id: `fin|${e.engagementKey}|rec`, tracker: 'finance', record: s(e.company), sub: s(e.topic), label: 'Payment received', date: rec, amount: num(e.amountReceived) || totalOf(e) });
+    if (rec) out.push({ id: `fin|${e.engagementKey}|rec`, tracker: 'finance', record: s(e.company), sub: s(e.topic), label: 'Payment received', date: rec, amount: collectedOf(e).amount || invoiceExTravel(e) });
   });
   bdLines(sol).forEach(r => {
     const sub = toIso(r.submissionToClient);
@@ -371,20 +402,25 @@ const NOT_REVENUE = /cancel|lost|drop|postpon|hold/i;
 export function cashSummary(eng, range) {
   const t = todayIso();
   let booked = 0, delivered = 0, invoiced = 0, collected = 0, toInvoice = 0, toInvoiceN = 0, overdueInvoiceN = 0;
-  let outstanding = 0, overdueOut = 0;
+  let outstanding = 0, overdueOut = 0, collectedN = 0;
+  const suspects = suspectReceipts(eng).map(({ e, reason }) => ({ company: s(e.company), sno: s(e.sno), raw: s(e.amountReceived), reason }));
   const aging = { '0–30': 0, '31–60': 0, '61–90': 0, '90+': 0 };
   const byClient = new Map();
   eng.forEach(e => {
     const start = toIso(e.startDate);
     const price = num(e.price);
     if (inRange(start, range) && !NOT_REVENUE.test(s(e.status))) { booked += price; if (/deliver/i.test(s(e.status))) delivered += price; }
-    if (inRange(toIso(e.invoice), range)) invoiced += totalOf(e);
-    if (inRange(toIso(e.receivedDate), range)) collected += num(e.amountReceived) || totalOf(e);
+    if (inRange(toIso(e.invoice), range)) invoiced += invoiceExTravel(e);   // travel / stay is not revenue
+    const got = collectedOf(e);
+    // Collected = money received in the period (Received Date), or — when no Received Date is filled —
+    // on invoices raised in the period. Never more than the invoice amount.
+    const recIso = toIso(e.receivedDate);
+    if (got.amount > 0 && (recIso ? inRange(recIso, range) : inRange(toIso(e.invoice), range))) { collected += got.amount; collectedN++; }
     if (!s(e.engagementKey)) return;
     const stage = financeStage(e);
     if (stage === 'To Invoice' || stage === 'Invoice Overdue') { toInvoice += price; toInvoiceN++; if (stage === 'Invoice Overdue') overdueInvoiceN++; }
     if (['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(stage)) {
-      const bal = Math.max(0, totalOf(e) - num(e.amountReceived));
+      const bal = Math.max(0, expectedOf(e) - got.gross);   // Price + GST − TDS + travel, less received
       outstanding += bal;
       const inv = toIso(e.invoice);
       const age = inv ? daysBetween(inv, t) : 0;
@@ -395,7 +431,7 @@ export function cashSummary(eng, range) {
     }
   });
   return {
-    booked, delivered, invoiced, collected, toInvoice, toInvoiceN, overdueInvoiceN, outstanding, overdueOut, aging,
+    booked, delivered, invoiced, collected, collectedN, suspects, toInvoice, toInvoiceN, overdueInvoiceN, outstanding, overdueOut, aging,
     topOutstanding: [...byClient.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6),
   };
 }

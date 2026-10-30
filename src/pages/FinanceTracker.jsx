@@ -12,12 +12,14 @@ import { usePermissions } from '../hooks/usePermissions.js';
 import ExportButton from '../components/ExportButton.jsx';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, FIN_RULES } from '../config/pendingFields.js';
+import { money, gstOf, tdsOf, receivableOf, expectedOf, GST_RATE, TDS_RATE } from '../services/money.js';
 
 /**
  * Finance Tracker
  * ───────────────
  * Lists Engagement Calendar rows (the master for finance) by month window,
- * exactly like the Engagement Calendar page.
+ * exactly like the Engagement Calendar page. Rows are referenced and ordered by S No
+ * (the Index column stays hidden — it is only the key the Excel flows save with).
  * Finance edits Payment status, Invoice date, Amount Received, Received Date,
  * Travel, Stay & Misc and GST — saved to the Engagement Calendar and copied in
  * the same save to the Ops Checklist row with the same Index (when there is one).
@@ -58,10 +60,13 @@ const dueColor = due => {
   const diff = (new Date(due) - new Date(todayIso())) / 86400000;
   return diff < 0 ? 'var(--red)' : diff <= 3 ? '#f59e0b' : 'var(--green)';
 };
-const num = v => { const n = Number(String(v ?? '').replace(/[^0-9.-]/g, '')); return isNaN(n) ? 0 : n; };
+// Amounts: money() reads "1,50,000", "₹ 50,000", "1.5 L" and ignores dates typed next to the amount
+const num = v => money(v);
 const inr = v => (v === '' || v == null ? '—' : '₹ ' + num(v).toLocaleString('en-IN', { maximumFractionDigits: 2 }));
-export const totalOf = e => num(e.price) + num(e.travelExpenses) + num(e.gst);
-const keyOf = r => String(r?.engagementKey ?? '').trim();
+// Total still expected from the client: Price + GST (18%) − TDS (10%) + Travel, Stay & Misc
+export const totalOf = e => expectedOf(e);
+const keyOf = r => String(r?.engagementKey ?? '').trim();   // hidden save key (Excel flows)
+const snoOf = r => String(r?.sno ?? '').trim();             // reference shown to people
 const validYear = v => { const y = Number(String(v).slice(0, 4)); return y >= 2000 && y <= 2099; };
 
 // ─── Finance stage (from Engagement Calendar values) ────────────────────────
@@ -145,10 +150,10 @@ const Section = ({ children }) => (
 );
 
 // ─── Detail panel ────────────────────────────────────────────────────────────
-const EDIT_KEYS = ['payment', 'invoice', 'amountReceived', 'receivedDate', 'travelExpenses', 'gst'];
+const EDIT_KEYS = ['payment', 'invoice', 'amountReceived', 'receivedDate', 'travelExpenses'];   // GST is calculated (18% of Price)
 const fromRow = e => ({
   payment: e.payment ?? '', invoice: toIso(e.invoice), amountReceived: e.amountReceived ?? '',
-  receivedDate: toIso(e.receivedDate), travelExpenses: e.travelExpenses ?? '', gst: e.gst ?? '',
+  receivedDate: toIso(e.receivedDate), travelExpenses: e.travelExpenses ?? '',
 });
 
 function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
@@ -179,6 +184,9 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
     const pay = k === 'payment' ? v : autoPayment({ ...ec, ...next });
     const changes = { [k]: v };
     if (k !== 'payment' && pay !== form.payment) { next.payment = pay; changes.payment = pay; }
+    // Keep the Excel GST column in step with the rule (18% of Price) whenever this engagement is saved
+    const gstCalc = gstOf(ec);
+    if (money(ec.price) > 0 && Math.abs(money(ec.gst) - gstCalc) > 0.5) changes.gst = String(gstCalc);
     setForm(next);
     onEdit(ec, changes);
   };
@@ -192,7 +200,7 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="card-title" style={{ fontSize: 15 }}>{ec.company}</div>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-            {ec.egId} · Index {ec.engagementKey || '—'} · {fmtDate(ec.startDate)}{ec.endDate && ec.endDate !== ec.startDate ? ` → ${fmtDate(ec.endDate)}` : ''}
+            S No {snoOf(ec) || '—'} · {ec.egId} · {fmtDate(ec.startDate)}{ec.endDate && ec.endDate !== ec.startDate ? ` → ${fmtDate(ec.endDate)}` : ''}
           </div>
           {ec.topic && <div style={{ fontSize: 12, marginTop: 2 }}>{ec.topic}</div>}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, marginTop: 4, color: 'var(--muted)' }}>
@@ -210,7 +218,8 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
           <StageBadge stage={stage} />
           <OverdueTag days={overdueDays(live)} big />
           {saving && <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>⏳ Saving…</span>}
-          {total > 0 && <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--primary)' }}>{inr(total)}</div>}
+          {total > 0 && <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--primary)' }} title="Price + GST (18%) − TDS (10%) + Travel, Stay & Misc">{inr(total)}</div>}
+          {total > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600 }}>to receive · after TDS</div>}
         </div>
       </div>
 
@@ -271,12 +280,12 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
                 ? <input name="travelExpenses" type="number" min="0" step="0.01" className="form-input" style={{ fontSize: 12 }} value={form.travelExpenses} onChange={edit('travelExpenses')} placeholder="0" />
                 : <Val>{ec.travelExpenses ? inr(ec.travelExpenses) : ''}</Val>}
             </Field>
-            <Field label="GST (₹)">
-              {canEdit
-                ? <input name="gst" type="number" min="0" step="0.01" className="form-input" style={{ fontSize: 12 }} value={form.gst} onChange={edit('gst')} placeholder="0" />
-                : <Val>{ec.gst ? inr(ec.gst) : ''}</Val>}
+            <Field label={`GST (${GST_RATE * 100}% of Price) · auto`}><Val>{num(ec.price) ? inr(gstOf(ec)) : ''}</Val></Field>
+            <Field label={`TDS (${TDS_RATE * 100}% of Price) · auto`}><Val style={{ color: '#b45309' }}>{num(ec.price) ? `− ${inr(tdsOf(ec))}` : ''}</Val></Field>
+            <Field label="Amount to be Received (Price + GST − TDS)">
+              <Val style={{ fontWeight: 800, color: 'var(--primary)' }}>{num(ec.price) ? inr(receivableOf(ec)) : ''}</Val>
             </Field>
-            <Field label="Total"><Val style={{ fontWeight: 700 }}>{total ? inr(total) : ''}</Val></Field>
+            <Field label="Total to Receive (incl. Travel)"><Val style={{ fontWeight: 700 }}>{total ? inr(total) : ''}</Val></Field>
 
             <Section>Ops Checklist</Section>
             {oc ? (
@@ -288,7 +297,7 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
               </>
             ) : link.state === 'wrong' ? (
               <div style={{ gridColumn: '1 / -1', fontSize: 12, color: '#7f1d1d', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px' }}>
-                ⚠ The Ops Checklist row with Index {ec.engagementKey} is <strong>{link.oc.company}</strong> ({link.oc.egId}, {fmtDate(link.oc.startDate)}) — a different engagement, so nothing is copied to it. Fix that row's Index in the Ops Checklist Excel.
+                ⚠ The Ops Checklist row linked to this engagement (S No {link.oc.sno}) is <strong>{link.oc.company}</strong> ({link.oc.egId}, {fmtDate(link.oc.startDate)}) — a different engagement, so nothing is copied to it. Correct the link on that Ops Checklist row.
               </div>
             ) : (
               <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--muted)' }}>
@@ -301,7 +310,7 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
         {tab === 'details' && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 24px', fontSize: 13 }}>
             {[
-              ['Index 🔒', ec.engagementKey], ['EG.ID', ec.egId], ['Company', ec.company], ['Status', ec.status],
+              ['S No', snoOf(ec)], ['EG.ID', ec.egId], ['Company', ec.company], ['Status', ec.status],
               ['Start Date', fmtDate(ec.startDate)], ['End Date', fmtDate(ec.endDate)], ['Topic', ec.topic],
               ['Sector', ec.sector], ['Service Type', ec.serviceType], ['Offering', ec.offering], ['No. of Days', ec.day],
               ['Location', ec.location], ['Consultant 1', ec.consultant1], ['Consultant 2', ec.consultant2],
@@ -406,7 +415,7 @@ export default function FinanceTracker({ onRefreshed }) {
 
   const filtered = useMemo(() => rows.filter(r => {
     const q = search.toLowerCase();
-    const mQ = !q || [r.company, r.topic, r.egId, r.engagementKey, r.consultant1].some(v => String(v ?? '').toLowerCase().includes(q));
+    const mQ = !q || [r.company, r.topic, r.egId, r.sno, r.consultant1].some(v => String(v ?? '').toLowerCase().includes(q));
     const mS = stageF === 'All'
       || (stageF === 'Needs Action' ? (['Invoice Overdue', 'To Invoice', 'Payment Overdue'].includes(r._stage) || overdueDays(r) > 0)
       : stageF === 'All To Invoice' ? ['Invoice Overdue', 'To Invoice'].includes(r._stage)
@@ -414,20 +423,20 @@ export default function FinanceTracker({ onRefreshed }) {
       : stageF === 'Overdue (30+ days)' ? overdueDays(r) > 0
       : r._stage === stageF);
     return mQ && mS;
-  }).sort((a, b) => String(a.startDate || '9999').localeCompare(String(b.startDate || '9999')) || num(a.engagementKey) - num(b.engagementKey)),
+  }).sort((a, b) => (Number(snoOf(a)) || 1e9) - (Number(snoOf(b)) || 1e9) || String(a.startDate || '9999').localeCompare(String(b.startDate || '9999'))),
   [rows, search, stageF]);
 
   // KPI counts follow the period and the search. The stage filter is not applied to the
   // cards — the cards ARE the stage filter (click to filter), so applying it would zero the others.
   const kpiRows = useMemo(() => {
     const q = search.toLowerCase();
-    return !q ? rows : rows.filter(r => [r.company, r.topic, r.egId, r.engagementKey, r.consultant1].some(v => String(v ?? '').toLowerCase().includes(q)));
+    return !q ? rows : rows.filter(r => [r.company, r.topic, r.egId, r.sno, r.consultant1].some(v => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, search]);
   const count = (...st) => kpiRows.filter(r => st.includes(r._stage)).length;
 
   // Pending-fields bar: engagements with finance details due but empty, in the list order
   const pendingBar = useMemo(() => pendingItems(filtered.filter(r => keyOf(r)), FIN_RULES, r => ({
-    id: keyOf(r), serial: r.engagementKey, title: r.company || '(no company)',
+    id: keyOf(r), serial: snoOf(r), title: r.company || '(no company)',
     subtitle: [r.egId, r.topic, fmtDate(r.startDate)].filter(Boolean).join(' · '),
   })), [filtered]);
   const openPending = (it, f) => { setSelected(it.id); setFocusN(n => n + 1); revealField(f.key, f.label); };
@@ -439,7 +448,7 @@ export default function FinanceTracker({ onRefreshed }) {
     if (['To Invoice', 'Invoice Overdue', 'Upcoming'].includes(r._stage) && invDue) tasks.push({ key: 'invoice', label: 'Raise invoice', due: invDue });
     if (['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r._stage) && payDue) tasks.push({ key: 'receivedDate', label: r._stage === 'Partly Received' ? 'Collect balance' : 'Collect payment', due: payDue });
     return {
-      id: keyOf(r), serial: r.engagementKey, title: r.company || '(no company)',
+      id: keyOf(r), serial: snoOf(r), title: r.company || '(no company)',
       subtitle: [r.egId, r.topic, totalOf(r) ? inr(totalOf(r)) : ''].filter(Boolean).join(' · '), tasks, row: r,
     };
   }).filter(x => x.tasks.length), [filtered]);
@@ -492,7 +501,7 @@ export default function FinanceTracker({ onRefreshed }) {
 
   const handleEdit = (ec, changes) => {
     const key = keyOf(ec);
-    if (!key) { showToast(`❌ ${ec.company}: this engagement has no Index, so it cannot be saved.`); return; }
+    if (!key) { showToast(`❌ ${ec.company}: S No ${snoOf(ec) || '—'} has no link ID (Index) in the Engagement Calendar, so it cannot be saved.`); return; }
     const p = pendingRef.current.get(key) || { ec, before: {}, changes: {} };
     for (const k of Object.keys(changes)) if (!(k in p.before)) p.before[k] = ec[k] ?? '';
     p.changes = { ...p.changes, ...changes };
@@ -513,11 +522,12 @@ export default function FinanceTracker({ onRefreshed }) {
   const wrongLinks = ops == null ? 0 : rows.filter(r => linkOf(r).state === 'wrong').length;
 
   const exportCols = [
-    { label: 'Index', key: 'engagementKey' }, { label: 'EG ID', key: 'egId' }, { label: 'Company', key: 'company' },
+    { label: 'S No', get: r => snoOf(r) }, { label: 'EG ID', key: 'egId' }, { label: 'Company', key: 'company' },
     { label: 'Topic', key: 'topic' }, { label: 'Start Date', get: r => fmtDate(r.startDate) }, { label: 'End Date', get: r => fmtDate(r.endDate) },
     { label: 'Status', key: 'status' }, { label: 'Finance Stage', key: '_stage' },
-    { label: 'Price (INR)', key: 'price' }, { label: 'Travel, Stay & Misc', key: 'travelExpenses' }, { label: 'GST', key: 'gst' },
-    { label: 'Total', get: r => totalOf(r) || '' }, { label: 'Payment Status', key: 'payment' },
+    { label: 'Price (INR)', key: 'price' }, { label: 'Travel, Stay & Misc', key: 'travelExpenses' }, { label: 'GST (18%)', get: r => (num(r.price) ? gstOf(r) : '') }, { label: 'TDS (10%)', get: r => (num(r.price) ? tdsOf(r) : '') },
+    { label: 'Amount to be Received (Price + GST − TDS)', get: r => (num(r.price) ? receivableOf(r) : '') },
+    { label: 'Total to Receive (incl. Travel)', get: r => totalOf(r) || '' }, { label: 'Payment Status', key: 'payment' },
     { label: 'Invoice Date', get: r => (toIso(r.invoice) ? fmtDate(r.invoice) : '') },
     { label: 'Payment Due Date', get: r => { const d = financeDates(r).payDue; return d ? fmtDate(d) : ''; } },
     { label: 'Days Overdue', get: r => overdueDays(r) || '' },
@@ -562,7 +572,7 @@ export default function FinanceTracker({ onRefreshed }) {
 
       {wrongLinks > 0 && (
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '6px 12px', marginBottom: 8, fontSize: 12, color: '#7f1d1d' }}>
-          ⚠ {wrongLinks} engagement{wrongLinks > 1 ? 's' : ''} in this period share an Index with a different Ops Checklist row — finance is saved to the Engagement Calendar, but nothing is copied to that Ops row. Open the engagement for details.
+          ⚠ {wrongLinks} engagement{wrongLinks > 1 ? 's' : ''} in this period are linked to a different engagement's Ops Checklist row — finance is saved to the Engagement Calendar, but nothing is copied to that Ops row. Open the engagement for details.
         </div>
       )}
 
@@ -577,7 +587,7 @@ export default function FinanceTracker({ onRefreshed }) {
             <select className="form-input" value={span} onChange={e => changeSpan(Number(e.target.value))} title="Months shown">
               {SPAN_OPTIONS.map(n => <option key={n} value={n}>{n === 12 ? '12 months' : n === 1 ? '1 month' : `${n} months`}</option>)}
             </select>
-            <input className="form-input wide" placeholder="🔍 Company, topic, EG.ID, Index…" value={search} onChange={e => setSearch(e.target.value)} />
+            <input className="form-input wide" placeholder="🔍 Company, topic, EG.ID, S No…" value={search} onChange={e => setSearch(e.target.value)} />
             <select className="form-input" value={stageF} onChange={e => setStageF(e.target.value)}>
               {['All', 'Overdue (30+ days)', 'Needs Action', 'All To Invoice', 'All Awaiting Payment', ...Object.keys(STAGES)].map(s => <option key={s}>{s}</option>)}
             </select>
@@ -611,14 +621,14 @@ export default function FinanceTracker({ onRefreshed }) {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--border)', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>{r.engagementKey || '—'}</span>
+                                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--border)', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>{snoOf(r) || '—'}</span>
                                 <span style={{ fontWeight: 700, fontSize: 13 }}>{r.company}</span>
                               </div>
                               <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.topic}>{r.topic}</div>
                             </div>
                             <div style={{ textAlign: 'right', flexShrink: 0 }}>
                               {savingKeys.has(key) && <span title="Saving…" style={{ fontSize: 11, marginRight: 4 }}>⏳</span>}
-                              {l.state === 'wrong' && <span title="Index points to a different Ops Checklist row" style={{ fontSize: 10, fontWeight: 800, color: '#b91c1c', marginRight: 4 }}>⚠ Ops link</span>}
+                              {l.state === 'wrong' && <span title="Linked Ops Checklist row is a different engagement" style={{ fontSize: 10, fontWeight: 800, color: '#b91c1c', marginRight: 4 }}>⚠ Ops link</span>}
                               <StageBadge stage={r._stage} />
                               {late > 0 && <div style={{ marginTop: 4 }}><OverdueTag days={late} /></div>}
                               {total > 0 && <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4 }}>{inr(total)}</div>}

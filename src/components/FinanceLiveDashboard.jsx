@@ -8,19 +8,25 @@
  *   Revenue          Price (INR) of rows with an Invoice date, by invoice month (₹ Lakhs, GST excluded)
  *   Invoice          one Company + Invoice date (several session rows billed together count once)
  *   Billing days     "Day" of the invoiced rows, by invoice month
- *   Collection       Amount Received (or the full invoice when Payment = Received and no amount is entered)
+ *   Collection       Amount Received (or the full invoice when Payment = Received and no amount is entered),
+ *                    WITHOUT Travel / Stay & Misc — never more than Price + GST (travel is not revenue or collection). Counted in the selected period by Received Date
+ *                    (by Invoice date when no Received Date is filled).
+ *   Period           the KPI cards and the summary follow the period picker (This month … Custom dates);
+ *                    the FY × month charts always show whole financial years.
  *   Invoice amount   Price + Travel / Stay & Misc + GST
  *   Due in market    invoice amount − received, for every invoice not marked Received / NA (any year)
  *   Overdue          the part of that due whose Invoice date + 30 days has passed
  *   To be raised     sessions that have ended, are not Cancelled / NA and have no Invoice date
  * Earlier years (Apr–Oct as recorded) and credit notes: fixed, Dashboard Report Data (12 Oct 2026).
  */
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   ChartBox, Kpi, SourceNote, NV, TL, GD, GN, PU, RD, bOpts, fmtNum,
   CURRENT_FY, fyStartOf, fyLong, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
 import { normPayment } from '../services/syncWithEC.js';
+import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts } from '../services/money.js';
+import { PERIODS, periodRange, periodLabelOf, inRange } from '../services/actionItems.js';
 // Same stage / overdue rules as the Finance Tracker page, so the two always agree
 import { financeStage, overdueDays } from '../pages/FinanceTracker.jsx';
 import {
@@ -31,9 +37,17 @@ const MONTHS = ['April', 'May', 'June', 'July', 'August', 'September', 'October'
 const COLORS = [TL, GD, NV, PU, GN, RD, '#3B82F6', '#0EA5A4', '#F97316', '#64748B', '#A855F7', '#84CC16'];
 const CREDIT_DAYS = 30;
 const slot = iso => (+iso.slice(5, 7) + 8) % 12;           // Apr = 0 … Mar = 11
-const num = v => { const n = Number(String(v ?? '').replace(/[^0-9.-]/g, '')); return Number.isNaN(n) ? 0 : n; };
+const num = v => money(v);   // reads "1,50,000", "₹ 50,000", "1.5 L"; ignores dates typed next to the amount
 const L = v => v / 1e5;                                      // ₹ → Lakhs
-const fmtL = v => `Rs.${(Number(v) || 0).toFixed(2)}L`;
+const fmtL = v => { const n = Number(v) || 0; return Math.abs(n) >= 100 ? `Rs.${(n / 100).toFixed(2)} Cr` : `Rs.${n.toFixed(2)}L`; };   // v in Lakhs
+const PERIOD_KEY = 'ercrm.dash.finance.period.v1';
+const BASIS_KEY = 'ercrm.dash.finance.basis.v1';
+const NOT_REVENUE = /cancel|lost|drop|postpon|hold/i;     // same rule as the Sales tab
+function readBasis() { try { return localStorage.getItem(BASIS_KEY) === 'invoice' ? 'invoice' : 'delivery'; } catch { return 'delivery'; } }
+function readPeriod() {
+  try { const v = JSON.parse(localStorage.getItem(PERIOD_KEY) || 'null'); if (v && PERIODS.some(p => p.id === v.id)) return v; } catch { /* storage blocked */ }
+  return { id: 'fy', custom: null };
+}
 const fyShortName = y => `${y}-${y + 1}`;                    // 2026-2027 (as in the Excel)
 const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtDate = iso => (iso ? `${+iso.slice(8, 10)} ${MON3[+iso.slice(5, 7) - 1]} ${iso.slice(0, 4)}` : '—');
@@ -64,36 +78,49 @@ function fyMonthConfig(rows, months, totFmt) {
 
 export default function FinanceLiveDashboard({ engagements, refreshing }) {
   const NOW_SLOT = slot(todayISO);   // read each render (todayISO moves on at midnight)
+  const [period, setPeriod] = useState(readPeriod);
+  useEffect(() => { try { localStorage.setItem(PERIOD_KEY, JSON.stringify(period)); } catch { /* storage blocked */ } }, [period]);
+  const range = useMemo(() => periodRange(period.id, todayISO, period.custom), [period, todayISO]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const periodName = periodLabelOf(period.id, period.custom);
+  // Revenue by: 'delivery' = session start month (as the Sales tab and the COMPARISON sheet) · 'invoice' = Invoice date month
+  const [basis, setBasis] = useState(readBasis);
+  useEffect(() => { try { localStorage.setItem(BASIS_KEY, basis); } catch { /* storage blocked */ } }, [basis]);
+  const setCustom = (k, v) => setPeriod(p => ({ ...p, custom: { ...range, ...(p.custom || {}), [k]: v } }));
   /* Engagement Calendar rows with their finance values */
   const rows = useMemo(() => (engagements || []).map(e => {
     const inv = toIso(e.invoice);
     const end = toIso(e.endDate) || toIso(e.startDate);
     const p = normPayment(e.payment);
-    const amount = num(e.price) + num(e.travelExpenses) + num(e.gst);
-    const got = num(e.amountReceived);
-    const received = p === 'Received' ? Math.max(got, amount) : got;
+    const amount = expectedOf(e);       // Price + GST (18%) − TDS (10%) + Travel — what the client still has to pay
+    const col = collectedOf(e);          // capped at the invoice amount; suspect = cell needs checking
     const stage = financeStage(e);
     return {
-      ...e, inv, end, p, amount, price: num(e.price), got: received, stage,
+      ...e, inv, end, p, amount, price: num(e.price), got: col.gross, col: col.amount, net: invoiceExTravel(e), suspect: col.suspect, rec: toIso(e.receivedDate), stage,
       cancelled: stage === 'Cancelled',
       invFy: inv ? fyStartOf(inv) : null,
+      start: toIso(e.startDate),
+      notRevenue: NOT_REVENUE.test(clean(e.status)),
     };
   }), [engagements]);
 
-  /* ── Monthly series for live FYs (by invoice month) ── */
+  /* Revenue date of a row for the chosen basis ('' = not revenue) */
+  const revDate = r => (basis === 'invoice' ? (r.inv && !r.cancelled ? r.inv : '') : (r.start && !r.notRevenue ? r.start : ''));
+
+  /* ── Monthly series for live FYs (revenue by the chosen basis; invoices and billing days by invoice month) ── */
   const live = useMemo(() => {
     const out = {};
     for (let y = LIVE_FROM_FY; y <= CURRENT_FY; y++) out[y] = { rev: Array(12).fill(0), inv: Array(12).fill(0), days: Array(12).fill(0), invSet: Array.from({ length: 12 }, () => new Set()) };
     rows.forEach(r => {
+      const rd = revDate(r);
+      if (rd && out[fyStartOf(rd)]) out[fyStartOf(rd)].rev[slot(rd)] += L(r.price);
       if (!r.inv || r.cancelled || !out[r.invFy]) return;
       const o = out[r.invFy], s = slot(r.inv);
-      o.rev[s] += L(r.price);
       o.days[s] += Number(r.day) > 0 ? Number(r.day) : 0;
       o.invSet[s].add(`${keyOf(r.company)}|${r.inv}`);
     });
     Object.values(out).forEach(o => { o.inv = o.invSet.map(s => s.size); });
     return out;
-  }, [rows]);
+  }, [rows, basis]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Months shown: April → current month (same-period comparison with the earlier years, like the Excel)
   const months = MONTHS.slice(0, Math.max(7, NOW_SLOT + 1));
@@ -115,7 +142,22 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   const curInvoices = cur.inv.reduce((s, v) => s + v, 0);
   const curDays = cur.days.reduce((s, v) => s + v, 0);
   const curMonthsNamed = MONTHS.filter((m, i) => cur.rev[i] > 0).join(' + ');
-  const collectionL = L(rows.filter(r => r.invFy === CURRENT_FY && !r.cancelled).reduce((s, r) => s + r.got, 0));
+  const collectionL = L(rows.filter(r => r.invFy === CURRENT_FY && !r.cancelled).reduce((s, r) => s + r.col, 0));
+
+  /* ── Selected period (KPI cards) ── */
+  const pk = useMemo(() => {
+    const inv = rows.filter(r => r.inv && !r.cancelled && inRange(r.inv, range));
+    const invoices = new Set(inv.map(r => `${keyOf(r.company)}|${r.inv}`)).size;
+    const revRows = rows.filter(r => { const d = revDate(r); return d && inRange(d, range); });
+    const revenue = revRows.reduce((s, r) => s + r.price, 0);
+    const invoiced = inv.reduce((s, r) => s + r.net, 0);          // Price + GST, travel excluded
+    const paid = rows.filter(r => !r.cancelled && r.col > 0 && (r.rec ? inRange(r.rec, range) : (r.inv && inRange(r.inv, range))));
+    const collected = paid.reduce((s, r) => s + r.col, 0);
+    const months = [...new Set(revRows.map(r => MONTHS[slot(revDate(r))]))];
+    return { invoices, revenueL: L(revenue), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
+      suspects: suspectReceipts(engagements) };
+  }, [rows, range, basis, engagements]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const collectPct = pk.invoicedL > 0 ? Math.round((pk.collectedL / pk.invoicedL) * 100) : null;
 
   /* ── Dues: every invoice not fully received (any year) ── */
   const dues = useMemo(() => rows
@@ -191,20 +233,48 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       <SourceNote live={`${fyLong(LIVE_FROM_FY)} onward and all dues from the Engagement Calendar finance columns (same values as the Finance Tracker)`}
                   fixed="earlier years (Apr–Oct) and credit notes from Dashboard Report Data (12 Oct 2026)" />
 
-      <div className="kg g3">
-        <Kpi tone="gd" label="No. of Invoices Raised" value={fmtNum(curInvoices)} sub={`Invoices raised in ${curName}`} />
-        <Kpi tone="tl" label="Total Revenue" value={fmtL(curRevL)} sub={curMonthsNamed ? `${curMonthsNamed} revenue combined` : 'Invoiced revenue this FY'} />
-        <Kpi tone="gn" label="Collection" value={fmtL(collectionL)} sub="Payments received on this FY's invoices" tag="Collected" tagTone="up" />
+      <div className="erd-period" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '4px 0 12px' }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--e-text2, #6B7280)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Period</span>
+        <select className="form-input" style={{ height: 34, fontSize: 13, minWidth: 150, width: 'auto' }} value={period.id} onChange={e => setPeriod(p => ({ ...p, id: e.target.value }))}>
+          {PERIODS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+        {period.id === 'custom' && (<>
+          <input type="date" className="form-input" style={{ height: 34, fontSize: 13, width: 'auto' }} value={range.from} max={range.to} onChange={e => setCustom('from', e.target.value)} />
+          <span style={{ fontSize: 12, color: '#6B7280' }}>to</span>
+          <input type="date" className="form-input" style={{ height: 34, fontSize: 13, width: 'auto' }} value={range.to} min={range.from} onChange={e => setCustom('to', e.target.value)} />
+        </>)}
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--e-text2, #6B7280)', textTransform: 'uppercase', letterSpacing: 0.4, marginLeft: 8 }}>Revenue by</span>
+        <div className="erd-seg">
+          {[['delivery', 'Delivery month'], ['invoice', 'Invoice month']].map(([k, l]) => (
+            <button key={k} type="button" className={basis === k ? 'on' : ''} aria-pressed={basis === k} onClick={() => setBasis(k)}
+              title={k === 'delivery' ? 'Session start date — same as the Sales tab and the COMPARISON sheet' : 'Invoice date — when the bill was raised'}>{l}</button>
+          ))}
+        </div>
+        <span style={{ fontSize: 12, color: '#6B7280', flexBasis: '100%' }}>{period.id === 'all' ? 'All dates' : `${fmtDate(range.from)} → ${fmtDate(range.to)}`} · cards below follow this period; charts show whole financial years</span>
       </div>
+
+      <div className="kg g3">
+        <Kpi tone="gd" label="No. of Invoices Raised" value={fmtNum(pk.invoices)} sub={`Invoices raised · ${periodName}`} how="Distinct Company + Invoice date pairs with an Invoice date in the period (several session rows billed together count once); cancelled excluded." />
+        <Kpi tone="tl" label="Total Revenue" value={fmtL(pk.revenueL)} sub={pk.months.length && pk.months.length <= 4 ? `${pk.months.join(' + ')} · price excl. GST` : `${basis === 'invoice' ? 'Invoiced' : 'Delivered / scheduled'} price excl. GST · ${periodName}`}
+             how={basis === 'invoice' ? 'Sum of Price (INR) of rows whose Invoice date falls in the period; GST and travel excluded, cancelled rows excluded.' : 'Sum of Price (INR) of sessions whose start date falls in the period (cancelled / lost / postponed / on hold excluded); GST and travel excluded.'} />
+        <Kpi tone="gn" label="Collection" value={fmtL(pk.collectedL)} sub={`${pk.payments} payment(s) · ${periodName}${collectPct != null ? ` · ${collectPct}% of ${fmtL(pk.invoicedL)} invoiced` : ''} · excl. travel & stay`} tag="Collected" tagTone="up"
+             how="Amount Received counted on the Received Date in the period (Invoice date when Received Date is blank); Price + GST only — travel excluded — and never above the invoice value." />
+      </div>
+      {pk.suspects.length > 0 && (
+        <div style={{ fontSize: 12, color: '#7f1d1d', background: '#FFF5F5', borderLeft: '3px solid #E98272', borderRadius: 6, padding: '8px 12px', margin: '-4px 0 12px' }}>
+          {pk.suspects.length} "Amount Received" cell{pk.suspects.length > 1 ? 's need' : ' needs'} checking (capped at the row's bill meanwhile):{' '}
+          {pk.suspects.slice(0, 6).map(({ e, reason }) => `${clean(e.company)}${e.sno ? ` (S No ${e.sno})` : ''}: "${clean(e.amountReceived)}" — ${reason}`).join(' · ')}{pk.suspects.length > 6 ? ' …' : ''}. Payments split over several rows of one invoice, or several payments in one cell ("140400, 48492"), are handled automatically.
+        </div>
+      )}
       <div className="kg g4">
-        <Kpi tone="pu" label="To be Raised" value={fmtL(toInvoiceL)} sub={`${toInvoice.length} program(s) delivered, not yet invoiced`} tag="Pending" tagTone="warn" />
-        <Kpi tone="nv" label="Raised within Timeline – Yet to Receive" value={fmtL(yetL)} sub={`Invoiced, within ${CREDIT_DAYS}-day credit period`} tag="Within credit period" />
-        <Kpi tone="rd" label="Raised within Timeline – Overdue" value={fmtL(overdueTotal)} sub="Past due date, pending collection" tag="Overdue" tagTone="bad" />
-        <Kpi tone="rd" label="Total Due in Market" value={fmtL(dueTotal)} sub={`${byClient.length} clients · all outstanding market dues`} tag="Watch" tagTone="bad" />
+        <Kpi tone="pu" label="To be Raised" value={fmtL(toInvoiceL)} sub={`${toInvoice.length} program(s) delivered, not yet invoiced`} tag="Pending" tagTone="warn" how="Price + GST (18%) − TDS (10%) + travel of sessions that have ended, are not cancelled / NA and have no Invoice date yet (all dates, not the period)." />
+        <Kpi tone="nv" label="Raised within Timeline – Yet to Receive" value={fmtL(yetL)} sub={`Invoiced, within ${CREDIT_DAYS}-day credit period`} tag="Within credit period" how="Unpaid balance — (Price + GST − TDS + travel) − amount received — of invoices raised less than 30 days ago; all years." />
+        <Kpi tone="rd" label="Raised within Timeline – Overdue" value={fmtL(overdueTotal)} sub="Past due date, pending collection" tag="Overdue" tagTone="bad" how="Unpaid balance of invoices whose Invoice date + 30 days has passed and that are not marked Received / NA." />
+        <Kpi tone="rd" label="Total Due in Market" value={fmtL(dueTotal)} sub={`${byClient.length} clients · all outstanding market dues`} tag="Watch" tagTone="bad" how="Yet to receive + Overdue: every invoice not marked Received / NA, any year — Price + GST − TDS + travel, less what has been received." />
       </div>
 
       <div className="cg c11">
-        <div className="card"><h3>Revenue by FY (Rs. Lakhs)</h3><div className="cs">Monthly revenue per financial year (FY total shown with label) · April → {months[months.length - 1]}</div><ChartBox config={revCfg} className="ch-wrap tall" /></div>
+        <div className="card"><h3>Revenue by FY (Rs. Lakhs)</h3><div className="cs">Monthly revenue per financial year (FY total shown with label) · April → {months[months.length - 1]} · live years by {basis === 'invoice' ? 'Invoice date' : 'session start date'}; earlier years fixed from the Excel report</div><ChartBox config={revCfg} className="ch-wrap tall" /></div>
         <div className="card"><h3>Invoices &amp; Vouchers Raised</h3><div className="cs">Count per month by financial year (FY total shown with label)</div><ChartBox config={invCfg} className="ch-wrap tall" /></div>
       </div>
 

@@ -120,8 +120,23 @@
 .tkf-addnote { display: flex; gap: 6px; }
 .tkf-addnote .form-input { height: 28px; font-size: 12px; }
 .tkf-link { align-self: flex-start; border: none; background: none; padding: 0; color: var(--purple); font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit; }
-.tkf-quick { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--border); background: #FAFBFD; flex-shrink: 0; }
+.tkf-quick { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-top: 1px solid var(--border); background: #FAFBFD; flex-shrink: 0; }
+.tkf-quick.full { max-height: 62vh; overflow-y: auto; background: #fff; box-shadow: 0 -4px 12px rgba(45,48,71,0.06); }
 .tkf-quick .form-input { height: 30px; font-size: 12px; min-width: 0; }
-.tkf-quick .form-input:first-child { flex: 1; }
+.tkf-q-line { display: flex; gap: 6px; }
+.tkf-q-line .tkf-q-title { flex: 1; }
 .tkf-quick .tkf-date { width: 118px; flex-shrink: 0; }
+.tkf-q-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--navy, #2D3047); }
+.tkf-q-head .tkf-icon { color: var(--muted); }
+.tkf-q-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+.tkf-q-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; }
+.tkf-q-grid label .form-input { text-transform: none; letter-spacing: 0; font-weight: 400; color: #2D3047; width: 100%; }
+.tkf-quick .tkf-q-desc { height: auto; min-height: 44px; resize: vertical; padding: 6px 8px; }
+.tkf-q-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tkf-q-hint { font-size: 11px; color: var(--muted); }
+.tkf-q-more { align-self: flex-start; }
+.tkf-info { padding: 6px 12px; font-size: 12px; color: #14532d; background: #F0FFF4; border-left: 3px solid #0AC44B; flex-shrink: 0; }
+.tkf-reassign { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); margin: 6px 0; }
+.tkf-reassign .form-input { height: 28px; font-size: 12px; flex: 1; min-width: 0; }
+.tkf-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 @media print { .tkf-launch, .tkf-panel { display: none !important; } }
