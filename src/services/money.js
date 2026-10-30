@@ -125,6 +125,9 @@ export function fmtInrShort(rupees) {
  *   • the other rows of the same invoice (same company + same Invoice date) together cover it.
  * Returns the rows still worth checking, each with a short reason.
  */
+const isoOf = v => { const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/) || String(v ?? '').match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (!m) return ''; return m[1].length === 4 ? `${m[1]}-${m[2]}-${m[3]}` : `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; };
+const dayDiff = (a, b) => (a && b ? (Date.parse(a) - Date.parse(b)) / 86400000 : 1e9);
 export function suspectReceipts(list) {
   const key = v => String(v ?? '').trim().toLowerCase();
   const co = e => key(e.company);
@@ -135,7 +138,7 @@ export function suspectReceipts(list) {
     if (!co(e)) return;
     if (inv(e)) { const k = `${co(e)}|${inv(e)}`; byInvoice.set(k, (byInvoice.get(k) || []).concat(e)); }
     const amt = readMoney(e.amountReceived).value;
-    if (amt > 0) { const k = `${co(e)}|${amt}|${key(e.receivedDate)}`; repeats.set(k, (repeats.get(k) || 0) + 1); }
+    if (amt > 0) { const k = `${co(e)}|${amt}`; repeats.set(k, (repeats.get(k) || 0) + 1); }
   });
   const out = [];
   (list || []).forEach(e => {
@@ -145,9 +148,17 @@ export function suspectReceipts(list) {
     const bill = invoiceTotal(e);
     const tooBig = (bill > 0 && value > bill * 1.05) || (bill === 0 && value > 5e7);
     if (!tooBig) return;
-    if ((repeats.get(`${co(e)}|${value}|${key(e.receivedDate)}`) || 0) > 1) return;            // same payment typed on several rows
+    if ((repeats.get(`${co(e)}|${value}`) || 0) > 1) return;            // same payment typed on several rows (any date)
     const group = inv(e) ? byInvoice.get(`${co(e)}|${inv(e)}`) || [] : [];
     if (group.length > 1 && group.reduce((t, x) => t + invoiceTotal(x), 0) >= value * 0.95) return;   // payment for the whole invoice
+    // One payment for a whole batch (pre-work, sessions, coaching connects invoiced separately): the same company's
+    // rows invoiced within 90 days that have no amount of their own (or are marked paid) together cover it
+    const d0 = isoOf(e.invoice) || isoOf(e.startDate);
+    if (d0) {
+      const near = (list || []).filter(x => co(x) === co(e) && Math.abs(dayDiff(isoOf(x.invoice) || isoOf(x.startDate), d0)) <= 90
+        && (x === e || readMoney(x.amountReceived).value === 0 || readMoney(x.amountReceived).value === value));
+      if (near.reduce((t, x) => t + invoiceTotal(x), 0) >= value * 0.95) return;
+    }
     out.push({ e, reason: bill > 0 ? `more than this row's bill (${Math.round(bill).toLocaleString('en-IN')})` : 'no price on this row' });
   });
   return out;

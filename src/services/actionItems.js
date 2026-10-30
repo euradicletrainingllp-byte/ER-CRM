@@ -401,7 +401,7 @@ export function missingByTracker({ sol = [], eng = [], ops = [], cdt = [], leads
 const NOT_REVENUE = /cancel|lost|drop|postpon|hold/i;
 export function cashSummary(eng, range) {
   const t = todayIso();
-  let booked = 0, delivered = 0, invoiced = 0, collected = 0, toInvoice = 0, toInvoiceN = 0, overdueInvoiceN = 0;
+  let booked = 0, bookedInv = 0, delivered = 0, invoiced = 0, collected = 0, toInvoice = 0, toInvoiceN = 0, overdueInvoiceN = 0;
   let outstanding = 0, overdueOut = 0, collectedN = 0;
   const suspects = suspectReceipts(eng).map(({ e, reason }) => ({ company: s(e.company), sno: s(e.sno), raw: s(e.amountReceived), reason }));
   const aging = { '0–30': 0, '31–60': 0, '61–90': 0, '90+': 0 };
@@ -410,7 +410,7 @@ export function cashSummary(eng, range) {
     const start = toIso(e.startDate);
     const price = num(e.price);
     if (inRange(start, range) && !NOT_REVENUE.test(s(e.status))) { booked += price; if (/deliver/i.test(s(e.status))) delivered += price; }
-    if (inRange(toIso(e.invoice), range)) invoiced += invoiceExTravel(e);   // travel / stay is not revenue
+    if (inRange(toIso(e.invoice), range)) { invoiced += invoiceExTravel(e); if (!cancelled(e)) bookedInv += price; }   // travel / stay is not revenue
     const got = collectedOf(e);
     // Collected = money received in the period (Received Date), or — when no Received Date is filled —
     // on invoices raised in the period. Never more than the invoice amount.
@@ -431,7 +431,7 @@ export function cashSummary(eng, range) {
     }
   });
   return {
-    booked, delivered, invoiced, collected, collectedN, suspects, toInvoice, toInvoiceN, overdueInvoiceN, outstanding, overdueOut, aging,
+    booked, bookedInv, delivered, invoiced, collected, collectedN, suspects, toInvoice, toInvoiceN, overdueInvoiceN, outstanding, overdueOut, aging,
     topOutstanding: [...byClient.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6),
   };
 }

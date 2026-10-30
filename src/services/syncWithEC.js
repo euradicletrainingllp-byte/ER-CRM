@@ -7,7 +7,7 @@
  * "Sync with EC" was removed on 2026-10-07 (see addToTrackers.js).
  */
 
-import { getEngagements, updateEngagementRow, patchEngagementCaches, isoToExcelSerial, ecContractFields, updateOpsRow, readTrackerFresh } from './api.js';
+import { getEngagements, updateEngagementRow, patchEngagementCaches, isoToExcelSerial, ecContractFields, updateOpsRow, readTrackerFresh, EC_EXTRA_COLS, ecExtraFields } from './api.js';
 
 // ─── Ops Checklist Finance → Engagement Calendar (live, per edit) ────────────
 
@@ -72,6 +72,7 @@ function ecUpdateBody(e) {
     nps:                               e.nps            || '',
     'Proposal Link':                   e.proposalLink   || '',
     'Ops Checklist':                   e.opsChecklist   || '',
+    ...ecExtraFields(e),
     'Index':                  e.engagementKey  || '',
   };
 }
@@ -130,7 +131,7 @@ export function suggestEcIndex(oc, ecRows) {
 
 const describeEc = ec => `"${ec.company}" (${ec.egId}, ${fmtShort(ec.startDate)})`;
 
-const EC_LABEL = { invoice: 'Invoice date', receivedDate: 'Received date', payment: 'Payment status', travelExpenses: 'Travel, Stay & Misc', gst: 'GST' };
+const EC_LABEL = { invoice: 'Invoice date', receivedDate: 'Received date', payment: 'Payment status', travelExpenses: 'Travel, Stay & Misc', gst: 'GST', ...Object.fromEntries(EC_EXTRA_COLS.map(([k, h]) => [k, h])) };
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 const shiftIso = (iso, days) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
@@ -255,7 +256,8 @@ export async function updateECFinanceAmounts(engagementKey, amounts, hintDate, e
 // ═════════════════════════════════════════════════════════════════════════════
 
 /** EC columns the Finance Tracker owns (locked in the Engagement Calendar form). */
-export const EC_FINANCE_FIELDS = ['invoice', 'payment', 'receivedDate', 'amountReceived', 'travelExpenses', 'gst'];
+// Finance-owned EC fields (the EC edit form takes these fresh from Excel). Price breakup is owned by the EC form, so it is not here.
+export const EC_FINANCE_FIELDS = ['invoice', 'payment', 'receivedDate', 'amountReceived', 'travelExpenses', 'gst', 'travelInvoiceRaised', 'travelInvoiceDate', 'travelReceived', 'travelReceivedAmount', 'travelReceivedDate'];
 
 /** Fixed Payment status values (the EC 'Payment' column). */
 export const PAYMENT_OPTIONS = ['Invoice Not Raised', 'Invoice Raised', 'Partly Received', 'Received', 'NA'];
@@ -291,8 +293,8 @@ export function ecToOcFinance(ec, changedKeys) {
 }
 
 const sameFin = (k, a, b) => {
-  if (['invoice', 'receivedDate', 'invoiceActualDate', 'paymentActualDate'].includes(k)) return isoDate(a) === isoDate(b);
-  if (['travelExpenses', 'gst', 'amountReceived'].includes(k)) {
+  if (['invoice', 'receivedDate', 'invoiceActualDate', 'paymentActualDate', 'travelInvoiceDate', 'travelReceivedDate'].includes(k)) return isoDate(a) === isoDate(b);
+  if (['travelExpenses', 'gst', 'amountReceived', 'pmCost', 'materialCost', 'otherCost', 'travelReceivedAmount'].includes(k)) {
     const na = Number(String(a ?? '').replace(/[^0-9.-]/g, '')), nb = Number(String(b ?? '').replace(/[^0-9.-]/g, ''));
     const ea = String(a ?? '').trim() === '', eb = String(b ?? '').trim() === '';
     if (ea || eb) return ea && eb || (ea ? nb === 0 : na === 0);

@@ -17,7 +17,7 @@ import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { addEngagementToOps, addEngagementToCDT, isInTracker } from '../services/addToTrackers.js';
 import { checklistForEngagement } from '../services/bdChecklistSync.js';
-import { onListChange, getOpsChecklist, getContentDevTracker, ecContractFields } from '../services/api.js';
+import { onListChange, getOpsChecklist, getContentDevTracker, ecContractFields, ecExtraFields, ecHasExtraCols } from '../services/api.js';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, EC_RULES } from '../config/pendingFields.js';
 import CalendarView from './ERCalendar.jsx';
@@ -82,7 +82,13 @@ function generateNextEgId(existingIds) {
 
 /* ─── Add / Edit Engagement Modal ──────────────────────────────────────── */
 // Finance-owned fields — edited only in the Finance Tracker, read-only in the Engagement Calendar form
-const OPS_MANAGED_FIELDS = ['invoice', 'payment', 'receivedDate', 'travelExpenses', 'gst', 'amountReceived'];
+const TRAVEL_BILLING_FIELDS = ['travelInvoiceRaised', 'travelInvoiceDate', 'travelReceived', 'travelReceivedAmount', 'travelReceivedDate'];
+const PRICE_BREAKUP_FIELDS = ['pmCost', 'materialCost', 'otherCost', 'otherCostDetails', 'priceComments'];
+const OPS_MANAGED_FIELDS = ['invoice', 'payment', 'receivedDate', 'travelExpenses', 'gst', 'amountReceived', ...TRAVEL_BILLING_FIELDS];
+const fmtFee = n => (n < 0 ? '−₹' : '₹') + Math.abs(Math.round(n)).toLocaleString('en-IN');
+const num0 = v => Number(String(v ?? '').replace(/[^0-9.-]/g, '')) || 0;
+/** Price − PM − Material − Other costs (same as the Excel "Facilitation Fee (INR)" formula). */
+const facilitationFee = e => (num0(e.price) ? num0(e.price) - num0(e.pmCost) - num0(e.materialCost) - num0(e.otherCost) : null);
 
 function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, engagements }) {
   const isEdit = !!initial;
@@ -123,6 +129,7 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
         nps:            initial.nps            || '',
         proposalLink:   initial.proposalLink   || '',
         opsChecklist:   initial.opsChecklist   || '',
+        ...Object.fromEntries([...PRICE_BREAKUP_FIELDS, ...TRAVEL_BILLING_FIELDS].map(k => [k, initial[k] ?? ''])),
       };
     }
     // Add mode — use prefill values from Solution Tracker if provided
@@ -154,6 +161,7 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
       nps:            '',
       proposalLink:   prefill?.proposalLink || '',
       opsChecklist:   prefill?.opsChecklist || '',
+      ...Object.fromEntries([...PRICE_BREAKUP_FIELDS, ...TRAVEL_BILLING_FIELDS].map(k => [k, ''])),
     };
   });
 
@@ -263,7 +271,23 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
             ['Contract Status',                 'poStatus'],
             ['Invoice Date',                    'invoice',         '', 'date'],
             ['Price (₹)',                       'price',           '', 'number'],
+            // Price breakup — edited here (Excel columns added 30 Oct 2026)
+            ...(ecHasExtraCols() ? [
+              ['PM Cost (₹)',                   'pmCost',          '', 'number'],
+              ['Material Cost (₹)',             'materialCost',    '', 'number'],
+              ['Other Cost (₹)',                'otherCost',       '', 'number'],
+              ['Other Cost Details',            'otherCostDetails'],
+              ['Price Comments',                'priceComments',   'full'],
+            ] : []),
             ['Travel, Stay & Misc. Exp. (₹)',  'travelExpenses',  '', 'number'],
+            // Travel billing — edited in the Finance Tracker, shown here for record
+            ...(ecHasExtraCols() ? [
+              ['Travel Invoice Raised',         'travelInvoiceRaised'],
+              ['Travel Invoice Date',           'travelInvoiceDate', '', 'date'],
+              ['Travel Amount Received',        'travelReceived'],
+              ['Travel Received Amount (₹)',    'travelReceivedAmount', '', 'number'],
+              ['Travel Received Date',          'travelReceivedDate', '', 'date'],
+            ] : []),
             ['GST (₹)',                         'gst',             '', 'number'],
             ['Payment Status',                  'payment'],
             ['Amount Received',                 'amountReceived'],
@@ -289,6 +313,11 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
                 />
                 {locked && (
                   <span style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Edit in Finance Tracker</span>
+                )}
+                {key === 'otherCostDetails' && facilitationFee(form) != null && (
+                  <span style={{ fontSize: 11, marginTop: 2, fontWeight: 700, color: facilitationFee(form) < 0 ? '#b91c1c' : '#0f766e' }}>
+                    Facilitation fee (Price − costs): {fmtFee(facilitationFee(form))}{facilitationFee(form) < 0 ? ' — costs exceed the price' : ''}
+                  </span>
                 )}
               </div>
             );
@@ -423,7 +452,18 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false,
     ['Contract Status',  eng.poStatus    || '—'],
     ['Invoice Date',     eng.invoice ? fmtDt(eng.invoice) : '—'],
     ['Price (₹)',        eng.price > 0 ? fmtINR(eng.price) : '—'],
+    ...(ecHasExtraCols() ? [
+      ['PM Cost (₹)',       num0(eng.pmCost) ? fmtINR(num0(eng.pmCost)) : '—'],
+      ['Material Cost (₹)', num0(eng.materialCost) ? fmtINR(num0(eng.materialCost)) : '—'],
+      ['Other Cost (₹)',    num0(eng.otherCost) ? `${fmtINR(num0(eng.otherCost))}${eng.otherCostDetails ? ` · ${eng.otherCostDetails}` : ''}` : (eng.otherCostDetails || '—')],
+      ['Facilitation Fee (₹)', facilitationFee(eng) != null && (num0(eng.pmCost) || num0(eng.materialCost) || num0(eng.otherCost)) ? fmtFee(facilitationFee(eng)) : '—'],
+      ['Price Comments',    eng.priceComments || '—'],
+    ] : []),
     ['Travel & Misc. (₹)', eng.travelExpenses > 0 ? fmtINR(eng.travelExpenses) : (eng.travelExpenses === 0 && eng.price > 0 ? '₹0' : '—')],
+    ...(ecHasExtraCols() ? [
+      ['Travel Invoice',    [eng.travelInvoiceRaised, eng.travelInvoiceDate ? fmtDt(eng.travelInvoiceDate) : ''].filter(Boolean).join(' · ') || '—'],
+      ['Travel Received',   [eng.travelReceived, num0(eng.travelReceivedAmount) ? fmtINR(num0(eng.travelReceivedAmount)) : '', eng.travelReceivedDate ? fmtDt(eng.travelReceivedDate) : ''].filter(Boolean).join(' · ') || '—'],
+    ] : []),
     ['GST (₹)',          eng.gst > 0 ? fmtINR(eng.gst) : (eng.gst === 0 && eng.price > 0 ? '₹0' : '—')],
     ['Payment Status',   eng.payment        || '—'],
     ['Amt Received',     eng.amountReceived || '—'],
@@ -802,6 +842,7 @@ const formToExcel = form => ({
   nps:                               form.nps            || '',
   'Proposal Link':                   form.proposalLink   || '',
   'Ops Checklist':                   form.opsChecklist   || '',
+  ...ecExtraFields(form),
 });
 
 /* ─── Main Page ─────────────────────────────────────────────────────────── */
@@ -1138,7 +1179,8 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
       // and run in the same per-engagement queue as finance saves.
       await withEcLock(original.engagementKey, async () => {
         const fresh = await freshEcFinance(original.engagementKey, original.startDate).catch(() => null);
-        await updateEngagementRow(original.egId, original.sno, formToExcel(fresh ? { ...form, ...fresh } : form), original.engagementKey);
+        // Price breakup / travel billing columns are not on this form: keep Excel's (fresh) or the row's values
+        await updateEngagementRow(original.egId, original.sno, formToExcel({ ...original, ...form, ...(fresh || {}) }), original.engagementKey);
       });
       setData(d => d.map(r => (rowKey(r) === newKey ? { ...r, pending: false } : r)));
       patchEngagementCaches(rows => rows.map(r => (rowKey(r) === oldKey ? { ...r, ...rowFromForm(form) } : r)));

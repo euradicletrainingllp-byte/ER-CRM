@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { ErrorState } from '../components/LoadingState.jsx';
 import {
-  peekList, getOpsChecklist,
+  peekList, getOpsChecklist, ecHasExtraCols,
   getEngagementsForRange, peekEngagementsForRange, prefetchEngagementsForRange, buildMonthRange,
 } from '../services/api.js';
 import {
@@ -150,11 +150,15 @@ const Section = ({ children }) => (
 );
 
 // ─── Detail panel ────────────────────────────────────────────────────────────
-const EDIT_KEYS = ['payment', 'invoice', 'amountReceived', 'receivedDate', 'travelExpenses'];   // GST is calculated (18% of Price)
+// Travel billing (Engagement Calendar columns added 30 Oct 2026). Price breakup is edited in the Engagement Calendar.
+const EXTRA_KEYS = ['travelInvoiceRaised', 'travelInvoiceDate', 'travelReceived', 'travelReceivedAmount', 'travelReceivedDate'];
+const EDIT_KEYS = ['payment', 'invoice', 'amountReceived', 'receivedDate', 'travelExpenses', ...EXTRA_KEYS];   // GST is calculated (18% of Price)
 const fromRow = e => ({
   payment: e.payment ?? '', invoice: toIso(e.invoice), amountReceived: e.amountReceived ?? '',
   receivedDate: toIso(e.receivedDate), travelExpenses: e.travelExpenses ?? '',
+  ...Object.fromEntries(EXTRA_KEYS.map(k => [k, k.endsWith('Date') ? toIso(e[k]) : (e[k] ?? '')])),
 });
+
 
 function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
   const [tab, setTab] = useState('finance');
@@ -168,7 +172,7 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
     const busy = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el.name : '';
     const r = fromRow(ec);
     setForm(f => Object.fromEntries(EDIT_KEYS.map(k => [k, k === busy ? f[k] : r[k]])));
-  }, [ec.payment, ec.invoice, ec.amountReceived, ec.receivedDate, ec.travelExpenses, ec.gst]);
+  }, [ec.payment, ec.invoice, ec.amountReceived, ec.receivedDate, ec.travelExpenses, ec.gst, ...EXTRA_KEYS.map(k => ec[k])]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const live = { ...ec, ...form };
   const stage = financeStage(live);
@@ -184,6 +188,12 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
     const pay = k === 'payment' ? v : autoPayment({ ...ec, ...next });
     const changes = { [k]: v };
     if (k !== 'payment' && pay !== form.payment) { next.payment = pay; changes.payment = pay; }
+    // Travel billing moves forward on its own: a travel invoice date → Raised; an amount received → Yes / Partly
+    if (k === 'travelInvoiceDate' && v && !next.travelInvoiceRaised) { next.travelInvoiceRaised = 'Yes'; changes.travelInvoiceRaised = 'Yes'; }
+    if (k === 'travelReceivedAmount' && money(v) > 0 && !['Yes', 'NA'].includes(next.travelReceived)) {
+      const st = money(v) >= money(ec.travelExpenses) ? 'Yes' : 'Partly';
+      next.travelReceived = st; changes.travelReceived = st;
+    }
     // Keep the Excel GST column in step with the rule (18% of Price) whenever this engagement is saved
     const gstCalc = gstOf(ec);
     if (money(ec.price) > 0 && Math.abs(money(ec.gst) - gstCalc) > 0.5) changes.gst = String(gstCalc);
@@ -286,6 +296,31 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
               <Val style={{ fontWeight: 800, color: 'var(--primary)' }}>{num(ec.price) ? inr(receivableOf(ec)) : ''}</Val>
             </Field>
             <Field label="Total to Receive (incl. Travel)"><Val style={{ fontWeight: 700 }}>{total ? inr(total) : ''}</Val></Field>
+
+            {ecHasExtraCols() ? (() => {
+              const inp = (k, type = 'number', ph = '0') => (canEdit
+                ? <input name={k} type={type} {...(type === 'number' ? { min: 0, step: '0.01' } : {})} className="form-input" style={{ fontSize: 12 }} value={form[k]} onChange={edit(k)} placeholder={ph} />
+                : <Val>{type === 'number' ? (form[k] ? inr(form[k]) : '') : type === 'date' ? (form[k] ? fmtDate(form[k]) : '') : form[k]}</Val>);
+              const sel = (k, opts) => (canEdit
+                ? <select name={k} className="form-input" style={{ fontSize: 12 }} value={form[k]} onChange={edit(k)}><option value="">—</option>{opts.map(o => <option key={o}>{o}</option>)}</select>
+                : <Val>{form[k]}</Val>);
+              const travelBal = money(live.travelExpenses) - money(live.travelReceivedAmount);
+              return (<>
+                <Section>Travel, Stay &amp; Misc Billing</Section>
+                <Field label="Travel Invoice Raised">{sel('travelInvoiceRaised', ['Yes', 'No', 'NA'])}</Field>
+                <Field label="Travel Invoice Date">{inp('travelInvoiceDate', 'date')}</Field>
+                <Field label="Travel Amount Received">{sel('travelReceived', ['Yes', 'No', 'Partly', 'NA'])}</Field>
+                <Field label="Travel Received Amount (₹)">{inp('travelReceivedAmount')}</Field>
+                <Field label="Travel Received Date">{inp('travelReceivedDate', 'date')}</Field>
+                <Field label="Travel Balance">
+                  <Val style={{ fontWeight: 700, color: travelBal > 0 && live.travelInvoiceRaised === 'Yes' ? '#b91c1c' : undefined }}>{money(live.travelExpenses) ? inr(Math.max(0, travelBal)) : ''}</Val>
+                </Field>
+              </>);
+            })() : (
+              <Field label="Travel billing" full>
+                <Val style={{ color: 'var(--muted)', fontWeight: 400 }}>Add the Travel Invoice Raised … Travel Received Date columns to the Engagement Calendar table to use these fields.</Val>
+              </Field>
+            )}
 
             <Section>Ops Checklist</Section>
             {oc ? (
@@ -535,6 +570,11 @@ export default function FinanceTracker({ onRefreshed }) {
     { label: 'Balance', get: r => (totalOf(r) ? totalOf(r) - num(r.amountReceived) : '') },
     { label: 'Invoice POC (Ops)', get: r => linkOf(r).oc?.invoicePoc ?? '' },
     { label: 'Invoice Comments (Ops)', get: r => linkOf(r).oc?.invoiceComment ?? '' },
+    ...(ecHasExtraCols() ? [
+      { label: 'Travel Invoice Raised', key: 'travelInvoiceRaised' },
+      { label: 'Travel Invoice Date', get: r => (toIso(r.travelInvoiceDate) ? fmtDate(r.travelInvoiceDate) : '') }, { label: 'Travel Amount Received', key: 'travelReceived' },
+      { label: 'Travel Received Amount (INR)', key: 'travelReceivedAmount' }, { label: 'Travel Received Date', get: r => (toIso(r.travelReceivedDate) ? fmtDate(r.travelReceivedDate) : '') },
+    ] : []),
   ];
 
   if (error && !data.length) return <ErrorState error={error} onRetry={() => load({ force: true })} />;

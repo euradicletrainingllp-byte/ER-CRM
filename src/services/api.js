@@ -188,6 +188,33 @@ function withDecodedKeys(r) {
 }
 
 // Helper: get a field trying multiple key variants (PA renames special chars)
+// ─── Price breakup + travel billing columns (Engagement Calendar, 30 Oct 2026) ──────────────────
+// [field, Excel header, type]. "Facilitation Fee (INR)" is an Excel formula: read only, never written.
+export const EC_EXTRA_COLS = [
+  ['pmCost', 'PM Cost (INR)', 'num'], ['materialCost', 'Material Cost (INR)', 'num'], ['otherCost', 'Other Cost (INR)', 'num'],
+  ['otherCostDetails', 'Other Cost Details'], ['priceComments', 'Price Comments'],
+  ['travelInvoiceRaised', 'Travel Invoice Raised'], ['travelInvoiceDate', 'Travel Invoice Date', 'date'],
+  ['travelReceived', 'Travel Amount Received'], ['travelReceivedAmount', 'Travel Received Amount (INR)', 'num'],
+  ['travelReceivedDate', 'Travel Received Date', 'date'],
+];
+const headerVariants = h => [...new Set([h, h.replace(/[^A-Za-z0-9]/g, '_'), h.replace(/[^A-Za-z0-9]+/g, '_'), h.replace(/[^A-Za-z0-9]+/g, '_').replace(/_+$/, '')])];
+// Sent only once the Excel table has these columns (seen in a read) — before that, saves stay exactly as they were
+let _ecHasExtraCols = false;
+export const ecHasExtraCols = () => _ecHasExtraCols;
+function readEcExtras(r) {
+  const out = {};
+  EC_EXTRA_COLS.forEach(([k, h, type]) => {
+    const raw = getField(r, ...headerVariants(h), k);
+    if (raw !== undefined) _ecHasExtraCols = true;
+    out[k] = raw == null || String(raw).trim() === '' ? '' : type === 'num' ? toAmount(raw) : type === 'date' ? formatDate(raw) : String(raw);
+  });
+  const fee = getField(r, ...headerVariants('Facilitation Fee (INR)'), 'facilitationFee');
+  out.facilitationFee = fee == null || String(fee).trim() === '' ? '' : toAmount(fee);
+  return out;
+}
+/** Excel columns for every EC write (the flow rewrites the whole row, so they must always be sent). */
+export const ecExtraFields = e => (_ecHasExtraCols ? Object.fromEntries(EC_EXTRA_COLS.map(([k, h]) => [h, e?.[k] ?? ''])) : {});
+
 function getField(r, ...keys) {
   for (const k of keys) {
     if (r[k] !== undefined && r[k] !== null) return r[k];
@@ -404,6 +431,7 @@ export async function getEngagements(filters = {}) {
       // Carried from the Solution / BD Tracker when the engagement is added
       proposalLink:   getField(r, 'Proposal Link', 'Proposal_Link', 'proposalLink') ?? '',
       opsChecklist:   getField(r, 'Ops Checklist', 'Ops_Checklist', 'opsChecklist') ?? '',
+      ...readEcExtras(r),
     };
   }).filter(r => r.company); // only require company — egId always has a fallback
 }
@@ -680,6 +708,7 @@ export async function addEngagementRow(rowData) {
     nps:                               rowData.nps            || '',
     'Proposal Link':                   rowData.proposalLink   || '',
     'Ops Checklist':                   rowData.opsChecklist   || '',
+    ...ecExtraFields(rowData),
   }).then(notifyEcChanged).then(res => ({ ...(res || {}), engagementKey: key }));
 }
 

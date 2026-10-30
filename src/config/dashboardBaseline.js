@@ -1,7 +1,7 @@
 /**
  * Previous-year figures for the Operations and Solutioning dashboards.
  *
- * Source: "Dashboard Report Data 12th October 2026.xlsx" — Operations and Solutioning sheets.
+ * Source: "Dashboard Report Data 12th October 2026.xlsx" — Operations and Solutioning sheets (Solutioning FY 2025-26 re-checked against the 26 Oct 2026 file).
  * These numbers are fixed. Every financial year from LIVE_FROM_FY onward is calculated live
  * from the Engagement Calendar (Operations) and the Solution Tracker (Solutioning) instead.
  */
@@ -84,10 +84,9 @@ export const SOL_BASELINE = {
       ['Training', 134, 33318950], ['Talent Management', 9, 10550000], ['Coaching', 4, 1822800],
       ['Assessment', 2, 149000], ['HR Services', 1, 0],
     ],
-    typeOfService: [
-      ['Assessment & Development Centers', 3, 4545000], ['Executive Coaching', 0, 0], ['Facilitation', 140, 36770014],
-      ['Facilitation + Creative Solutions', 1, 135000], ['Success Presentation', 23, 709800],
-      ['Coaching Connects', 31, 4636936], ['Creative Solutions', 3, 0], ['IDP Creation', 1, 725000],
+    typeOfService: [          // corrected labels — Dashboard Report Data, 26 Oct 2026
+      ['Assessment & Development Centers', 3, 4545000], ['Facilitation', 140, 36770014], ['Success Presentation', 1, 135000],
+      ['One-O-One Coaching', 23, 709800], ['Mini Group Coaching', 31, 4636936], ['Diagnosis', 3, 0], ['Consulting', 1, 725000],
     ],
     developmentCategory: [
       ['Power Skills Enablement', 66, 13903200], ['Leadership Development', 48, 23973050],

@@ -1,0 +1,8 @@
+
+## 2026-10-30 — Engagement Calendar: price breakup + travel billing columns
+- New EC columns read/written: PM Cost (INR), Material Cost (INR), Other Cost (INR), Other Cost Details, Price Comments, Travel Invoice Raised, Travel Invoice Date, Travel Amount Received, Travel Received Amount (INR), Travel Received Date. Facilitation Fee (INR) = Excel formula, read only (never written).
+- Columns are sent on every EC write (create, EC edit form, finance saves, BD checklist sync) only once a read shows they exist in Excel — safe before the Excel/flow change.
+- Finance Tracker panel: "Price Breakup" (costs, auto facilitation fee, red when negative, price comments) and "Travel, Stay & Misc Billing" (invoice raised/date, received/amount/date, balance; auto Yes/Partly). Export includes the new columns.
+- Files: services/api.js (EC_EXTRA_COLS, ecExtraFields, ecHasExtraCols), services/syncWithEC.js, pages/FinanceTracker.jsx, pages/EngagementCalendar.jsx. Backup: Claude outputs/backup-2026-10-30-ec-price-breakup/.
+- Manual: Engagement calendar CRUD 2 → Create + Update a row: map the 10 new columns (not Facilitation Fee).
+- Update (23:59): Price breakup (PM / Material / Other cost, details, Price Comments) moved to the Engagement Calendar edit form + details (facilitation fee shown, red when costs exceed price); removed from the Finance Tracker. Travel billing stays editable in the Finance Tracker and shows locked / read-only in the Engagement Calendar. EC_FINANCE_FIELDS now holds only the travel keys, so an EC form save never overwrites travel billing and a finance save keeps the price breakup.
