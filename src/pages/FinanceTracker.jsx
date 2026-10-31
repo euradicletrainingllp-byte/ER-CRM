@@ -423,6 +423,14 @@ export default function FinanceTracker({ onRefreshed }) {
     } finally { if (id === requestId.current) setSyncing(false); }
   }, [win.from, win.to, onRefreshed]);
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  // A background read of the full table finished — swap the fresh rows in (no network call)
+  useEffect(() => {
+    const h = () => loadRef.current?.({ keepCurrent: true });
+    window.addEventListener('ercrm:ec-loaded', h);
+    return () => window.removeEventListener('ercrm:ec-loaded', h);
+  }, []);
   useEffect(() => { load(); }, [win.from, win.to]);
   useEffect(() => { getOpsChecklist().then(setOps).catch(() => setOps(o => o || [])); }, []);
   // Preload previous / next windows so paging feels instant

@@ -379,12 +379,15 @@ function ecContract(r) {
 /** Every key the EC flow may use for the contract column (it maps whichever one it was built with). */
 export const ecContractFields = v => ({ contract: v || '', Contract: v || '', 'Contract Type': v || '' });
 
-export async function getEngagements(filters = {}) {
-  const data = await callEngagementFlow('get', filters);
-  const rows = (Array.isArray(data?.value) ? data.value
-             : Array.isArray(data)        ? data
-             : []).map(withDecodedKeys);
+const ecRawRows = data => (Array.isArray(data?.value) ? data.value
+                         : Array.isArray(data)        ? data
+                         : []).map(withDecodedKeys);
 
+export async function getEngagements(filters = {}) {
+  return mapEngagementRows(ecRawRows(await callEngagementFlow('get', filters)));
+}
+
+function mapEngagementRows(rows) {
   return rows.map((r, i) => {
     // PA renames columns — try every known variant (column is now 'EG ID' with a space)
     const egId = getField(r,
@@ -436,19 +439,24 @@ export async function getEngagements(filters = {}) {
   }).filter(r => r.company); // only require company — egId always has a fallback
 }
 
-// ─── ENGAGEMENT CALENDAR — 3-MONTH WINDOW LOADING ────────────────────────────
-// Loading all rows at once makes the Power Automate flow time out (HTTP 504)
-// once the sheet grows to hundreds of rows. The Engagement Calendar page loads
-// a 3-month window instead (previous, current and next month). The range is sent
-// to the flow so it can filter on its side; the rows are ALSO filtered here, so
-// the page works correctly even if the flow still returns every row.
+// ─── ENGAGEMENT CALENDAR — LOAD ONCE, FILTER IN MEMORY (1 Nov 2026) ──────────
+// The whole table is read once per session (in pages of EC_PAGE_SIZE rows, so no single flow
+// call runs long enough to time out) and kept in memory. Month windows, ◀ ▶, 1/3/6/12 months
+// and filters are cut from that copy — they never call the flow. Excel is read again only on
+// Refresh, after a save, or quietly when the copy is older than EC_REFRESH_AFTER_MS.
+const EC_PAGE_SIZE = 250;                        // rows per flow call (Excel connector pages hold 256)
+const EC_PARALLEL_PAGES = 3;                     // page calls sent at the same time
+const EC_REFRESH_AFTER_MS = 10 * 60 * 1000;      // quiet background refresh after 10 minutes
 
-const EC_CACHE_TTL_MS = 2 * 60 * 1000;          // reuse a window for 2 minutes
-const _ecCache = new Map();                      // key → { ts, promise }
+let _full = null;        // { ts, rows } — read from Excel in this session
+let _fullLoad = null;    // { seq, promise } — read in progress
+let _writeSeq = 0;       // bumped before every write; a read started earlier is not trusted
+let _fullStale = false;  // a write happened after the last completed read
 
-/** Clear cached engagement reads (called automatically after every write). */
+/** Mark the loaded copy as out of date (called automatically before every write). */
 export function invalidateEngagementCache() {
-  _ecCache.clear();
+  _writeSeq += 1;
+  _fullStale = true;
 }
 
 const pad2 = n => String(n).padStart(2, '0');
@@ -526,144 +534,141 @@ async function withReadRetry(fn, delays = [2000, 5000]) {
   throw lastErr;
 }
 
-// ── Saved copy of each loaded range (memory + browser storage) ──────────────
-// Lets the page show data instantly (stale-while-revalidate) while a fresh
-// copy loads from Excel in the background. Browser copy expires after 24h.
-const _ecData = new Map();                       // key → { ts, rows }
+// ── Saved copy of the full table (browser storage) ──────────────────────────
+// Shown instantly when a page opens, while the session's first read from Excel runs.
 const EC_STORE_KEY = 'ercrm.engagements.cache.v1';
-const EC_STORE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const EC_STORE_MAX_ENTRIES = 12;
+const EC_STORE_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+let _savedCopy;          // undefined = not read yet, null = none
 
-function storeReadAll() {
-  try { return JSON.parse(localStorage.getItem(EC_STORE_KEY) || '{}') || {}; }
-  catch { return {}; }
+function savedCopy() {
+  if (_savedCopy !== undefined) return _savedCopy;
+  _savedCopy = null;
+  try {
+    const saved = (JSON.parse(localStorage.getItem(EC_STORE_KEY) || '{}') || {}).all;
+    if (saved && Array.isArray(saved.rows) && Date.now() - saved.ts < EC_STORE_MAX_AGE_MS) _savedCopy = saved;
+  } catch { /* blocked / corrupt */ }
+  return _savedCopy;
 }
-function storeWriteAll(all) {
-  try { localStorage.setItem(EC_STORE_KEY, JSON.stringify(all)); } catch { /* storage full / blocked */ }
-}
-function storeSave(key, rows) {
-  const all = storeReadAll();
-  all[key] = { ts: Date.now(), rows };
-  const keys = Object.keys(all).sort((a, b) => all[b].ts - all[a].ts);
-  keys.slice(EC_STORE_MAX_ENTRIES).forEach(k => delete all[k]);
-  storeWriteAll(all);
+function storeWrite(entry) {
+  _savedCopy = entry;
+  // Only the full table is kept (older builds also saved each window — dropped to free space)
+  try { localStorage.setItem(EC_STORE_KEY, JSON.stringify({ all: entry })); } catch { /* storage full / blocked */ }
 }
 
-function cachedRead(key, loader, force, persist = false) {
-  const hit = _ecCache.get(key);
-  if (!force && hit && Date.now() - hit.ts < EC_CACHE_TTL_MS) return hit.promise;
-  const entry = { ts: Date.now(), promise: null };
-  entry.promise = withReadRetry(loader).then(rows => {
-    _ecData.set(key, { ts: Date.now(), rows });
-    if (persist) storeSave(key, rows);
-    return rows;
-  }).catch(err => {
-    if (_ecCache.get(key) === entry) _ecCache.delete(key);   // never cache a failure
-    throw err;
+/**
+ * Every raw row of the EC table, read in pages (skip / top). If the flow does not use
+ * skip / top it returns the whole table on the first call, which is then used as is.
+ */
+async function readAllEngagementRows() {
+  const page = skip => withReadRetry(() => callEngagementFlow('get', { skip, top: EC_PAGE_SIZE })).then(ecRawRows);
+  const first = await page(0);
+  if (first.length !== EC_PAGE_SIZE) return first;              // whole table (or a small one)
+  const firstSig = JSON.stringify(first[0]);
+  const all = [...first];
+  for (let skip = EC_PAGE_SIZE; skip < 50000; skip += EC_PAGE_SIZE * EC_PARALLEL_PAGES) {
+    const skips = Array.from({ length: EC_PARALLEL_PAGES }, (_, i) => skip + i * EC_PAGE_SIZE);
+    const pages = await Promise.all(skips.map(page));
+    if (skip === EC_PAGE_SIZE && pages[0].length && JSON.stringify(pages[0][0]) === firstSig) return first;   // skip ignored
+    let done = false;
+    for (const p of pages) {
+      all.push(...p);
+      if (p.length < EC_PAGE_SIZE) { done = true; break; }
+    }
+    if (done) break;
+  }
+  // A row added / deleted between page reads can put one row on two pages — keep one per Index
+  const seen = new Set();
+  return all.filter(r => {
+    const k = readKey(r);
+    if (!k) return true;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
   });
-  _ecCache.set(key, entry);
+}
+
+/** Read the full table from Excel. Calls made while a read is running share it (unless a write
+ *  happened after that read started and a fresh copy is forced). */
+function loadFullFromExcel(force) {
+  const cur = _fullLoad;
+  if (cur && !(force && cur.seq !== _writeSeq)) return cur.promise;
+  const seq = _writeSeq;
+  const before = cur ? cur.promise.catch(() => {}) : Promise.resolve();
+  const entry = { seq, promise: null };
+  entry.promise = before.then(readAllEngagementRows).then(raw => {
+    const rows = mapEngagementRows(raw);
+    _full = { ts: Date.now(), rows };
+    if (seq === _writeSeq) _fullStale = false;
+    storeWrite(_full);
+    try { window.dispatchEvent(new CustomEvent('ercrm:ec-loaded')); } catch { /* non-browser */ }
+    return rows;
+  }).finally(() => { if (_fullLoad === entry) _fullLoad = null; });
+  _fullLoad = entry;
   return entry.promise;
 }
 
-/** Last known rows for a range (memory first, then browser copy) — or null. Never hits the network. */
-export function peekEngagementsForRange(from, to) {
-  const key = `range|${from}|${to}`;
-  const mem = _ecData.get(key);
-  if (mem) return mem.rows;
-  const saved = storeReadAll()[key];
-  if (saved && Array.isArray(saved.rows) && Date.now() - saved.ts < EC_STORE_MAX_AGE_MS) {
-    _ecData.set(key, saved);
-    return saved.rows;
-  }
-  return null;
-}
+const cutRange = (rows, from, to) => rows
+  .filter(e => !e.startDate || engagementInRange(e, from, to))
+  .map(e => (e.startDate ? e : { ...e, undated: true }));
 
-/** Last known FULL Engagement Calendar (memory first, then browser copy) — or null. */
+/** Last known FULL Engagement Calendar (this session's copy, then the browser copy) — or null. */
 export function peekAllEngagements() {
-  const mem = _ecData.get('all');
-  if (mem) return mem.rows;
-  const saved = storeReadAll()['all'];
-  if (saved && Array.isArray(saved.rows) && Date.now() - saved.ts < EC_STORE_MAX_AGE_MS) {
-    _ecData.set('all', saved);
-    return saved.rows;
-  }
-  return null;
+  if (_full) return _full.rows;
+  const saved = savedCopy();
+  return saved ? saved.rows : null;
 }
 
-/** Load a range in the background (no-op if a fresh copy is already cached). */
-export function prefetchEngagementsForRange(from, to) {
-  const hit = _ecCache.get(`range|${from}|${to}`);
-  if (hit && Date.now() - hit.ts < EC_CACHE_TTL_MS) return;
-  getEngagementsForRange(from, to).catch(() => { /* silent — it is only a prefetch */ });
+/** Last known rows for a range — or null. Never hits the network. */
+export function peekEngagementsForRange(from, to) {
+  const rows = peekAllEngagements();
+  return rows ? cutRange(rows, from, to) : null;
 }
 
-/** Apply a change to every saved copy (used after a successful save/delete). */
+/** Kept for existing callers: starts the full read if it has not run yet, else does nothing. */
+export function prefetchEngagementsForRange() {
+  if (!_full && !_fullLoad) loadFullFromExcel(false).catch(() => { /* silent — only a prefetch */ });
+}
+
+/** Apply a change to the loaded and saved copies (used after a successful save/delete). */
 export function patchEngagementCaches(mutate) {
-  for (const [k, v] of _ecData) _ecData.set(k, { ...v, rows: mutate(v.rows) });
-  const all = storeReadAll();
-  Object.keys(all).forEach(k => { if (Array.isArray(all[k].rows)) all[k].rows = mutate(all[k].rows); });
-  storeWriteAll(all);
+  if (_full) _full = { ..._full, rows: mutate(_full.rows) };
+  const saved = savedCopy();
+  const next = _full || (saved && { ...saved, rows: mutate(saved.rows) });
+  if (next) storeWrite(next);
 }
 
 /**
- * Engagements overlapping [from, to] plus rows with no Start Date
- * (flagged `undated: true`). Cached for 2 minutes; pass { force: true } to refresh.
+ * Every engagement. After the first read it is served from memory (instant); a copy older than
+ * 10 minutes is refreshed quietly in the background. After a write the next call waits for a
+ * fresh read so new rows / IDs are never missed. { force: true } always reads Excel.
+ */
+export function getAllEngagementsCached({ force = false } = {}) {
+  if (!force && _full && !_fullStale) {
+    if (Date.now() - _full.ts > EC_REFRESH_AFTER_MS) loadFullFromExcel(false).catch(() => {});
+    return Promise.resolve(_full.rows);
+  }
+  return loadFullFromExcel(force);
+}
+
+/**
+ * Engagements overlapping [from, to] plus rows with no Start Date (flagged `undated: true`),
+ * cut from the full table in memory. { force: true } re-reads Excel first.
  */
 export function getEngagementsForRange(from, to, { force = false } = {}) {
-  return cachedRead(`range|${from}|${to}`, async () => {
-    const rows = await getEngagements({
-      fromDate:   from,
-      toDate:     to,
-      fromSerial: isoToExcelSerial(from),
-      toSerial:   isoToExcelSerial(to),
-    });
-    return rows
-      .filter(e => !e.startDate || engagementInRange(e, from, to))
-      .map(e => (e.startDate ? e : { ...e, undated: true }));
-  }, force, true);
-}
-
-/** Every engagement (used only when the Add form needs all EG IDs). Cached. */
-export function getAllEngagementsCached({ force = false } = {}) {
-  return cachedRead('all', () => getEngagements(), force, true);
+  return getAllEngagementsCached({ force }).then(rows => cutRange(rows, from, to));
 }
 
 /**
- * Every engagement, for the Dashboard. Tries the full read first; when that fails (usually the
- * flow timing out on a large sheet) it reads the previous, current and next financial year in
- * 3-month windows — the same reads the Engagement Calendar page uses — and keeps the last saved
- * copy for rows outside those years. Returns { rows, fallback } — fallback is the full-read
- * error when the window path was used, else null. Throws only if both paths fail.
+ * Every engagement, for the Dashboard. Returns { rows, fallback } — when Excel cannot be read,
+ * the last saved copy is returned with fallback = the read error. Throws only if there is none.
  */
 export async function getAllEngagementsResilient({ force = false } = {}) {
   try {
     return { rows: await getAllEngagementsCached({ force }), fallback: null };
-  } catch (fullErr) {
-    const t = new Date();
-    const fy = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;   // FY starts in April
-    const windows = [];
-    for (let i = 0; i < 12; i++) {                                          // Apr (FY-1) … Mar (FY+2)
-      const s = new Date(fy - 1, 3 + i * 3, 1), e = new Date(fy - 1, 3 + i * 3 + 3, 0);
-      const iso = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-      windows.push([iso(s), iso(e)]);
-    }
-    const parts = [];
-    for (let i = 0; i < windows.length; i += 3) {                           // 3 reads at a time
-      const got = await Promise.all(windows.slice(i, i + 3).map(([f, to]) => getEngagementsForRange(f, to, { force })));
-      parts.push(...got);
-    }
-    const from = windows[0][0], to = windows[windows.length - 1][1];
-    const keyOfRow = e => `${e.egId}|${e.sno}|${String(e.engagementKey ?? '').trim()}`;
-    const merged = new Map();
-    // Older saved copy first (only rows outside the re-read years), then the fresh windows
-    (peekAllEngagements() || []).forEach(e => {
-      if (e.startDate && !engagementInRange(e, from, to)) merged.set(keyOfRow(e), e);
-    });
-    parts.flat().forEach(e => { const { undated, ...row } = e; merged.set(keyOfRow(row), row); });   // eslint-disable-line no-unused-vars
-    const rows = [...merged.values()];
-    _ecData.set('all', { ts: Date.now(), rows });
-    storeSave('all', rows);
-    return { rows, fallback: fullErr };
+  } catch (err) {
+    const saved = peekAllEngagements();
+    if (saved) return { rows: saved, fallback: err };
+    throw err;
   }
 }
 

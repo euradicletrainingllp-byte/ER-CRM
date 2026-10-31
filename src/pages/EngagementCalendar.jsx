@@ -663,6 +663,27 @@ const SPAN_OPTIONS = [1, 2, 3, 4, 6, 12];
 const MIN_YEAR = 2022;
 const MAX_SPAN = 24;
 const rowKey = e => `${e.egId}|${e.sno}`;
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// 'All years' view: every month from the earliest to the latest start date in the data
+const ALL_FROM = '1900-01-01', ALL_TO = '2999-12-31';
+function allYearsWindow(rows) {
+  let lo = todayISO().slice(0, 7), hi = lo;
+  (rows || []).forEach(e => {
+    const k = String(e.startDate || '').slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(k)) return;
+    if (k < lo) lo = k;
+    if (k > hi) hi = k;
+  });
+  const months = [];
+  let y = Number(lo.slice(0, 4)), m = Number(lo.slice(5, 7)) - 1;
+  for (let guard = 0; guard < 1200; guard++) {
+    const key = `${y}-${pad2(m + 1)}`;
+    months.push({ key, label: `${MON[m]} ${y}`, year: y, month: m });
+    if (key >= hi) break;
+    if (++m > 11) { m = 0; y++; }
+  }
+  return { from: ALL_FROM, to: ALL_TO, months };
+}
 
 /* ─── Range navigator (Months / Year view) ──────────────────────────────── */
 function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan, onShift, onToday, onJumpMonth, onJumpYear, onChipClick, leading }) {
@@ -683,7 +704,7 @@ function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan,
   for (let y = Math.max(thisYear + 2, first.year); y >= Math.min(MIN_YEAR, first.year); y--) years.push(y);
   const currentKey = todayISO().slice(0, 7);
 
-  const unit = viewMode === 'year' ? 'year' : (span === 1 ? 'month' : `${span} months`);
+  const unit = viewMode === 'all' ? 'period' : viewMode === 'year' ? 'year' : (span === 1 ? 'month' : `${span} months`);
   const seg = active => ({
     padding: '5px 14px', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer',
     background: active ? '#1a3a5c' : 'transparent', color: active ? '#fff' : '#475569',
@@ -701,11 +722,12 @@ function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan,
         {leading && <span style={{ width: 1, height: 20, background: '#e2e8f0', margin: '0 2px' }} />}
         <span style={lbl}>📅 Period:</span>
         <div style={{ display: 'inline-flex', border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
+          <button type="button" style={seg(viewMode === 'all')}    onClick={() => onMode('all')}    disabled={loading}>All years</button>
           <button type="button" style={seg(viewMode === 'months')} onClick={() => onMode('months')} disabled={loading}>Months</button>
           <button type="button" style={seg(viewMode === 'year')}   onClick={() => onMode('year')}   disabled={loading}>Year</button>
         </div>
 
-        {viewMode === 'months' ? (
+        {viewMode === 'all' ? null : viewMode === 'months' ? (
           <>
             <span style={lbl}>Show</span>
             <select
@@ -759,7 +781,23 @@ function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan,
 
         {/* Month chips — click to jump to that month in the list */}
         <span style={{ width: 1, height: 20, background: '#e2e8f0', margin: '0 2px' }} />
-        {win.months.map(m => {
+        {viewMode === 'all' && [...new Set(win.months.map(m => m.year))].map(y => (
+          <button
+            key={y}
+            type="button"
+            onClick={() => onChipClick(win.months.find(m => m.year === y).key)}
+            title={`Jump to ${y}`}
+            style={{
+              fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, cursor: 'pointer',
+              border: y === thisYear ? '1px solid #1a3a5c' : '1px solid transparent',
+              background: y === thisYear ? '#1a3a5c' : '#f1f5f9',
+              color: y === thisYear ? '#fff' : '#475569',
+            }}
+          >
+            {y}
+          </button>
+        ))}
+        {viewMode !== 'all' && win.months.map(m => {
           const isNow = m.key === currentKey;
           return (
             <button
@@ -781,14 +819,14 @@ function RangeNav({ viewMode, span, win, loading, containsToday, onMode, onSpan,
         {!containsToday && <span style={{ fontSize: 11, color: '#94a3b8' }}>(current month not in view)</span>}
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(-1)} disabled={loading} title={`Previous ${unit}`}>
+          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(-1)} disabled={loading || viewMode === 'all'} title={`Previous ${unit}`}>
             ◀ Prev
           </button>
           <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={onToday} disabled={loading}
                   title="Go to the current period and scroll to the next upcoming delivery">
             ● Today
           </button>
-          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(1)} disabled={loading} title={`Next ${unit}`}>
+          <button className="btn btn-outline btn-sm" style={{ whiteSpace: 'nowrap' }} onClick={() => onShift(1)} disabled={loading || viewMode === 'all'} title={`Next ${unit}`}>
             Next ▶
           </button>
         </div>
@@ -854,18 +892,21 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
   const location = useLocation();
 
   // View: 'months' (N months starting at `start`) or 'year' (Jan–Dec of start.year)
-  const [viewMode, setViewMode] = useState('months');
+  const [viewMode, setViewMode] = useState('all');      // default: every year at once
   const [span,     setSpan]     = useState(3);
   const [start,    setStart]    = useState(() => defaultStart(3));
+  const [allRowsSeen, setAllRowsSeen] = useState(null);   // rows used to size the 'All years' months
   const win = useMemo(
-    () => (viewMode === 'year'
+    () => (viewMode === 'all'
+      ? allYearsWindow(allRowsSeen || peekEngagementsForRange(ALL_FROM, ALL_TO))
+      : viewMode === 'year'
       ? buildMonthRange(start.year, 0, 12)
       : buildMonthRange(start.year, start.month, span)),
-    [viewMode, span, start],
+    [viewMode, span, start, allRowsSeen],
   );
   const today = todayISO();
   const containsToday = today >= win.from && today <= win.to;
-  const rangeLabel = win.months.length === 1
+  const rangeLabel = viewMode === 'all' ? 'all years' : win.months.length === 1
     ? win.months[0].label
     : `${win.months[0].label} – ${win.months[win.months.length - 1].label}`;
 
@@ -992,6 +1033,15 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
     revalTimer.current = setTimeout(() => loadRef.current?.({ force: true, keepCurrent: true }), 2500);
   };
 
+  // A background read of the full table finished — swap the fresh rows in (no network call)
+  useEffect(() => {
+    const h = () => loadRef.current?.({ keepCurrent: true });
+    window.addEventListener('ercrm:ec-loaded', h);
+    return () => window.removeEventListener('ercrm:ec-loaded', h);
+  }, []);
+
+  useEffect(() => { if (viewMode === 'all') setAllRowsSeen(data); }, [data, viewMode]);
+
   // Reload whenever the range changes (saved ranges appear instantly)
   useEffect(() => { load(); }, [win.from, win.to]);
 
@@ -999,6 +1049,7 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
   useEffect(() => {
     if (syncing || rangeLoading || error) return;
     const t = setTimeout(() => {
+      if (viewMode === 'all') return;
       const n    = viewMode === 'year' ? 12 : span;
       const base = viewMode === 'year' ? { year: start.year, month: 0 } : start;
       [-n, n].forEach(d => {
@@ -1014,6 +1065,12 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
   const changeMode = mode => {
     if (mode === viewMode) return;
     const nowYear = new Date().getFullYear();
+    if (mode === 'all') { setViewMode('all'); return; }
+    if (viewMode === 'all') {                          // leaving 'All years' → start at the current period
+      setStart(mode === 'year' ? { year: nowYear, month: 0 } : defaultStart(span));
+      setViewMode(mode);
+      return;
+    }
     if (mode === 'year') {
       setStart({ year: containsToday ? nowYear : start.year, month: 0 });
     } else {
@@ -1025,11 +1082,11 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
     setSpan(n);
     if (containsToday) setStart(defaultStart(n));   // keep the current month centred
   };
-  const shift = dir => setStart(s => (viewMode === 'year'
+  const shift = dir => viewMode !== 'all' && setStart(s => (viewMode === 'year'
     ? { year: s.year + dir, month: 0 }
     : addMonths(s, dir * span)));
   const goToday = () => {
-    setStart(viewMode === 'year' ? { year: new Date().getFullYear(), month: 0 } : defaultStart(span));
+    if (viewMode !== 'all') setStart(viewMode === 'year' ? { year: new Date().getFullYear(), month: 0 } : defaultStart(span));
     setScrollNonce(n => n + 1);
   };
   const jumpMonth = ym => {

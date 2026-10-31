@@ -87,7 +87,7 @@ export default function Dashboard({ onRefreshed }) {
     await Promise.allSettled([
       getAllEngagementsResilient({ force: true }).then(({ rows, fallback }) => {
         setEngData(rows);
-        if (fallback) note.push('The full Engagement Calendar read did not finish, so it was loaded in 3-month windows (previous, current and next financial year). Older years show the last saved copy.');
+        if (fallback) note.push('Excel could not be read just now, so the Engagement Calendar shows the last saved copy. Try Refresh in a minute.');
       }).catch(e => { errs.eng = e; }),
       getOpsChecklist().then(setOpsData).catch(e => { errs.ops = e; }),
       getSolutionTracker().then(setSolData).catch(e => { errs.solution = e; setSolData(d => d || []); }),
