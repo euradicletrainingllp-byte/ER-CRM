@@ -22,3 +22,10 @@
 
 ## 2026-11-02 — Finance Tracker: Next up
 - List auto-scrolls the next upcoming / ongoing engagement (earliest start, not ended, not cancelled) to the middle on load and on FY / month change; orange "⏭ Next up" tag + outline, "⏭ Next up" button in the filter bar (same as Engagement Calendar). File: FinanceTracker.jsx.
+
+## 2026-11-02 — Finance dashboard: Revenue incl. GST + TDS card
+- Total Revenue card = Price + GST (travel excl.), same basis toggle as before. Monthly / FY charts unchanged (price excl. GST, fixed years from report).
+- Collection unchanged: Amount Received − travel & stay, capped at invoice value.
+- New card "TDS (Not Credited)" = 10% of Price on Revenue rows; sub-line Collection + TDS + to collect = Revenue. KPI row now g4 (4 cards).
+- File: FinanceLiveDashboard.jsx. Backup: Claude outputs/backup-2026-11-02-rev-gst-tds.tgz.
+- Invoice count: an Invoice No cell holding several numbers ("ER/013/26-27, ER/026/26-27") now counts each number (FY 26-27: 52 → 53).

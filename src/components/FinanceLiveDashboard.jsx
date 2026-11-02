@@ -25,7 +25,7 @@ import {
   CURRENT_FY, fyStartOf, fyLong, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
 import { normPayment } from '../services/syncWithEC.js';
-import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts, invoiceNoOf } from '../services/money.js';
+import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts, invoiceNoOf, tdsOf } from '../services/money.js';
 import { PERIODS, periodRange, periodLabelOf, inRange } from '../services/actionItems.js';
 // Same stage / overdue rules as the Finance Tracker page, so the two always agree
 import { financeStage, overdueDays } from '../pages/FinanceTracker.jsx';
@@ -105,7 +105,14 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   }), [engagements]);
 
   /* One invoice = its Invoice No; rows without a number fall back to Company + Invoice date */
-  const invKey = r => (r.invNo ? `#${r.invNo}` : `${keyOf(r.company)}|${r.inv}`);
+  // A cell may hold several numbers ("ER/013/26-27, ER/026/26-27") — each counts as its own invoice
+  // A row with no number but the same Company + Invoice date as a numbered row is part of that invoice (not counted again)
+  const numberedOn = useMemo(() => new Set(rows.filter(r => r.invNo && r.inv).map(r => `${keyOf(r.company)}|${r.inv}`)), [rows]);
+  const invKeys = r => {
+    if (r.invNo) return r.invNo.split(/[,;&/]\s*(?=ER)|[,;&]/i).map(x => x.trim()).filter(Boolean).map(x => `#${x}`);
+    const k = `${keyOf(r.company)}|${r.inv}`;
+    return numberedOn.has(k) ? [] : [k];
+  };
 
   /* Revenue date of a row for the chosen basis ('' = not revenue) */
   const revDate = r => (basis === 'invoice' ? (r.inv && !r.cancelled ? r.inv : '') : (r.start && !r.notRevenue ? r.start : ''));
@@ -120,7 +127,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       if (!r.inv || r.cancelled || !out[r.invFy]) return;
       const o = out[r.invFy], s = slot(r.inv);
       o.days[s] += Number(r.day) > 0 ? Number(r.day) : 0;
-      o.invSet[s].add(invKey(r));
+      invKeys(r).forEach(k => o.invSet[s].add(k));
     });
     Object.values(out).forEach(o => { o.inv = o.invSet.map(s => s.size); });
     return out;
@@ -151,14 +158,15 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   /* ── Selected period (KPI cards) ── */
   const pk = useMemo(() => {
     const inv = rows.filter(r => r.inv && !r.cancelled && inRange(r.inv, range));
-    const invoices = new Set(inv.map(invKey)).size;
+    const invoices = new Set(inv.flatMap(invKeys)).size;
     const revRows = rows.filter(r => { const d = revDate(r); return d && inRange(d, range); });
-    const revenue = revRows.reduce((s, r) => s + r.price, 0);
+    const revenue = revRows.reduce((s, r) => s + r.net, 0);         // Price + GST, travel excluded
+    const tds = revRows.reduce((s, r) => s + tdsOf(r), 0);           // 10% of Price — deducted by the client, never credited
     const invoiced = inv.reduce((s, r) => s + r.net, 0);          // Price + GST, travel excluded
     const paid = rows.filter(r => !r.cancelled && r.col > 0 && (r.rec ? inRange(r.rec, range) : (r.inv && inRange(r.inv, range))));
     const collected = paid.reduce((s, r) => s + r.col, 0);
     const months = [...new Set(revRows.map(r => MONTHS[slot(revDate(r))]))];
-    return { invoices, revenueL: L(revenue), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
+    return { invoices, revenueL: L(revenue), tdsL: L(tds), pendingL: L(revenue - collected - tds), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
       suspects: suspectReceipts(engagements) };
   }, [rows, range, basis, engagements]);   // eslint-disable-line react-hooks/exhaustive-deps
   const collectPct = pk.invoicedL > 0 ? Math.round((pk.collectedL / pk.invoicedL) * 100) : null;
@@ -257,12 +265,14 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
         <span style={{ fontSize: 12, color: '#6B7280', flexBasis: '100%' }}>{period.id === 'all' ? 'All dates' : `${fmtDate(range.from)} → ${fmtDate(range.to)}`} · cards below follow this period; charts show whole financial years</span>
       </div>
 
-      <div className="kg g3">
+      <div className="kg g4">
         <Kpi tone="gd" label="No. of Invoices Raised" value={fmtNum(pk.invoices)} sub={`Invoices raised · ${periodName}`} how="Distinct Invoice No with an Invoice date in the period (rows billed on one invoice count once); rows with no Invoice No count by Company + Invoice date; cancelled excluded." />
-        <Kpi tone="tl" label="Total Revenue" value={fmtL(pk.revenueL)} sub={pk.months.length && pk.months.length <= 4 ? `${pk.months.join(' + ')} · price excl. GST` : `${basis === 'invoice' ? 'Invoiced' : 'Delivered / scheduled'} price excl. GST · ${periodName}`}
-             how={basis === 'invoice' ? 'Sum of Price (INR) of rows whose Invoice date falls in the period; GST and travel excluded, cancelled rows excluded.' : 'Sum of Price (INR) of sessions whose start date falls in the period (cancelled / lost / postponed / on hold excluded); GST and travel excluded.'} />
+        <Kpi tone="tl" label="Total Revenue" value={fmtL(pk.revenueL)} sub={pk.months.length && pk.months.length <= 4 ? `${pk.months.join(' + ')} · price + GST` : `${basis === 'invoice' ? 'Invoiced' : 'Delivered / scheduled'} price + GST · ${periodName}`}
+             how={basis === 'invoice' ? 'Price (INR) + GST (18%) of rows whose Invoice date falls in the period; travel excluded, cancelled rows excluded. Revenue = Collection + TDS + still to collect.' : 'Price (INR) + GST (18%) of sessions whose start date falls in the period (cancelled / lost / postponed / on hold excluded); travel excluded. Revenue = Collection + TDS + still to collect.'} />
         <Kpi tone="gn" label="Collection" value={fmtL(pk.collectedL)} sub={`${pk.payments} payment(s) · ${periodName}${collectPct != null ? ` · ${collectPct}% of ${fmtL(pk.invoicedL)} invoiced` : ''} · excl. travel & stay`} tag="Collected" tagTone="up"
-             how="Amount Received counted on the Received Date in the period (Invoice date when Received Date is blank); Price + GST only — travel excluded — and never above the invoice value." />
+             how="Sum of Amount Received on the Received Date in the period (Invoice date when Received Date is blank), travel & stay taken out, never above the invoice value." />
+        <Kpi tone="nv" label="TDS (Not Credited)" value={fmtL(pk.tdsL)} sub={`10% of price · ${periodName} · ${fmtL(pk.collectedL)} + ${fmtL(pk.tdsL)} + ${fmtL(Math.max(0, pk.pendingL))} to collect = ${fmtL(pk.revenueL)}`} tag="Deducted by client" tagTone="warn"
+             how="TDS (10% of Price) on the same rows as Total Revenue — the client deducts it and pays it to the government, so it never reaches the bank. Collection + TDS + still to collect = Total Revenue; the last part also absorbs timing (payments this period for invoices of an earlier period)." />
       </div>
       {pk.suspects.length > 0 && (
         <div style={{ fontSize: 12, color: '#7f1d1d', background: '#FFF5F5', borderLeft: '3px solid #E98272', borderRadius: 6, padding: '8px 12px', margin: '-4px 0 12px' }}>
