@@ -208,12 +208,21 @@ function readEcExtras(r) {
     if (raw !== undefined) _ecHasExtraCols = true;
     out[k] = raw == null || String(raw).trim() === '' ? '' : type === 'num' ? toAmount(raw) : type === 'date' ? formatDate(raw) : String(raw);
   });
+  const invNo = getField(r, ...headerVariants('Invoice No'), 'Invoice Number', 'Invoice_Number', 'invoiceNo');
+  if (invNo !== undefined) _ecHasInvoiceNo = true;
+  out.invoiceNo = invNo == null ? '' : String(invNo).trim();
   const fee = getField(r, ...headerVariants('Facilitation Fee (INR)'), 'facilitationFee');
   out.facilitationFee = fee == null || String(fee).trim() === '' ? '' : toAmount(fee);
   return out;
 }
 /** Excel columns for every EC write (the flow rewrites the whole row, so they must always be sent). */
-export const ecExtraFields = e => (_ecHasExtraCols ? Object.fromEntries(EC_EXTRA_COLS.map(([k, h]) => [h, e?.[k] ?? ''])) : {});
+// "Invoice No" (2 Nov 2026): sent only once the EC table has the column — one invoice can cover several engagement rows
+let _ecHasInvoiceNo = false;
+export const ecHasInvoiceNo = () => _ecHasInvoiceNo;
+export const ecExtraFields = e => ({
+  ...(_ecHasExtraCols ? Object.fromEntries(EC_EXTRA_COLS.map(([k, h]) => [h, e?.[k] ?? ''])) : {}),
+  ...(_ecHasInvoiceNo ? { 'Invoice No': String(e?.invoiceNo ?? '').trim() } : {}),
+});
 
 function getField(r, ...keys) {
   for (const k of keys) {

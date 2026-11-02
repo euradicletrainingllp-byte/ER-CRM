@@ -25,7 +25,7 @@ import {
   CURRENT_FY, fyStartOf, fyLong, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
 import { normPayment } from '../services/syncWithEC.js';
-import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts } from '../services/money.js';
+import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts, invoiceNoOf } from '../services/money.js';
 import { PERIODS, periodRange, periodLabelOf, inRange } from '../services/actionItems.js';
 // Same stage / overdue rules as the Finance Tracker page, so the two always agree
 import { financeStage, overdueDays } from '../pages/FinanceTracker.jsx';
@@ -97,11 +97,15 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     return {
       ...e, inv, end, p, amount, price: num(e.price), got: col.gross, col: col.amount, net: invoiceExTravel(e), suspect: col.suspect, rec: toIso(e.receivedDate), stage,
       cancelled: stage === 'Cancelled',
+      invNo: invoiceNoOf(e),
       invFy: inv ? fyStartOf(inv) : null,
       start: toIso(e.startDate),
       notRevenue: NOT_REVENUE.test(clean(e.status)),
     };
   }), [engagements]);
+
+  /* One invoice = its Invoice No; rows without a number fall back to Company + Invoice date */
+  const invKey = r => (r.invNo ? `#${r.invNo}` : `${keyOf(r.company)}|${r.inv}`);
 
   /* Revenue date of a row for the chosen basis ('' = not revenue) */
   const revDate = r => (basis === 'invoice' ? (r.inv && !r.cancelled ? r.inv : '') : (r.start && !r.notRevenue ? r.start : ''));
@@ -116,7 +120,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       if (!r.inv || r.cancelled || !out[r.invFy]) return;
       const o = out[r.invFy], s = slot(r.inv);
       o.days[s] += Number(r.day) > 0 ? Number(r.day) : 0;
-      o.invSet[s].add(`${keyOf(r.company)}|${r.inv}`);
+      o.invSet[s].add(invKey(r));
     });
     Object.values(out).forEach(o => { o.inv = o.invSet.map(s => s.size); });
     return out;
@@ -147,7 +151,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   /* ── Selected period (KPI cards) ── */
   const pk = useMemo(() => {
     const inv = rows.filter(r => r.inv && !r.cancelled && inRange(r.inv, range));
-    const invoices = new Set(inv.map(r => `${keyOf(r.company)}|${r.inv}`)).size;
+    const invoices = new Set(inv.map(invKey)).size;
     const revRows = rows.filter(r => { const d = revDate(r); return d && inRange(d, range); });
     const revenue = revRows.reduce((s, r) => s + r.price, 0);
     const invoiced = inv.reduce((s, r) => s + r.net, 0);          // Price + GST, travel excluded
@@ -254,7 +258,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="kg g3">
-        <Kpi tone="gd" label="No. of Invoices Raised" value={fmtNum(pk.invoices)} sub={`Invoices raised · ${periodName}`} how="Distinct Company + Invoice date pairs with an Invoice date in the period (several session rows billed together count once); cancelled excluded." />
+        <Kpi tone="gd" label="No. of Invoices Raised" value={fmtNum(pk.invoices)} sub={`Invoices raised · ${periodName}`} how="Distinct Invoice No with an Invoice date in the period (rows billed on one invoice count once); rows with no Invoice No count by Company + Invoice date; cancelled excluded." />
         <Kpi tone="tl" label="Total Revenue" value={fmtL(pk.revenueL)} sub={pk.months.length && pk.months.length <= 4 ? `${pk.months.join(' + ')} · price excl. GST` : `${basis === 'invoice' ? 'Invoiced' : 'Delivered / scheduled'} price excl. GST · ${periodName}`}
              how={basis === 'invoice' ? 'Sum of Price (INR) of rows whose Invoice date falls in the period; GST and travel excluded, cancelled rows excluded.' : 'Sum of Price (INR) of sessions whose start date falls in the period (cancelled / lost / postponed / on hold excluded); GST and travel excluded.'} />
         <Kpi tone="gn" label="Collection" value={fmtL(pk.collectedL)} sub={`${pk.payments} payment(s) · ${periodName}${collectPct != null ? ` · ${collectPct}% of ${fmtL(pk.invoicedL)} invoiced` : ''} · excl. travel & stay`} tag="Collected" tagTone="up"

@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { ErrorState } from '../components/LoadingState.jsx';
 import {
-  peekList, getOpsChecklist, ecHasExtraCols,
-  getEngagementsForRange, peekEngagementsForRange, prefetchEngagementsForRange, buildMonthRange,
+  peekList, getOpsChecklist, ecHasExtraCols, ecHasInvoiceNo,
+  getAllEngagementsCached, peekAllEngagements,
 } from '../services/api.js';
 import {
   saveEcFinance, PAYMENT_OPTIONS, normPayment, ecMatchesOps,
@@ -30,9 +30,11 @@ import { money, gstOf, tdsOf, receivableOf, expectedOf, GST_RATE, TDS_RATE } fro
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const pad2 = n => String(n).padStart(2, '0');
 const todayIso = () => { const t = new Date(); return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`; };
-const addMonths = (ym, delta) => { const d = new Date(ym.year, ym.month + delta, 1); return { year: d.getFullYear(), month: d.getMonth() }; };
-const defaultStart = span => { const t = new Date(); return addMonths({ year: t.getFullYear(), month: t.getMonth() }, -Math.floor((span - 1) / 2)); };
-const SPAN_OPTIONS = [1, 3, 6, 12];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fyOf = d => { const y = +String(d).slice(0, 4), m = +String(d).slice(5, 7); return m >= 4 ? y : y - 1; };
+const fyName = y => `FY ${y}-${String(y + 1).slice(2)}`;
+const ymName = ym => `${MON[+ym.slice(5) - 1]} ${ym.slice(0, 4)}`;
+const isoStart = e => (/^\d{4}-\d{2}/.test(String(e.startDate || '')) ? String(e.startDate) : '');
 
 const addDays = (iso, n) => {
   if (!iso) return null;
@@ -152,9 +154,9 @@ const Section = ({ children }) => (
 // ─── Detail panel ────────────────────────────────────────────────────────────
 // Travel billing (Engagement Calendar columns added 30 Oct 2026). Price breakup is edited in the Engagement Calendar.
 const EXTRA_KEYS = ['travelInvoiceRaised', 'travelInvoiceDate', 'travelReceived', 'travelReceivedAmount', 'travelReceivedDate'];
-const EDIT_KEYS = ['payment', 'invoice', 'amountReceived', 'receivedDate', 'travelExpenses', ...EXTRA_KEYS];   // GST is calculated (18% of Price)
+const EDIT_KEYS = ['payment', 'invoiceNo', 'invoice', 'amountReceived', 'receivedDate', 'travelExpenses', ...EXTRA_KEYS];   // GST is calculated (18% of Price)
 const fromRow = e => ({
-  payment: e.payment ?? '', invoice: toIso(e.invoice), amountReceived: e.amountReceived ?? '',
+  payment: e.payment ?? '', invoiceNo: e.invoiceNo ?? '', invoice: toIso(e.invoice), amountReceived: e.amountReceived ?? '',
   receivedDate: toIso(e.receivedDate), travelExpenses: e.travelExpenses ?? '',
   ...Object.fromEntries(EXTRA_KEYS.map(k => [k, k.endsWith('Date') ? toIso(e[k]) : (e[k] ?? '')])),
 });
@@ -172,7 +174,7 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
     const busy = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el.name : '';
     const r = fromRow(ec);
     setForm(f => Object.fromEntries(EDIT_KEYS.map(k => [k, k === busy ? f[k] : r[k]])));
-  }, [ec.payment, ec.invoice, ec.amountReceived, ec.receivedDate, ec.travelExpenses, ec.gst, ...EXTRA_KEYS.map(k => ec[k])]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ec.payment, ec.invoiceNo, ec.invoice, ec.amountReceived, ec.receivedDate, ec.travelExpenses, ec.gst, ...EXTRA_KEYS.map(k => ec[k])]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const live = { ...ec, ...form };
   const stage = financeStage(live);
@@ -259,6 +261,13 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
             <Field label="Invoice Due Date (TAT)">
               <Val style={{ color: p && p !== 'Invoice Not Raised' ? 'var(--muted)' : dueColor(invDue) }}>{fmtDate(invDue)}</Val>
             </Field>
+            {ecHasInvoiceNo() && (
+              <Field label="Invoice No">
+                {canEdit
+                  ? <input name="invoiceNo" className="form-input" style={{ fontSize: 12 }} value={form.invoiceNo} onChange={edit('invoiceNo')} placeholder="Same no. for rows on one invoice" />
+                  : <Val>{ec.invoiceNo}</Val>}
+              </Field>
+            )}
             <Field label="Invoice Date">
               {canEdit
                 ? <input name="invoice" type="date" className="form-input" style={{ fontSize: 12 }} value={form.invoice} onChange={edit('invoice')} />
@@ -369,16 +378,14 @@ function linkFor(ec, opsList) {
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 export default function FinanceTracker({ onRefreshed }) {
-  // Month window — same behaviour as the Engagement Calendar page
-  const [span, setSpan] = useState(3);
-  const [start, setStart] = useState(() => defaultStart(3));
-  const win = useMemo(() => buildMonthRange(start.year, start.month, span), [start, span]);
-  const today = todayIso();
-  const containsToday = today >= win.from && today <= win.to;
-  const rangeLabel = win.months.length === 1 ? win.months[0].label : `${win.months[0].label} – ${win.months[win.months.length - 1].label}`;
+  // Whole Engagement Calendar, filtered by FY and month (saved per browser)
+  const [fyF, setFyF] = useState(() => { try { return localStorage.getItem('ercrm.fin.fy') || 'all'; } catch { return 'all'; } });
+  const [monthF, setMonthF] = useState('all');
+  useEffect(() => { try { localStorage.setItem('ercrm.fin.fy', fyF); } catch {} }, [fyF]);
+  const rangeLabel = monthF !== 'all' ? ymName(monthF) : fyF === 'all' ? 'All years' : fyName(+fyF);
 
-  const [data, setData] = useState(() => peekEngagementsForRange(win.from, win.to) || []);
-  const [rangeLoading, setRangeLoading] = useState(() => !peekEngagementsForRange(win.from, win.to));
+  const [data, setData] = useState(() => peekAllEngagements() || []);
+  const [rangeLoading, setRangeLoading] = useState(() => !peekAllEngagements());
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
   const [ops, setOps] = useState(() => peekList('ops') || null);
@@ -406,13 +413,13 @@ export default function FinanceTracker({ onRefreshed }) {
     const id = ++requestId.current;
     let hasData = keepCurrent;
     if (!keepCurrent) {
-      const cached = peekEngagementsForRange(win.from, win.to);
+      const cached = peekAllEngagements();
       if (cached) { setData(cached); setRangeLoading(false); hasData = true; }
       else { setData([]); setRangeLoading(true); }
     }
     setSyncing(true); setError(null);
     try {
-      const rows = await getEngagementsForRange(win.from, win.to, { force });
+      const rows = await getAllEngagementsCached({ force });
       if (id !== requestId.current) return;
       setData(rows); setRangeLoading(false);
       onRefreshed?.(new Date().toLocaleTimeString());
@@ -421,7 +428,7 @@ export default function FinanceTracker({ onRefreshed }) {
       if (hasData) showToast('⚠ Could not refresh from Excel — showing the last saved copy.');
       else { setError(e); setRangeLoading(false); }
     } finally { if (id === requestId.current) setSyncing(false); }
-  }, [win.from, win.to, onRefreshed]);
+  }, [onRefreshed]);
 
   const loadRef = useRef(load);
   loadRef.current = load;
@@ -431,34 +438,30 @@ export default function FinanceTracker({ onRefreshed }) {
     window.addEventListener('ercrm:ec-loaded', h);
     return () => window.removeEventListener('ercrm:ec-loaded', h);
   }, []);
-  useEffect(() => { load(); }, [win.from, win.to]);
+  useEffect(() => { load(); }, []);
   useEffect(() => { getOpsChecklist().then(setOps).catch(() => setOps(o => o || [])); }, []);
-  // Preload previous / next windows so paging feels instant
-  useEffect(() => {
-    if (syncing || rangeLoading) return;
-    const t = setTimeout(() => [-span, span].forEach(d => {
-      const s = addMonths(start, d); const r = buildMonthRange(s.year, s.month, span);
-      prefetchEngagementsForRange(r.from, r.to);
-    }), 1200);
-    return () => clearTimeout(t);
-  }, [syncing, rangeLoading, win.from, win.to]);
-
-  const shift = dir => setStart(s => addMonths(s, dir * span));
-  const goToday = () => setStart(defaultStart(span));
-  const changeSpan = n => { setSpan(n); if (containsToday) setStart(defaultStart(n)); };
-
   // Ops Checklist link per engagement (same Index AND same engagement)
   const linkOf = ec => linkFor(ec, ops);
   const opsRef = useRef(ops);
   opsRef.current = ops;
 
-  const rows = useMemo(() =>
-    data.filter(e => (e.undated ? containsToday : true)).map(e => ({ ...e, _stage: financeStage(e) })),
-  [data, containsToday]);
+  // FY / month options from the data (latest first)
+  const fyOptions = useMemo(() => [...new Set(data.map(isoStart).filter(Boolean).map(fyOf))].sort((x, y) => y - x), [data]);
+  const monthOptions = useMemo(() => [...new Set(data.map(isoStart).filter(d => d && (fyF === 'all' || fyOf(d) === +fyF)).map(d => d.slice(0, 7)))].sort().reverse(), [data, fyF]);
+  const pickFy = v => { setFyF(v); setMonthF('all'); };
+  const goThisMonth = () => { const t = todayIso(); setFyF(String(fyOf(t))); setMonthF(t.slice(0, 7)); };
+
+  // Undated rows show only under "All years"
+  const rows = useMemo(() => data.filter(e => {
+    const d = isoStart(e);
+    if (!d) return fyF === 'all' && monthF === 'all';
+    return (fyF === 'all' || fyOf(d) === +fyF) && (monthF === 'all' || d.startsWith(monthF));
+  }).map(e => ({ ...e, _stage: financeStage(e) })),
+  [data, fyF, monthF]);
 
   const filtered = useMemo(() => rows.filter(r => {
     const q = search.toLowerCase();
-    const mQ = !q || [r.company, r.topic, r.egId, r.sno, r.consultant1].some(v => String(v ?? '').toLowerCase().includes(q));
+    const mQ = !q || [r.company, r.topic, r.egId, r.sno, r.consultant1, r.invoiceNo].some(v => String(v ?? '').toLowerCase().includes(q));
     const mS = stageF === 'All'
       || (stageF === 'Needs Action' ? (['Invoice Overdue', 'To Invoice', 'Payment Overdue'].includes(r._stage) || overdueDays(r) > 0)
       : stageF === 'All To Invoice' ? ['Invoice Overdue', 'To Invoice'].includes(r._stage)
@@ -469,11 +472,39 @@ export default function FinanceTracker({ onRefreshed }) {
   }).sort((a, b) => (Number(snoOf(a)) || 1e9) - (Number(snoOf(b)) || 1e9) || String(a.startDate || '9999').localeCompare(String(b.startDate || '9999'))),
   [rows, search, stageF]);
 
+  // Next upcoming (or ongoing) delivery in the list — auto-scrolled to the middle, like the Engagement Calendar
+  const [scrollNonce, setScrollNonce] = useState(0);
+  const rowRefs = useRef({});
+  const scrolledFor = useRef('');
+  const nextUpKey = useMemo(() => {
+    const today = todayIso(); let best = null;
+    filtered.forEach(e => {
+      const st = isoStart(e); if (!st || /cancel/i.test(e.status || '')) return;
+      const end = String(e.endDate || '') >= st ? String(e.endDate) : st;
+      if (end < today) return;
+      if (!best || st < isoStart(best)) best = e;
+    });
+    return best ? keyOf(best) : null;
+  }, [filtered]);
+  useEffect(() => {
+    // Wait until the fresh Excel copy has replaced the saved one, so a re-render can't cancel the scroll
+    if (rangeLoading || syncing || !nextUpKey) return;
+    const token = `${fyF}|${monthF}|${scrollNonce}`;
+    if (scrolledFor.current === token) return;
+    const t = setTimeout(() => {
+      const el = rowRefs.current[nextUpKey]; if (!el) return;
+      scrolledFor.current = token;
+      el.scrollIntoView({ behavior: scrollNonce ? 'smooth' : 'auto', block: 'center' });
+    }, 120);
+    return () => clearTimeout(t);
+  }, [rangeLoading, syncing, nextUpKey, fyF, monthF, scrollNonce]);
+
+
   // KPI counts follow the period and the search. The stage filter is not applied to the
   // cards — the cards ARE the stage filter (click to filter), so applying it would zero the others.
   const kpiRows = useMemo(() => {
     const q = search.toLowerCase();
-    return !q ? rows : rows.filter(r => [r.company, r.topic, r.egId, r.sno, r.consultant1].some(v => String(v ?? '').toLowerCase().includes(q)));
+    return !q ? rows : rows.filter(r => [r.company, r.topic, r.egId, r.sno, r.consultant1, r.invoiceNo].some(v => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, search]);
   const count = (...st) => kpiRows.filter(r => st.includes(r._stage)).length;
 
@@ -571,6 +602,7 @@ export default function FinanceTracker({ onRefreshed }) {
     { label: 'Price (INR)', key: 'price' }, { label: 'Travel, Stay & Misc', key: 'travelExpenses' }, { label: 'GST (18%)', get: r => (num(r.price) ? gstOf(r) : '') }, { label: 'TDS (10%)', get: r => (num(r.price) ? tdsOf(r) : '') },
     { label: 'Amount to be Received (Price + GST − TDS)', get: r => (num(r.price) ? receivableOf(r) : '') },
     { label: 'Total to Receive (incl. Travel)', get: r => totalOf(r) || '' }, { label: 'Payment Status', key: 'payment' },
+    { label: 'Invoice No', key: 'invoiceNo' },
     { label: 'Invoice Date', get: r => (toIso(r.invoice) ? fmtDate(r.invoice) : '') },
     { label: 'Payment Due Date', get: r => { const d = financeDates(r).payDue; return d ? fmtDate(d) : ''; } },
     { label: 'Days Overdue', get: r => overdueDays(r) || '' },
@@ -628,17 +660,18 @@ export default function FinanceTracker({ onRefreshed }) {
         {/* LEFT — engagement list */}
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
           <div className="filter-bar" style={{ flexShrink: 0, flexWrap: 'wrap' }}>
-            <button className="btn btn-outline btn-sm" onClick={() => shift(-1)} title="Previous period">◀</button>
-            <span style={{ fontSize: 12, fontWeight: 700, minWidth: 130, textAlign: 'center' }}>{rangeLabel}</span>
-            <button className="btn btn-outline btn-sm" onClick={() => shift(1)} title="Next period">▶</button>
-            {!containsToday && <button className="btn btn-outline btn-sm" onClick={goToday}>Today</button>}
-            <select className="form-input" value={span} onChange={e => changeSpan(Number(e.target.value))} title="Months shown">
-              {SPAN_OPTIONS.map(n => <option key={n} value={n}>{n === 12 ? '12 months' : n === 1 ? '1 month' : `${n} months`}</option>)}
+            <select className="form-input" value={fyF} onChange={e => pickFy(e.target.value)} title="Financial year (by session start)">
+              <option value="all">All years</option>{fyOptions.map(y => <option key={y} value={y}>{fyName(y)}</option>)}
             </select>
-            <input className="form-input wide" placeholder="🔍 Company, topic, EG.ID, S No…" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="form-input" value={monthF} onChange={e => setMonthF(e.target.value)} title="Month (by session start)">
+              <option value="all">All months</option>{monthOptions.map(m => <option key={m} value={m}>{ymName(m)}</option>)}
+            </select>
+            {monthF !== todayIso().slice(0, 7) && <button className="btn btn-outline btn-sm" onClick={goThisMonth}>This month</button>}
+            <input className="form-input wide" placeholder="🔍 Company, topic, EG.ID, S No, Invoice No…" value={search} onChange={e => setSearch(e.target.value)} />
             <select className="form-input" value={stageF} onChange={e => setStageF(e.target.value)}>
               {['All', 'Overdue (30+ days)', 'Needs Action', 'All To Invoice', 'All Awaiting Payment', ...Object.keys(STAGES)].map(s => <option key={s}>{s}</option>)}
             </select>
+            {nextUpKey && <button className="btn btn-outline btn-sm" onClick={() => setScrollNonce(n => n + 1)} title="Scroll to the next upcoming delivery">⏭ Next up</button>}
             <button className="btn btn-outline btn-sm" onClick={() => load({ force: true, keepCurrent: true })} disabled={syncing} title={syncing ? 'Refreshing from Excel…' : 'Refresh'}>{syncing ? '⟳' : '↺'}</button>
             <ExportButton page="finance" filename={`Finance Tracker ${rangeLabel}`} sheetName="Finance Tracker" rows={() => filtered} columns={exportCols} disabled={rangeLoading} />
           </div>
@@ -660,8 +693,10 @@ export default function FinanceTracker({ onRefreshed }) {
                       const total = totalOf(r);
                       const l = linkOf(r);
                       const late = overdueDays(r);
+                      const isNext = key && key === nextUpKey;
                       return (
-                        <div key={key || `${r.egId}|${r.sno}`} onClick={() => key && setSelected(isSel ? null : key)} style={{
+                        <div key={key || `${r.egId}|${r.sno}`} ref={el => { if (key) rowRefs.current[key] = el; }} onClick={() => key && setSelected(isSel ? null : key)} style={{
+                          boxShadow: isNext ? 'inset 0 0 0 2px #e8760a' : undefined,
                           padding: '10px 14px', borderBottom: '1px solid var(--border)', cursor: 'pointer',
                           background: isSel ? '#f0f7ff' : late ? '#fef2f2' : 'transparent',
                           borderLeft: isSel ? '3px solid var(--accent)' : late ? '3px solid #dc2626' : '3px solid transparent',
@@ -671,6 +706,7 @@ export default function FinanceTracker({ onRefreshed }) {
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', background: 'var(--border)', borderRadius: 4, padding: '1px 6px', flexShrink: 0 }}>{snoOf(r) || '—'}</span>
                                 <span style={{ fontWeight: 700, fontSize: 13 }}>{r.company}</span>
+                                {isNext && <span style={{ fontSize: 10, fontWeight: 800, color: '#fff', background: '#e8760a', borderRadius: 20, padding: '1px 8px', flexShrink: 0 }}>⏭ Next up</span>}
                               </div>
                               <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.topic}>{r.topic}</div>
                             </div>
@@ -686,7 +722,7 @@ export default function FinanceTracker({ onRefreshed }) {
                             <span>📅 {fmtDate(r.startDate)}{r.endDate && r.endDate !== r.startDate ? ` → ${fmtDate(r.endDate)}` : ''}</span>
                             {r.egId && <span style={{ fontFamily: 'monospace' }}>{r.egId}</span>}
                             {['To Invoice', 'Invoice Overdue', 'Upcoming'].includes(r._stage) && invDue && <span style={{ color: dueColor(invDue), fontWeight: 600 }}>🧾 Invoice by {fmtDate(invDue)}</span>}
-                            {toIso(r.invoice) && <span>🧾 Invoiced {fmtDate(r.invoice)}</span>}
+                            {toIso(r.invoice) && <span>🧾 Invoiced {fmtDate(r.invoice)}{r.invoiceNo ? ` · ${r.invoiceNo}` : ''}</span>}
                             {['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r._stage) && payDue && <span style={{ color: late ? '#dc2626' : dueColor(payDue), fontWeight: late ? 800 : 600 }}>💳 Payment due {fmtDate(payDue)}{late ? ` · ${late} days overdue` : ''}</span>}
                             {num(r.amountReceived) > 0 && <span>💰 {inr(r.amountReceived)} received</span>}
                           </div>

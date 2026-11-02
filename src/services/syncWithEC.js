@@ -131,7 +131,7 @@ export function suggestEcIndex(oc, ecRows) {
 
 const describeEc = ec => `"${ec.company}" (${ec.egId}, ${fmtShort(ec.startDate)})`;
 
-const EC_LABEL = { invoice: 'Invoice date', receivedDate: 'Received date', payment: 'Payment status', travelExpenses: 'Travel, Stay & Misc', gst: 'GST', ...Object.fromEntries(EC_EXTRA_COLS.map(([k, h]) => [k, h])) };
+const EC_LABEL = { invoiceNo: 'Invoice No', invoice: 'Invoice date', receivedDate: 'Received date', payment: 'Payment status', travelExpenses: 'Travel, Stay & Misc', gst: 'GST', ...Object.fromEntries(EC_EXTRA_COLS.map(([k, h]) => [k, h])) };
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 const shiftIso = (iso, days) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); };
@@ -257,7 +257,7 @@ export async function updateECFinanceAmounts(engagementKey, amounts, hintDate, e
 
 /** EC columns the Finance Tracker owns (locked in the Engagement Calendar form). */
 // Finance-owned EC fields (the EC edit form takes these fresh from Excel). Price breakup is owned by the EC form, so it is not here.
-export const EC_FINANCE_FIELDS = ['invoice', 'payment', 'receivedDate', 'amountReceived', 'travelExpenses', 'gst', 'travelInvoiceRaised', 'travelInvoiceDate', 'travelReceived', 'travelReceivedAmount', 'travelReceivedDate'];
+export const EC_FINANCE_FIELDS = ['invoiceNo', 'invoice', 'payment', 'receivedDate', 'amountReceived', 'travelExpenses', 'gst', 'travelInvoiceRaised', 'travelInvoiceDate', 'travelReceived', 'travelReceivedAmount', 'travelReceivedDate'];
 
 /** Fixed Payment status values (the EC 'Payment' column). */
 export const PAYMENT_OPTIONS = ['Invoice Not Raised', 'Invoice Raised', 'Partly Received', 'Received', 'NA'];

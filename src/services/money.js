@@ -128,10 +128,13 @@ export function fmtInrShort(rupees) {
 const isoOf = v => { const m = String(v ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/) || String(v ?? '').match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
   if (!m) return ''; return m[1].length === 4 ? `${m[1]}-${m[2]}-${m[3]}` : `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; };
 const dayDiff = (a, b) => (a && b ? (Date.parse(a) - Date.parse(b)) / 86400000 : 1e9);
+/** Invoice number, normalised ("inv / 123 " → "INV/123"); '' when not typed. */
+export const invoiceNoOf = e => String(e?.invoiceNo ?? '').trim().toUpperCase().replace(/\s+/g, '');
+
 export function suspectReceipts(list) {
   const key = v => String(v ?? '').trim().toLowerCase();
   const co = e => key(e.company);
-  const inv = e => key(e.invoice);
+  const inv = e => (invoiceNoOf(e) ? `#${invoiceNoOf(e)}` : key(e.invoice));   // Invoice No groups rows billed together
   const byInvoice = new Map();
   const repeats = new Map();
   (list || []).forEach(e => {
