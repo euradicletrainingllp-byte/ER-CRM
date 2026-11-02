@@ -469,7 +469,7 @@ export default function FinanceTracker({ onRefreshed }) {
       : stageF === 'Overdue (30+ days)' ? overdueDays(r) > 0
       : r._stage === stageF);
     return mQ && mS;
-  }).sort((a, b) => (Number(snoOf(a)) || 1e9) - (Number(snoOf(b)) || 1e9) || String(a.startDate || '9999').localeCompare(String(b.startDate || '9999'))),
+  }).sort((a, b) => String(a.startDate || '9999').localeCompare(String(b.startDate || '9999')) || (Number(snoOf(a)) || 1e9) - (Number(snoOf(b)) || 1e9)),
   [rows, search, stageF]);
 
   // Next upcoming (or ongoing) delivery in the list — auto-scrolled to the middle, like the Engagement Calendar

@@ -29,3 +29,9 @@
 - New card "TDS (Not Credited)" = 10% of Price on Revenue rows; sub-line Collection + TDS + to collect = Revenue. KPI row now g4 (4 cards).
 - File: FinanceLiveDashboard.jsx. Backup: Claude outputs/backup-2026-11-02-rev-gst-tds.tgz.
 - Invoice count: an Invoice No cell holding several numbers ("ER/013/26-27, ER/026/26-27") now counts each number (FY 26-27: 52 → 53).
+
+## 2026-11-02 — Engagement Calendar in Start Date order
+- List default order = Start Date ↑, End Date ↑, Index ↑ (Filters column sort still overrides). File: EngagementCalendar.jsx.
+- Office Script docs/office-scripts/SortEngagementCalendar.ts sorts EngagementMasterTable the same way; S No (=ROW()-1) follows. Index untouched.
+- Pending: save script in Excel Online; ENGAGEMENT_CRUD → "Run script" after Response in create + update branches. Backup: Claude outputs/backup-2026-11-02-ec-date-order.tgz.
+- Finance Tracker list also sorted by Start Date first (then S No).

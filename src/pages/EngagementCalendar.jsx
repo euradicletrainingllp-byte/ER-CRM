@@ -1106,7 +1106,11 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
 
   // Excel-style filters (per column, with value counts, blanks and sort)
   const filterState = useExcelFilters(windowRows);
-  const { filtered } = filterState;
+  // Default order = Start Date oldest → newest (then End Date, then Index); a column sort from Filters overrides it
+  const filtered = useMemo(() => (filterState.sort ? filterState.filtered : [...filterState.filtered].sort((x, y) =>
+    String(x.startDate || '9999').localeCompare(String(y.startDate || '9999'))
+    || String(x.endDate || '9999').localeCompare(String(y.endDate || '9999'))
+    || (Number(x.engagementKey) || 0) - (Number(y.engagementKey) || 0))), [filterState.filtered, filterState.sort]);
   const totalRev = filtered.reduce((s, e) => s + (e.price || 0), 0);
 
   // Group the filtered rows by month (keeps the filter/sort order inside a group)
