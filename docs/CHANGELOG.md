@@ -89,3 +89,6 @@
 - BD Industry not auto-filled (BD form has no Industry field). Consultant "Notable Clients" left as free text (holds non-EuRadicle clients).
 - Files changed: clientsApi.js (readTableFresh), LeadTracker, SolutionTracker, EngagementCalendar, OpsChecklist, POTracker, VendorTracker, ContentDevelopmentTracker, TaskTracker, ClientDirectory, ConsultantDirectory. No Excel or flow changes.
 - Verified: vite build; test/directoryCache.test.js 9/9; browser harness with fake flows (pickers, auto-fill, quick-add client/contact, near-duplicate warning, clean-up fix sends {company, Index} only) at 1440 / 390.
+
+## 2026-11-05 — Sales dashboard
+- Removed the "Proposal Status — FY" month-wise table; the Monthly Proposal Status charts show the same data. File: src/components/SalesLiveDashboard.jsx.

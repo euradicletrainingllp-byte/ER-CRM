@@ -241,25 +241,6 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       </div>
 
       <div className="cg c1">
-        <div className="card"><h3>Proposal Status — {curName}</h3><div className="cs">Month-wise proposal breakdown with client names</div>
-          <div className="tbl-x"><table className="mt">
-            <thead><tr><th>Month</th><th className="nr">No. of Proposals</th><th className="nr">Won (Count)</th><th className="nr">Lost (Count)</th><th className="nr">In Process (Count)</th>
-              <th className="nr">Won Value (Rs.)</th><th className="nr">Lost Value (Rs.)</th><th className="nr">In Process Value (Rs.)</th><th>Won Clients</th><th>In Process Clients</th></tr></thead>
-            <tbody>
-              {propStatus.map(r => (
-                <tr key={r.month}><td style={{ fontWeight: 600 }}>{r.month}</td><td className="nr">{r.n}</td>
-                  <td className="nr" style={{ color: GN }}>{r.wonC}</td><td className="nr" style={{ color: RD }}>{r.lostC}</td><td className="nr" style={{ color: GD }}>{r.ipC}</td>
-                  <td className="nr">{fmtInr(r.wonV)}</td><td className="nr">{fmtInr(r.lostV)}</td><td className="nr">{fmtInr(r.ipV)}</td>
-                  <td style={{ fontSize: 12 }}>{[...r.wonCl].join(', ')}</td><td style={{ fontSize: 12 }}>{[...r.ipCl].join(', ')}</td></tr>
-              ))}
-              <tr className="tot"><td>Total</td><td className="nr">{tot.n}</td><td className="nr" style={{ color: GN }}>{tot.wonC}</td><td className="nr" style={{ color: RD }}>{tot.lostC}</td><td className="nr" style={{ color: GD }}>{tot.ipC}</td>
-                <td className="nr">{fmtInr(tot.wonV)}</td><td className="nr">{fmtInr(tot.lostV)}</td><td className="nr">{fmtInr(tot.ipV)}</td><td /><td /></tr>
-            </tbody>
-          </table></div>
-        </div>
-      </div>
-
-      <div className="cg c1">
         <div className="card"><h3>Monthly Proposal Status — {curName}</h3><div className="cs">Won vs Lost vs In-Process, stacked per month — Count and Value</div>
           <div className="cv-pair">
             {propCfgs.map(c => (
