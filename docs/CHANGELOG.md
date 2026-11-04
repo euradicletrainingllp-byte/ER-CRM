@@ -68,3 +68,5 @@
 - Every ChartBox: tapping a bar / point / slice opens the matching engagements or proposals (FY, month, quarter, status, delivery mode or name of client / consultant / industry); falls back to the point values. Per-chart override: `listFor(label, series, value)`.
 - Dashboard.jsx wraps each tab in DrillContext (EC rows; BD lines for Sales / Solutioning).
 - Build not run here (Windows node_modules: rollup native binary missing in the VM) — run `npm run build` locally.
+- 2026-11-04 (d): Popup lists — double-tap an engagement row → /engagement opens its Edit form (state editEc); a proposal row → /bd-tracker opens that version's BD Edit form (state editBd). Needs edit rights. Files: KpiListModal.jsx, EngagementCalendar.jsx, SolutionTracker.jsx.
+- 2026-11-04 (e): Popup lists — "Excel" button top-right downloads the shown list (search applied): engagement columns (S No, Index, EG ID, client, program, dates, consultants, location, status, price, invoice, payment, received, feedback, list amount) or proposal columns (P.ID, version, client, topic, date, status, BD / Solution value, topics, industry, type). Logged as EXPORT. File: KpiListModal.jsx.

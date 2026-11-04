@@ -988,6 +988,13 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
   };
 
   // Open the Add modal pre-filled when navigated from Solution Tracker
+  // Arrived from a dashboard list (double-tap): open that engagement's Edit form
+  useEffect(() => {
+    const row = location.state?.editEc;
+    if (!row) return;
+    window.history.replaceState({}, '', location.pathname);
+    if (canEdit('engagement')) setEditRow(row);
+  }, [location.state]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (location.state?.prefill) {
       openAdd(location.state.prefill);

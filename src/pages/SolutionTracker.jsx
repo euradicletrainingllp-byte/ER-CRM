@@ -1059,6 +1059,15 @@ export default function SolutionTracker({ onRefreshed, view }) {
   const nextVer = r => (verVals.get(r.proposalId) || []).filter(([v]) => v > versionNo(r.proposalVersion)).sort((a, b) => b[0] - a[0])[0];   // latest version
   const effStatus = r => (nextVer(r) ? 'Lost' : r.bdStatus);
   const effValue = r => { const nx = nextVer(r); return nx ? Math.max(0, lineValue(r) - nx[1]) : lineValue(r); };
+  // Arrived from a dashboard list (double-tap): open that proposal version's BD Edit form
+  useEffect(() => {
+    const t = location.state?.editBd;
+    if (!t || view !== 'bd' || !allBdRows.length) return;
+    navigate(location.pathname, { replace: true, state: null });
+    const row = allBdRows.find(r => String(r.proposalId) === String(t.id) && versionNo(r.proposalVersion) === t.version)
+             || allBdRows.find(r => String(r.proposalId) === String(t.id));
+    if (row && canUpdate('bd')) setBdModal(row);
+  }, [location.state, view, allBdRows.length]);   // eslint-disable-line react-hooks/exhaustive-deps
   const kpi = {
     total:    kpiRows.length,
     all:      new Set(allBdRows.map(r => r.proposalId)).size,

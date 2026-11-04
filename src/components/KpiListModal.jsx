@@ -1,4 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Download } from 'lucide-react';
+import { downloadXlsx } from '../utils/exportExcel.js';
+import { logEvent } from '../services/auditLogger.js';
 
 /* Click-through list for dashboard KPI cards and chart points.
    items: [{ name, sub, right, badge }] — or a function returning that array (built only when opened). */
@@ -12,6 +16,11 @@ export const egItem = (e, right) => ({
   sub: [c(e.company), fmtD(e.startDate) + (e.endDate && e.endDate !== e.startDate ? ` – ${fmtD(e.endDate)}` : ''), c(e.consultant || e.leadConsultant || e.trainer), e.sno ? `S No ${e.sno}` : ''].filter(Boolean).join(' · '),
   right: right !== undefined ? right : (Number(e.price) ? inrS(e.price) : ''),
   badge: c(e.status),
+  go: { path: '/engagement', state: { editEc: e } },
+  x: { 'S No': e.sno, Index: e.engagementKey, 'EG ID': e.egId, Client: c(e.company), Program: c(e.topic), 'Start Date': c(e.startDate), 'End Date': c(e.endDate),
+       Consultants: [e.consultant1, e.consultant2, e.consultant3].map(c).filter(Boolean).join(', '), Location: c(e.locationRaw ?? e.location), Status: c(e.status),
+       'Price (INR)': Number(e.price) || '', 'Invoice Date': c(e.invoice), 'Payment Status': c(e.payment), 'Amount Received': c(e.amountReceived), Feedback: c(e.feedback),
+       ...(right !== undefined ? { 'Amount (this list)': right } : {}) },
 });
 /** Proposal line (proposalData) → list item; val = 'bd' | 'sol' */
 export const propItem = (p, val = 'bd') => ({
@@ -19,6 +28,9 @@ export const propItem = (p, val = 'bd') => ({
   sub: [`P.ID ${p.id} V${p.version}`, p.date ? fmtD(p.date) : 'No date', p.replaced ? 'replaced version' : ''].filter(Boolean).join(' · '),
   right: inrS(val === 'sol' ? p.solValue : p.bdValue),
   badge: c(p.status),
+  go: { path: '/bd-tracker', state: { editBd: { id: p.id, version: p.version } } },
+  x: { 'Proposal ID': p.id, Version: `V${p.version}`, Client: c(p.client), Topic: c(p.topic), Date: c(p.date), 'BD Status': c(p.status), 'Replaced version': p.replaced ? 'Yes' : '',
+       'BD Value': p.bdValue || 0, 'Solution Value': p.solValue || 0, 'Solution Topics': (p.solTopics || []).join(', '), Industry: c(p.industry), 'Engagement Type': c(p.engagementType) },
 });
 
 const BADGE = s => /won|deliver|received|paid/i.test(s) ? ['#0AC44B', '#F0FFF4'] : /lost|cancel|overdue|reject/i.test(s) ? ['#E98272', '#FFF5F5']
@@ -26,6 +38,14 @@ const BADGE = s => /won|deliver|received|paid/i.test(s) ? ['#0AC44B', '#F0FFF4']
 
 export default function KpiListModal({ title, sub, items, onClose }) {
   const [q, setQ] = useState('');
+  const nav = useNavigate();
+  const download = () => {
+    const rows = shown.map(i => i.x || { Name: i.name, Details: i.sub || '', Status: i.badge || '', Value: i.right ?? '' });
+    if (!rows.length) return;
+    const keys = [...new Set(rows.flatMap(Object.keys))];
+    downloadXlsx({ filename: String(title).replace(/[\\/:*?"<>|]/g, '-').slice(0, 80), sheetName: 'List', columns: keys.map(k => ({ label: k, get: r => r[k] ?? '' })), rows });
+    try { logEvent({ Category: 'DATA', Action: 'EXPORT', Module: 'dashboard', RecordLabel: `${title} (${rows.length} rows)` }); } catch { /* ignore */ }
+  };
   const list = useMemo(() => (typeof items === 'function' ? items() : items) || [], [items]);
   const shown = useMemo(() => { const k = q.trim().toLowerCase(); return k ? list.filter(i => `${i.name} ${i.sub} ${i.badge}`.toLowerCase().includes(k)) : list; }, [list, q]);
   useEffect(() => { const h = e => e.key === 'Escape' && onClose(); addEventListener('keydown', h); return () => removeEventListener('keydown', h); }, [onClose]);
@@ -34,15 +54,22 @@ export default function KpiListModal({ title, sub, items, onClose }) {
       <div onClick={e => e.stopPropagation()} role="dialog" aria-label={title}
         style={{ background: '#fff', borderRadius: 16, width: 600, maxWidth: '100%', maxHeight: '86vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(45,48,71,0.15)', textAlign: 'left' }}>
         <div style={{ padding: '20px 20px 12px' }}>
-          <div style={{ fontSize: 18, fontWeight: 600, color: '#2D3047' }}>{title}</div>
-          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>{list.length} item{list.length === 1 ? '' : 's'}{sub ? ` · ${sub}` : ''}</div>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ flex: 1, fontSize: 18, fontWeight: 600, color: '#2D3047' }}>{title}</div>
+            <button onClick={download} disabled={!shown.length} title="Download this list as Excel"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', border: '1px solid #2D3047', borderRadius: 8, background: '#fff', color: '#2D3047', fontSize: 12, fontWeight: 600, cursor: shown.length ? 'pointer' : 'default', opacity: shown.length ? 1 : 0.5, whiteSpace: 'nowrap' }}>
+              <Download size={16} strokeWidth={1.75} /> Excel
+            </button>
+          </div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 4 }}>{list.length} item{list.length === 1 ? '' : 's'}{sub ? ` · ${sub}` : ''}{list.some(i => i.go) ? ' · double-tap a row to edit it' : ''}</div>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search engagement, client, proposal…" autoFocus
             style={{ marginTop: 12, width: '100%', height: 44, border: '1px solid #D1D5DB', borderRadius: 8, padding: '0 12px', fontSize: 14, boxSizing: 'border-box', outlineColor: '#AA78A6' }} />
         </div>
         <div style={{ overflowY: 'auto', maxHeight: '60vh', borderTop: '1px solid #E5E7EB' }}>
           {shown.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: '#6B7280', fontSize: 13 }}>Nothing to list</div>}
           {shown.map((i, n) => { const [fg, bg] = BADGE(i.badge || ''); return (
-            <div key={n} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 20px', borderBottom: '1px solid #F2F2F2' }}>
+            <div key={n} onDoubleClick={i.go ? () => { onClose(); nav(i.go.path, { state: i.go.state }); } : undefined} title={i.go ? 'Double-tap to edit' : undefined}
+              style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 20px', borderBottom: '1px solid #F2F2F2', cursor: i.go ? 'pointer' : 'default', userSelect: 'none' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#2D3047' }}>{i.name}</div>
                 {i.sub && <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{i.sub}</div>}
