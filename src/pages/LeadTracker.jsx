@@ -21,6 +21,8 @@ import { pendingItems, LEAD_RULES } from '../config/pendingFields.js';
 import {
   LEAD_SOURCES, LEAD_STATUSES, LEAD_CLOSED, LEAD_PRIORITIES, LEAD_ACTION_TYPES, LEAD_FOLLOWUP_DEFAULT_DAYS, leadIsOpen,
 } from '../config/leadVendorOptions.js';
+import { ClientPicker, ContactPicker, TeamPicker, useDirectory, ensureClientInDirectory, needsContactSave, saveTypedContact } from '../components/pickers/index.jsx';
+import { findClient, fillNonEmpty, isNotAClient } from '../services/directoryCache.js';
 import '../styles/leadsVendors.css';
 
 /* ─── Helpers ─── */
@@ -78,6 +80,13 @@ function LeadModal({ initial, onSave, onClose, saving, names, me }) {
   const [f, setF] = useState(() => (isEdit ? { ...EMPTY, ...initial } : { ...EMPTY, dateReceived: todayIso(), owner: me, createdBy: me }));
   const set = (k, v) => setF(x => ({ ...x, [k]: v }));
   const valid = f.company.trim() && f.source;
+  // Client Directory: a new company is added only when "Add to Client Directory" is ticked (leads are mostly prospects)
+  const dir = useDirectory();
+  const [addToDir, setAddToDir] = useState(false);
+  const [saveContact, setSaveContact] = useState(true);
+  const inDir = !!findClient(f.company, dir) || isNotAClient(f.company);
+  const showSaveContact = inDir && needsContactSave(f.company, f.contactName, f.email);
+  const fillContact = p => setF(x => fillNonEmpty(x, { designation: p.designation, email: p.email, phone: p.mobile || p.altPhone }));
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
@@ -88,14 +97,26 @@ function LeadModal({ initial, onSave, onClose, saving, names, me }) {
         <div className="form-grid">
           <Field label="Lead Source *"><Select value={f.source} options={LEAD_SOURCES} onChange={v => set('source', v)} /></Field>
           <Field label="Source Detail"><input className="form-input" value={f.sourceDetail} onChange={e => set('sourceDetail', e.target.value)} placeholder="Event name, referring client, post link…" /></Field>
-          <Field label="Shared By"><input className="form-input" list="lv-names" value={f.sharedBy} onChange={e => set('sharedBy', e.target.value)} placeholder="Who passed this lead on" /></Field>
+          <Field label="Shared By"><TeamPicker value={f.sharedBy} onChange={v => set('sharedBy', v)} extra={names} placeholder="Who passed this lead on" /></Field>
           <Field label="Date Received"><input className="form-input" type="date" value={f.dateReceived} onChange={e => set('dateReceived', e.target.value)} /></Field>
         </div>
 
         <div className="lv-form-section">Who</div>
         <div className="form-grid">
-          <Field label="Company *"><input className="form-input" value={f.company} onChange={e => set('company', e.target.value)} /></Field>
-          <Field label="Contact Person"><input className="form-input" value={f.contactName} onChange={e => set('contactName', e.target.value)} /></Field>
+          <Field label="Company *">
+            <ClientPicker value={f.company} onChange={v => set('company', v)} allowAdd={false} />
+            {f.company.trim() && !inDir && dir.ready.clients && (
+              <label className="ep-tick"><input type="checkbox" checked={addToDir} onChange={e => setAddToDir(e.target.checked)} />
+                Add to Client Directory as a prospect (otherwise added when the lead moves to BD)</label>
+            )}
+          </Field>
+          <Field label="Contact Person">
+            <ContactPicker client={f.company} value={f.contactName} onChange={v => set('contactName', v)} onPick={fillContact} />
+            {showSaveContact && (
+              <label className="ep-tick"><input type="checkbox" checked={saveContact} onChange={e => setSaveContact(e.target.checked)} />
+                Save to {findClient(f.company, dir)?.name}'s contacts</label>
+            )}
+          </Field>
           <Field label="Designation"><input className="form-input" value={f.designation} onChange={e => set('designation', e.target.value)} /></Field>
           <Field label="Email"><input className="form-input" type="email" value={f.email} onChange={e => set('email', e.target.value.trim())} /></Field>
           <Field label="Phone"><input className="form-input" value={f.phone} onChange={e => set('phone', e.target.value)} /></Field>
@@ -106,7 +127,7 @@ function LeadModal({ initial, onSave, onClose, saving, names, me }) {
 
         <div className="lv-form-section">Ownership &amp; status</div>
         <div className="form-grid">
-          <Field label="Lead Owner"><input className="form-input" list="lv-names" value={f.owner} onChange={e => set('owner', e.target.value)} /></Field>
+          <Field label="Lead Owner"><TeamPicker value={f.owner} onChange={v => set('owner', v)} extra={names} /></Field>
           <Field label="Status"><Select value={f.status} options={LEAD_STATUSES} onChange={v => set('status', v)} blank="— status —" /></Field>
           <Field label="Priority"><Select value={f.priority} options={LEAD_PRIORITIES} onChange={v => set('priority', v)} /></Field>
           <Field label="Next Follow-up"><input className="form-input" type="date" value={f.nextFollowUp} onChange={e => set('nextFollowUp', e.target.value)} /></Field>
@@ -114,7 +135,7 @@ function LeadModal({ initial, onSave, onClose, saving, names, me }) {
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
-          <button className="btn btn-cta" disabled={!valid || saving} onClick={() => onSave(f)}>{saving ? 'Saving…' : isEdit ? 'Update Lead' : 'Save Lead'}</button>
+          <button className="btn btn-cta" disabled={!valid || saving} onClick={() => onSave(f, { addToDir: !inDir && addToDir, saveContact: showSaveContact && saveContact })}>{saving ? 'Saving…' : isEdit ? 'Update Lead' : 'Save Lead'}</button>
           <button className="btn btn-outline" onClick={onClose}>Cancel</button>
           {!valid && <span className="lv-req">* Company and Lead Source are required</span>}
         </div>
@@ -135,7 +156,7 @@ function ActionForm({ lead, names, me, onSave, saving }) {
   return (
     <div className="lv-action-form" data-pf="lv-log-action">
       <div className="lv-af-grid">
-        <label>Actioned by<input className="form-input" list="lv-names" value={a.by} onChange={e => set('by', e.target.value)} /></label>
+        <label>Actioned by<TeamPicker value={a.by} onChange={v => set('by', v)} extra={names} placeholder="" /></label>
         <label>Action<Select value={a.type} options={LEAD_ACTION_TYPES} onChange={v => set('type', v)} /></label>
         <label>Status after<Select value={a.status} options={LEAD_STATUSES} onChange={v => set('status', v)} /></label>
         <label>Next follow-up<input className="form-input" type="date" value={closing ? '' : a.next} disabled={closing} onChange={e => set('next', e.target.value)} /></label>
@@ -335,7 +356,7 @@ export default function LeadTracker({ onRefreshed }) {
   const decided = kpiBase.filter(l => !leadIsOpen(l)).length;
 
   /* writes */
-  const save = async (lead, isNew) => {
+  const save = async (lead, isNew, dirOpts = {}) => {
     setSaving(true);
     try {
       if (isNew) {
@@ -347,6 +368,12 @@ export default function LeadTracker({ onRefreshed }) {
         setData(d => d.map(l => (l.leadId === lead.leadId ? lead : l))); showToast('✓ Lead updated');
       }
       setModal(null);
+      // Client Directory (after the lead is saved; a failure here never undoes the lead)
+      const notes = [];
+      if (dirOpts.addToDir) notes.push((await ensureClientInDirectory(lead.company, me, { note: `Added from lead (Lead Tracker)` })).msg);
+      if (dirOpts.saveContact) notes.push(await saveTypedContact({ client: lead.company, fullName: lead.contactName, designation: lead.designation, email: lead.email, mobile: lead.phone }, me));
+      const msg = notes.filter(Boolean).join(' · ');
+      if (msg) showToast((/not added/.test(msg) ? '⚠ ' : '✓ ') + msg);
     } catch (e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
   };
@@ -381,7 +408,7 @@ export default function LeadTracker({ onRefreshed }) {
   return (
     <div className="tracker-page">
       {toast && <div className="lv-toast">{toast}</div>}
-      {modal && <LeadModal initial={modal === 'add' ? null : modal} names={names} me={me} saving={saving} onClose={() => setModal(null)} onSave={f => save(f, modal === 'add')} />}
+      {modal && <LeadModal initial={modal === 'add' ? null : modal} names={names} me={me} saving={saving} onClose={() => setModal(null)} onSave={(f, dirOpts) => save(f, modal === 'add', dirOpts)} />}
 
       <div className="kpi-compact">
         <div className="kpi-card accent"><div className="kpi-label">Open leads</div><div className="kpi-value">{open.length}</div><div className="kpi-sub">of {kpiBase.length}{kpiBase.length !== data.length ? ` filtered · ${data.length} total` : ' total'}</div></div>

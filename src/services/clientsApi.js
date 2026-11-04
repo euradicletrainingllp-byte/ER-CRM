@@ -152,6 +152,9 @@ async function fetchTable(kind) {
   return rowsOf(data).map(r => readRow(kind, r)).filter(r => r[t.idKey] || r.name || r.fullName || r.program || r.action || r.summary);
 }
 
+/** One table straight from Excel (no remembered copy) — used before a quick-add so the next ID can't clash. */
+export const readTableFresh = kind => fetchTable(kind);
+
 /** Reads all five tables in parallel. A child table that fails to load comes back empty with a warning. */
 export async function getClientDirectory() {
   const kinds = Object.keys(TABLES);

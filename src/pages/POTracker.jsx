@@ -9,6 +9,8 @@ import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import ExportButton from '../components/ExportButton.jsx';
 import { usePermissions } from '../hooks/usePermissions.js';
 import { getAllEngagementsCached, peekAllEngagements } from '../services/api.js';
+import { ClientPicker, ContactPicker, ProposalPicker } from '../components/pickers/index.jsx';
+import { fillNonEmpty } from '../services/directoryCache.js';
 import { getPOs, peekPOs, addPO, updatePO, deletePO, nextPoId, poConfigured, poUsage, poStatus, splitIdx, PO_STATUS } from '../services/poApi.js';
 
 const inr = v => '₹ ' + Math.round(Number(v) || 0).toLocaleString('en-IN');
@@ -38,12 +40,18 @@ function POForm({ initial, ec, onSave, onClose, saving }) {
       <div className="modal-box" style={{ width: 760, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
         <div className="modal-title">{initial.poId ? `Edit ${initial.poId}` : 'New PO'}</div>
         <div className="form-grid">
-          {fld('PO Number', 'poNumber', 'text', true)}{fld('Client', 'client', 'text', true)}
+          {fld('PO Number', 'poNumber', 'text', true)}
+          <div className="form-field"><label className="form-label">Client<span className="required">*</span></label>
+            <ClientPicker value={f.client} onChange={v => setF(x => ({ ...x, client: v }))} /></div>
           {fld('PO Date', 'poDate', 'date')}{fld('PO Received Date', 'receivedDate', 'date')}
           {fld('PO Value (INR, excl. GST)', 'value', 'number', true)}
           <div className="form-field"><label className="form-label">GST Included</label><select className="form-input" value={f.gstIncluded} onChange={set('gstIncluded')}><option>No</option><option>Yes</option></select></div>
           {fld('Valid From', 'validFrom', 'date')}{fld('Valid To', 'validTo', 'date')}
-          {fld('Proposal ID (BD)', 'proposalId')}{fld('Client SPOC', 'spoc')}
+          <div className="form-field"><label className="form-label">Proposal ID (BD)</label>
+            <ProposalPicker value={f.proposalId} client={f.client} onChange={v => setF(x => ({ ...x, proposalId: v }))}
+              onPick={p => setF(x => fillNonEmpty(x, { client: x.client || p.client }))} /></div>
+          <div className="form-field"><label className="form-label">Client SPOC</label>
+            <ContactPicker client={f.client} value={f.spoc} onChange={v => setF(x => ({ ...x, spoc: v }))} /></div>
           <div className="form-field"><label className="form-label">Status</label><select className="form-input" value={f.status} onChange={set('status')}>{PO_STATUS.map(s => <option key={s}>{s}</option>)}</select></div>
           {fld('PO Link', 'link', 'url')}
           <div className="form-field full"><label className="form-label">Description / Scope</label><input className="form-input" value={f.scope} onChange={set('scope')} /></div>

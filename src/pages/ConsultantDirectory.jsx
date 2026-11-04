@@ -29,6 +29,7 @@ import {
 } from '../config/consultantOptions.js';
 import '../styles/leadsVendors.css';
 import '../styles/consultants.css';
+import { TeamPicker } from '../components/pickers/index.jsx';
 
 /* ─── Helpers ─── */
 const pad2 = n => String(n).padStart(2, '0');
@@ -213,7 +214,7 @@ function ConsultantModal({ initial, onSave, onClose, saving, names, me, showMone
 
         <div className="lv-form-section">Relationship</div>
         <div className="form-grid lv-grid-4">
-          <Field label="Relationship Owner" k="owner"><input className="form-input" list="cd-names" value={f.owner} onChange={e => set('owner', e.target.value)} /></Field>
+          <Field label="Relationship Owner" k="owner"><TeamPicker value={f.owner} onChange={v => set('owner', v)} placeholder="" /></Field>
           <Field label="Onboarded On" k="onboardedOn">{dateIn('onboardedOn')}</Field>
           <Field label="Internal Rating (1–5)" k="rating"><Select value={String(f.rating || '')} options={RATINGS} onChange={v => set('rating', v)} /></Field>
           <Field label="Preferred For" full k="preferredFor">{txtIn('preferredFor', { placeholder: 'Program types / clients this consultant fits best' })}</Field>

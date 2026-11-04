@@ -25,6 +25,7 @@ import {
 } from '../components/tasksShared.jsx';
 import '../styles/leadsVendors.css';
 import '../styles/tasks.css';
+import { ClientPicker } from '../components/pickers/index.jsx';
 
 const EMPTY_TASK = {
   taskId: '', projectId: '', projectName: '', projectType: '', team: '', client: '', projectOwner: '', projectDue: '',
@@ -108,7 +109,7 @@ function ProjectModal({ initial, people, user, saving, onSave, onClose }) {
         <div className="form-grid">
           <Field label="Project Name *" full><input autoFocus className="form-input" value={p.projectName} onChange={e => set('projectName', e.target.value)} placeholder="e.g. Zscaler CS Training – Wave 1" /></Field>
           <Field label="Project Type"><Select value={p.projectType} options={PROJECT_TYPES} onChange={v => set('projectType', v)} /></Field>
-          <Field label="Client"><input className="form-input" value={p.client} onChange={e => set('client', e.target.value)} placeholder="Blank for internal work" /></Field>
+          <Field label="Client"><ClientPicker value={p.client} onChange={v => set('client', v)} placeholder="Blank for internal work" /></Field>
           <Field label="Project Owner *"><PersonPicker value={p.projectOwner} users={user.users} onChange={v => set('projectOwner', v)} /></Field>
           <Field label="Project Due Date"><input className="form-input" type="date" value={p.projectDue} onChange={e => set('projectDue', e.target.value)} /></Field>
         </div>

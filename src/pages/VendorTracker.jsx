@@ -24,6 +24,7 @@ import {
   VENDOR_CATEGORIES, BILLABLE_OPTIONS, CLIENT_BILLING, VENDOR_PAYMENT, isBillable,
   VENDOR_INVOICE_EXPECTED_DAYS, CLIENT_BILLING_DAYS, VENDOR_PAYMENT_DAYS,
 } from '../config/leadVendorOptions.js';
+import { ClientPicker, VendorPicker, TeamPicker } from '../components/pickers/index.jsx';
 import '../styles/leadsVendors.css';
 
 /* ─── Helpers ─── */
@@ -98,12 +99,13 @@ function ServiceModal({ initial, prefill, onSave, onClose, saving, engagements, 
 
         <div className="lv-form-section">Service</div>
         <div className="form-grid">
-          <Field label="Vendor Name *"><input className="form-input" list="vs-vendors" value={f.vendorName} onChange={e => set('vendorName', e.target.value)} /></Field>
+          <Field label="Vendor Name *"><VendorPicker value={f.vendorName} onChange={v => set('vendorName', v)}
+            onPick={v => { if (v.contact && !String(f.vendorContact || '').trim()) set('vendorContact', v.contact); }} /></Field>
           <Field label="Vendor Contact"><input className="form-input" value={f.vendorContact} onChange={e => set('vendorContact', e.target.value)} placeholder="Name / phone / email" /></Field>
           <Field label="Service Category *"><Select value={f.category} options={VENDOR_CATEGORIES} onChange={v => set('category', v)} /></Field>
           <Field label="Service Date"><input className="form-input" type="date" value={f.serviceDate} onChange={e => set('serviceDate', e.target.value)} /></Field>
           <Field label="Service Description" full><input className="form-input" value={f.description} onChange={e => set('description', e.target.value)} placeholder="e.g. Conference hall 2 days, 40 participant kits" /></Field>
-          <Field label="Requested By"><input className="form-input" list="vs-names" value={f.requestedBy} onChange={e => set('requestedBy', e.target.value)} /></Field>
+          <Field label="Requested By"><TeamPicker value={f.requestedBy} onChange={v => set('requestedBy', v)} extra={names} /></Field>
         </div>
 
         <div className="lv-form-section">Engagement it was for</div>
@@ -119,7 +121,7 @@ function ServiceModal({ initial, prefill, onSave, onClose, saving, engagements, 
               </select>
             </div>
           </Field>
-          <Field label="Client"><input className="form-input" value={f.client} onChange={e => set('client', e.target.value)} /></Field>
+          <Field label="Client"><ClientPicker value={f.client} onChange={v => set('client', v)} /></Field>
           <Field label="Program"><input className="form-input" value={f.program} onChange={e => set('program', e.target.value)} /></Field>
         </div>
 

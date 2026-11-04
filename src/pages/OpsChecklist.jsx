@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
 import { peekList, getOpsChecklist, addOpsRow, updateOpsRow, deleteOpsRow, peekAllEngagements, getAllEngagementsCached } from '../services/api.js';
@@ -11,6 +11,20 @@ import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, OPS_RULES } from '../config/pendingFields.js';
+import { ClientPicker, ContactPicker, ConsultantPicker, TeamPicker } from '../components/pickers/index.jsx';
+
+/** Inline team-member edit (task POC, Invoice POC): saves on pick, Enter or leaving the box — only when the text changed. */
+function InlineTeamEdit({ initial, onCommit, onDone, style, className, placeholder, autoFocus }) {
+  const [v, setV] = useState(initial || '');
+  const last = useRef(String(initial ?? '').trim());
+  const commit = val => { const t = String(val ?? '').trim(); if (t !== last.current) { last.current = t; onCommit(t); } onDone?.(); };
+  return (
+    <div onKeyDown={e => { if (e.key === 'Enter') e.target.blur?.(); }}>
+      <TeamPicker value={v} onChange={setV} onPick={o => commit(o.value)} onBlur={e => commit(e.target.value)}
+        className={className} style={style} placeholder={placeholder} autoFocus={autoFocus} />
+    </div>
+  );
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // Filters compare text safely: Excel cells can be numbers, blank or carry stray spaces
@@ -149,9 +163,9 @@ function AddEditModal({ initial, onSave, onClose, saving }) {
         <div className="modal-title">{isEdit ? '✏️ Edit Session' : '➕ Add New Session'}</div>
         <div className="form-grid">
           <Row label="EG.ID"><input {...inp} value={form.egId} onChange={e => set('egId', e.target.value)} placeholder="EG.ID 001" /></Row>
-          <Row label="Company *"><input {...inp} value={form.company} onChange={e => set('company', e.target.value)} /></Row>
-          <Row label="Client SPOC"><input {...inp} value={form.clientSpoc} onChange={e => set('clientSpoc', e.target.value)} /></Row>
-          <Row label="Internal POC"><input {...inp} value={form.internalPoc} onChange={e => set('internalPoc', e.target.value)} /></Row>
+          <Row label="Company *"><ClientPicker value={form.company} onChange={v => set('company', v)} /></Row>
+          <Row label="Client SPOC"><ContactPicker client={form.company} value={form.clientSpoc} onChange={v => set('clientSpoc', v)} /></Row>
+          <Row label="Internal POC"><TeamPicker value={form.internalPoc} onChange={v => set('internalPoc', v)} /></Row>
           <Row label="Engagement Start Date"><input {...inp} type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} /></Row>
           <Row label="Engagement End Date"><input {...inp} type="date" value={form.endDate} onChange={e => set('endDate', e.target.value)} /></Row>
           <div className="form-field full"><label className="form-label">Topic / Program</label><input {...inp} value={form.topic} onChange={e => set('topic', e.target.value)} /></div>
@@ -166,9 +180,9 @@ function AddEditModal({ initial, onSave, onClose, saving }) {
           <Row label="Location"><input {...inp} value={form.location} onChange={e => set('location', e.target.value)} /></Row>
           <Row label="No. of Participants"><input {...inp} type="number" min="0" value={form.noOfParticipants} onChange={e => set('noOfParticipants', e.target.value)} /></Row>
           <Row label="Day(s)"><input {...inp} type="number" min="0" step="0.25" value={form.day} onChange={e => set('day', e.target.value)} /></Row>
-          <Row label="Consultant 1"><input {...inp} value={form.consultant1} onChange={e => set('consultant1', e.target.value)} /></Row>
-          <Row label="Consultant 2"><input {...inp} value={form.consultant2} onChange={e => set('consultant2', e.target.value)} /></Row>
-          <Row label="Consultant 3"><input {...inp} value={form.consultant3} onChange={e => set('consultant3', e.target.value)} /></Row>
+          <Row label="Consultant 1"><ConsultantPicker value={form.consultant1} onChange={v => set('consultant1', v)} /></Row>
+          <Row label="Consultant 2"><ConsultantPicker value={form.consultant2} onChange={v => set('consultant2', v)} /></Row>
+          <Row label="Consultant 3"><ConsultantPicker value={form.consultant3} onChange={v => set('consultant3', v)} /></Row>
           <Row label="Contract Type">
             <select {...inp} value={form.contractType} onChange={e => set('contractType', e.target.value)}>
               {['','PO','MSA','LOI','Other'].map(v => <option key={v} value={v}>{v || '— select —'}</option>)}
@@ -451,13 +465,8 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving, focusN }) {
                     {/* POC */}
                     <td style={{ padding:'8px 6px 6px 0', verticalAlign:'top' }}>
                       {editingPoc?.key === item.key ? (
-                        <input
-                          autoFocus
-                          defaultValue={poc}
-                          onBlur={e => { onUpdate(row, { [item.pocKey]: e.target.value }); setEditingPoc(null); }}
-                          onKeyDown={e => e.key==='Enter' && e.target.blur()}
-                          style={{ width:66, fontSize:11, padding:'2px 4px', border:'1px solid var(--accent)', borderRadius:4 }}
-                        />
+                        <InlineTeamEdit autoFocus initial={poc} className="" onCommit={v => onUpdate(row, { [item.pocKey]: v })} onDone={() => setEditingPoc(null)}
+                          style={{ width:90, fontSize:11, padding:'2px 4px', border:'1px solid var(--accent)', borderRadius:4 }} />
                       ) : (
                         <span
                           style={{ color:poc?'var(--primary)':'var(--muted)', cursor:canEdit?'pointer':'default', fontSize:11 }}
@@ -568,9 +577,8 @@ function ChecklistPanel({ row, canEdit, onUpdate, saving, focusN }) {
               <div>
                 <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:2 }}>Invoice POC</div>
                 {canEdit ? (
-                  <input key={'poc-' + (row.invoicePoc || '')} className="form-input" style={{ fontSize:12 }} defaultValue={row.invoicePoc || ''}
-                    onBlur={e => { if (e.target.value !== (row.invoicePoc || '')) onUpdate(row, { invoicePoc: e.target.value }); }}
-                    onKeyDown={e => e.key === 'Enter' && e.target.blur()} placeholder="Who raises the invoice" />
+                  <InlineTeamEdit key={'poc-' + (row.invoicePoc || '')} initial={row.invoicePoc || ''} className="form-input" style={{ fontSize:12 }}
+                    onCommit={v => onUpdate(row, { invoicePoc: v })} placeholder="Who raises the invoice" />
                 ) : <div style={{ fontWeight:500 }}>{row.invoicePoc || '—'}</div>}
               </div>
               <div style={{ gridColumn:'1 / -1' }}>

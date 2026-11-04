@@ -21,6 +21,8 @@ import { onListChange, getOpsChecklist, getContentDevTracker, ecContractFields, 
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, EC_RULES } from '../config/pendingFields.js';
 import CalendarView from './ERCalendar.jsx';
+import { ClientPicker, ConsultantPicker, ProposalPicker } from '../components/pickers/index.jsx';
+import { fillNonEmpty } from '../services/directoryCache.js';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -169,6 +171,7 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
   const [egSelect, setEgSelect] = useState('__new__');
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const [pidPick, setPidPick] = useState('');   // only used to fill Proposal Link — not saved
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -301,6 +304,12 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
             return (
               <div className={`form-field ${span || ''}`} key={key}>
                 <label className="form-label">{label}{locked && ' 🔒'}</label>
+                {key === 'company' ? (
+                  <ClientPicker value={form.company} onChange={v => set('company', v)}
+                    onPick={c => setForm(f => fillNonEmpty(f, { sector: c.industry }))} />
+                ) : (key === 'consultant1' || key === 'consultant2') ? (
+                  <ConsultantPicker value={form[key] ?? ''} onChange={v => set(key, v)} />
+                ) : (
                 <input
                   type={type || 'text'}
                   className="form-input"
@@ -311,6 +320,7 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
                   title={locked ? 'Updated from the Finance Tracker' : undefined}
                   style={locked ? { background: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' } : undefined}
                 />
+                )}
                 {locked && (
                   <span style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>Edit in Finance Tracker</span>
                 )}
@@ -336,6 +346,10 @@ function AddEditEngagementModal({ initial, prefill, onSave, onClose, saving, eng
           <div className="form-field full">
             <label className="form-label">Proposal Link{prefill?.proposalLink && !isEdit ? ' (from Solution Tracker)' : ''}</label>
             <LinkInput className="form-input" value={form.proposalLink} onChange={v => set('proposalLink', v)} placeholder="https://… (proposal document)" />
+            <div style={{ marginTop: 6 }}>
+              <ProposalPicker value={pidPick} onChange={setPidPick} client={form.company} placeholder="Fill the link from a BD proposal (optional)…"
+                onPick={p => { if (p.link) set('proposalLink', p.link); }} />
+            </div>
           </div>
           <div className="form-field full">
             <label className="form-label">

@@ -9,6 +9,7 @@ import { DeleteButton } from '../components/ActionButtons.jsx';
 import { LinkButton } from '../components/LinkButton.jsx';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, CDT_RULES } from '../config/pendingFields.js';
+import { ClientPicker, TeamPicker } from '../components/pickers/index.jsx';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtDt = d => {
@@ -194,7 +195,7 @@ function AddModal({ onSave, onClose, saving }) {
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 16px' }}>
           <div style={{ gridColumn:'1 / -1' }}>
             <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>Client *</label>
-            <input {...inp} value={form.client} onChange={e => set('client', e.target.value)} placeholder="Client / company name" />
+            <div style={{ marginBottom:10 }}><ClientPicker value={form.client} onChange={v => set('client', v)} placeholder="Client / company name" /></div>
           </div>
           <div style={{ gridColumn:'1 / -1' }}>
             <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>Program Topic</label>
@@ -206,7 +207,7 @@ function AddModal({ onSave, onClose, saving }) {
           </div>
           <div>
             <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>POC</label>
-            <input {...inp} value={form.poc} onChange={e => set('poc', e.target.value)} placeholder="Point of contact" />
+            <div style={{ marginBottom:10 }}><TeamPicker value={form.poc} onChange={v => set('poc', v)} placeholder="Point of contact" /></div>
           </div>
           <div>
             <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>PM Required</label>

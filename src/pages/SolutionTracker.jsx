@@ -20,6 +20,9 @@ import { pushBdChecklist } from '../services/bdChecklistSync.js';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, BD_RULES, SOL_RULES, toIso } from '../config/pendingFields.js';
 import { getLeads, updateLead } from '../services/leadsVendorsApi.js';
+import { ClientPicker, ContactPicker, ensureClientInDirectory, needsContactSave, saveTypedContact, SaveContactTick } from '../components/pickers/index.jsx';
+import { fillNonEmpty } from '../services/directoryCache.js';
+import { useMsal } from '@azure/msal-react';
 
 // In Process and Won proposals must carry the Operations checklist ticked by the BD person
 const CHECKLIST_STATUSES = ['In Process', 'Won'];
@@ -328,7 +331,8 @@ function ParticipantProfilePicker({ value, onChange }) {
   );
 }
 
-function AdditionalPocsEditor({ value, onChange }) {
+const phone10 = v => String(v ?? '').replace(/\D/g, '').slice(-10);
+function AdditionalPocsEditor({ value, onChange, client }) {
   const [list, setList] = useState(() => parsePocs(value));
   const update = next => { setList(next); onChange(serializePocs(next)); };
   const setP = (i, k, v) => update(list.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
@@ -337,7 +341,8 @@ function AdditionalPocsEditor({ value, onChange }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {list.map((p, i) => (
         <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr 1fr auto', gap: 6, alignItems: 'center' }}>
-          <input style={small} placeholder="Name" value={p.name} onChange={e => setP(i, 'name', e.target.value)} />
+          <ContactPicker client={client} className="" style={small} placeholder="Name" value={p.name} onChange={v => setP(i, 'name', v)}
+            onPick={c => update(list.map((x, j) => (j === i ? fillNonEmpty(x, { name: c.fullName, designation: c.designation, email: c.email, phone: phone10(c.mobile || c.altPhone) }) : x)))} />
           <input style={small} placeholder="Designation" value={p.designation} onChange={e => setP(i, 'designation', e.target.value)} />
           <input style={{ ...small, ...(p.email && !isEmail(p.email) ? { borderColor: '#f59e0b' } : {}) }} type="email" placeholder="Email ID"
             value={p.email} onChange={e => setP(i, 'email', e.target.value.trim())} />
@@ -558,8 +563,13 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
             </Field>
           )}
 
-          <Field label="Client Name *" half><input style={inp} value={form.clientName} onChange={e => set('clientName', e.target.value)} /></Field>
-          <Field label="Client POC" half><input style={inp} value={form.clientPoc} onChange={e => set('clientPoc', e.target.value)} /></Field>
+          <Field label="Client Name *" half><ClientPicker className="" style={inp} value={form.clientName} onChange={v => set('clientName', v)} /></Field>
+          <Field label="Client POC" half>
+            <ContactPicker client={form.clientName} className="" style={inp} value={form.clientPoc} onChange={v => set('clientPoc', v)}
+              onPick={c => setForm(f => fillNonEmpty(f, { contactNumber: phone10(c.mobile || c.altPhone), clientPocEmail: c.email, clientPocDesignation: c.designation }))} />
+            <SaveContactTick client={form.clientName} name={form.clientPoc} email={form.clientPocEmail}
+              checked={form._saveContact !== false} onChange={v => set('_saveContact', v)} />
+          </Field>
           <Field label="Contact Number" half>
             <input
               type="tel"
@@ -587,7 +597,7 @@ function BDModal({ initial, onSave, onClose, saving, bdRows, allRows }) {
             <input style={inp} value={form.clientPocDesignation || ''} onChange={e => set('clientPocDesignation', e.target.value)} placeholder="e.g. L&D Manager" />
           </Field>
           <Field label="Additional Client POCs">
-            <AdditionalPocsEditor value={form.additionalPocs} onChange={v => set('additionalPocs', v)} />
+            <AdditionalPocsEditor client={form.clientName} value={form.additionalPocs} onChange={v => set('additionalPocs', v)} />
           </Field>
 
           {/* ── Date of Discussion — auto-fills BD Month on change ── */}
@@ -905,6 +915,7 @@ function DeleteDialog({ label, onConfirm, onCancel, saving, type, linkedCount })
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function SolutionTracker({ onRefreshed, view }) {
   const navigate = useNavigate();
+  const { accounts } = useMsal();
   const location = useLocation();
   const { canCreate, canUpdate, canDelete, canEdit, canAccess } = usePermissions();
 
@@ -1263,6 +1274,16 @@ export default function SolutionTracker({ onRefreshed, view }) {
       const notSaved = await checkSolutionDates(form.proposalId, form.proposalVersion, form).catch(() => []);
       setBdModal(null);
       if (form._fromLead) await linkLeadToProposal(form._fromLead, form.proposalId);
+      // Client Directory: a lead moved to BD joins the directory; a typed POC is saved when ticked
+      {
+        const by = accounts[0]?.name || accounts[0]?.username || '';
+        const notes = [];
+        if (form._fromLead) notes.push((await ensureClientInDirectory(form.clientName, by, { note: `Added when lead ${form._fromLead} moved to BD (${form.proposalId})` })).msg);
+        if (form._saveContact !== false && needsContactSave(form.clientName, form.clientPoc, form.clientPocEmail))
+          notes.push(await saveTypedContact({ client: form.clientName, fullName: form.clientPoc, designation: form.clientPocDesignation, email: form.clientPocEmail, mobile: form.contactNumber }, by));
+        const bad = notes.filter(m => /not added/.test(m));
+        if (bad.length) alert(`Saved. ${bad.join('\n')}`);
+      }
       await load();
       // BD checklist (In Process or Won) → this proposal's Engagement Calendar rows + their Ops Checklist rows
       if (String(form.opsChecklist || '').trim()) {

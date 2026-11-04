@@ -36,6 +36,8 @@ import { pendingItems, missingFields, CLIENT_RULES } from '../config/pendingFiel
 import * as O from '../config/clientOptions.js';
 import '../styles/leadsVendors.css';
 import '../styles/clients.css';
+import { TeamPicker, ConsultantPicker, ProposalPicker } from '../components/pickers/index.jsx';
+import DirectoryCleanup from '../components/DirectoryCleanup.jsx';
 
 /* ─── Helpers ─── */
 const pad2 = n => String(n).padStart(2, '0');
@@ -141,8 +143,8 @@ const FORMS = {
     F('program', 'Program Name *', 'text', { full: true }), F('type', 'Program Type', 'select', { options: O.PROGRAM_TYPES }),
     F('audience', 'Audience / Level'), F('fy', 'Financial Year', 'text', { ph: 'FY27' }), F('status', 'Status *', 'select', { options: O.PROGRAM_STATUS }),
     F('batchesContracted', 'Batches Contracted', 'num'), F('batchesDelivered', 'Batches Delivered', 'num'), F('participants', 'Participants Covered', 'num'),
-    F('feedback', 'Avg Feedback', 'num'), F('facilitators', 'Facilitators / Coaches'), F('clientOwner', 'Client Owner'),
-    F('erOwner', 'EuRadicle Owner', 'person'), F('proposalId', 'BD Proposal ID'), F('nextMilestone', 'Next Milestone', 'text', { full: true }),
+    F('feedback', 'Avg Feedback', 'num'), F('facilitators', 'Facilitators / Coaches', 'consultants'), F('clientOwner', 'Client Owner'),
+    F('erOwner', 'EuRadicle Owner', 'person'), F('proposalId', 'BD Proposal ID', 'proposal'), F('nextMilestone', 'Next Milestone', 'text', { full: true }),
     F('notes', 'Key Notes', 'area', { full: true })] },
   { section: 'Commercials', money: true, fields: [
     F('feeBasis', 'Fee Basis', 'select', { options: O.FEE_BASIS }), F('feeRate', 'Fee Rate (₹)', 'num'), F('poValue', 'PO Value (₹)', 'num'),
@@ -189,7 +191,9 @@ function RecordModal({ kind, initial, defaults, title, onSave, onClose, saving, 
       case 'date':   return <input className="form-input" type="date" value={v || ''} onChange={e => set(fd.k, e.target.value)} />;
       case 'num':    return <input className="form-input" inputMode="decimal" value={v} onChange={e => set(fd.k, e.target.value.replace(/[^0-9.]/g, ''))} />;
       case 'area':   return <textarea className="form-input" rows={fd.rows || 2} value={v} placeholder={fd.ph || ''} onChange={e => set(fd.k, e.target.value)} />;
-      case 'person': return <input className="form-input" list="cl-names" value={v} onChange={e => set(fd.k, e.target.value)} />;
+      case 'person': return <TeamPicker value={v} onChange={x => set(fd.k, x)} placeholder="" />;
+      case 'consultants': return <ConsultantPicker multiple value={v} onChange={x => set(fd.k, x)} placeholder="Type names; pick several" />;
+      case 'proposal': return <ProposalPicker value={v} client={f.clientName || f.name} onChange={x => set(fd.k, x)} />;
       default:       return <input className="form-input" type={fd.type === 'email' ? 'email' : 'text'} value={v}
         placeholder={fd.ph || (fd.type === 'url' ? 'https://…' : '')} onChange={e => set(fd.k, e.target.value)} />;
     }
@@ -882,7 +886,7 @@ export default function ClientDirectory({ onRefreshed }) {
   };
   const q = norm(search);
   const matchQ = r => !q || q.split(' ').every(w => Object.values(r).map(norm).join(' | ').includes(w));
-  const viewLabel = VIEWS.find(v => v[0] === view)[1];
+  const viewLabel = (VIEWS.find(v => v[0] === view) || ['cleanup', 'Clean-up'])[1];
 
   const modalTitle = m => {
     const noun = KIND_NOUN[m.kind]; const who = m.rec?.clientName || m.defaults?.clientName || '';
@@ -917,7 +921,7 @@ export default function ClientDirectory({ onRefreshed }) {
         </div>
 
         <div className="filter-bar lv-filters" style={{ flexShrink: 0 }}>
-          <div className="lv-tabs">{VIEWS.map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}</div>
+          <div className="lv-tabs">{[...VIEWS, ...(isAdmin ? [['cleanup', '🧹 Clean-up']] : [])].map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}</div>
           <input className="form-input wide" placeholder="🔍 Client, contact, program, city…" value={search} onChange={e => setSearch(e.target.value)} />
           {view === 'clients' && <>
             <select className="form-input" value={industryF} onChange={e => setIndustryF(e.target.value)}>
@@ -940,7 +944,7 @@ export default function ClientDirectory({ onRefreshed }) {
           <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing}>{refreshing ? '⟳' : '↺'}</button>
           {view === 'clients'
             ? <ExportButton page="clients" filename="Client Directory" sheetName="Clients" rows={() => filtered} columns={clientCols} />
-            : <ExportButton page="clients" filename={`Client ${viewLabel}`} sheetName={viewLabel} rows={() => data[view].filter(matchQ)} columns={colsOf(view)} />}
+            : view !== 'cleanup' && <ExportButton page="clients" filename={`Client ${viewLabel}`} sheetName={viewLabel} rows={() => data[view].filter(matchQ)} columns={colsOf(view)} />}
           {perm.create && view === 'clients' && <button className="btn btn-primary btn-sm" onClick={() => openAdd('clients', null)}>+ Add Client</button>}
         </div>
 
@@ -1018,6 +1022,8 @@ export default function ClientDirectory({ onRefreshed }) {
               {showMoney && <><td>{inr(p.feeRate) || '—'}</td><td>{inr(p.poValue) || '—'}</td></>}
               <td>{p.feedback || '—'}</td><td className="lv-muted" style={{ maxWidth: 280 }}>{p.nextMilestone}</td>
             </tr>))}</tbody></table></div></div></div>}
+
+      {view === 'cleanup' && isAdmin && <DirectoryCleanup />}
 
       <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={perm.update} noun="client" />
     </div>
