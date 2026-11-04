@@ -35,3 +35,36 @@
 - Office Script docs/office-scripts/SortEngagementCalendar.ts sorts EngagementMasterTable the same way; S No (=ROW()-1) follows. Index untouched.
 - Pending: save script in Excel Online; ENGAGEMENT_CRUD → "Run script" after Response in create + update branches. Backup: Claude outputs/backup-2026-11-02-ec-date-order.tgz.
 - Finance Tracker list also sorted by Start Date first (then S No).
+
+## 2026-11-04 — Finance: Pro bono + overdue pending amount
+- "Pro bono" in Payment / Contract / PO Status / Status / Price / Comments → stage Not Applicable; never invoice/payment overdue (`isProBono`, financeStage, overdueDays).
+- Overdue filters (Needs Action, Invoice Overdue, Payment Overdue, Overdue 30+) show "Pending ₹…" on Engagements / To Invoice / Awaiting Payment cards (balance = Total to Receive − Amount Received).
+- File: src/pages/FinanceTracker.jsx. Dashboard / Founder's Desk use financeStage/overdueDays, so they follow.
+- 2026-11-04 (b): Payment Status "Pro Bono" option (normPayment; Ops copy → NA); stage "Pro Bono"; NA / Pro Bono / Cancelled → totalOf 0 (not billed). New "Not Billed" card + filter. Card tap filters list (under overdue filters: To Invoice → Invoice Overdue, Awaiting → Overdue 30+), highlights active card, scrolls list to top. Files: FinanceTracker.jsx, syncWithEC.js.
+
+## 2026-11-04 — Revised proposals: older version = Lost, drop-only value
+- Saving V2 (or any save on a proposal) sets BD Status / item status of older versions to Lost in Excel; editing an older version keeps it Lost; latest version keeps its own status (propagateBdFields statusFor).
+- Calculations (proposalData buildProposalLines + BD Tracker KPIs): replaced version = Lost, value = max(0, own − next version). E.g. V1 10L → V2 12L Won: Won 12L, Lost 0; V2 8L: Lost 2L. Applies to bdValue and solValue. Fields added: replaced, bdFull, solFull. Lost card shows lost value.
+- Existing Excel rows: older versions still holding Won / In Process show as Lost in all figures; Excel updates on the next save of that proposal.
+- Files: src/components/proposalData.js, src/pages/SolutionTracker.jsx.
+- 2026-11-04 (b): Lost value of a replaced version = max(0, own − LATEST version) (was next version). Lost proposal with no earlier version = full value. Latest Won → only latest Won, earlier versions Lost.
+
+## 2026-11-04 — Operations dashboard
+- EC rows with Index / S No and dates TBD count as upcoming in the current FY (not stale).
+- FY table, consultant and client charts calculated from the Engagement Calendar for every year; fixed baseline only for a year with no delivered EC rows.
+- New Consultant Days / Client Status year-on-year grouped charts (last 3 FYs + current incl. upcoming, top 15) replace the per-year mini charts.
+- Recent Program Feedback: overall average of scored sessions; table of sessions latest first, last-7-days delivered at top (highlighted, "Awaited" if no score), scroll for earlier.
+- File: src/components/OpsLiveDashboard.jsx.
+- 2026-11-04 (c): Solutioning tab Solutions card shows unique solutions (distinct Solution Topics; proposalData solTopics). SALES_TARGETS FY26 Q4 = 81L (was null).
+
+## 2026-11-04 — Finance dashboard
+- To be Raised = delivered / ended, no Invoice date (Pro Bono / NA / Cancelled excluded). Total Due in Market = To be Raised + Yet to Receive + Overdue. Collection = sum of Amount Received in the period.
+- Outstanding Payments Due = overdue invoices (client, program, invoice no., dates, amount, past due days). Invoice-Level Breakdown = invoices awaiting payment within credit period. Invoice & Payment Summary card removed.
+- File: src/components/FinanceLiveDashboard.jsx.
+
+## 2026-11-04 — Dashboard click-through lists
+- New src/components/KpiListModal.jsx: list popup (search, status badge, amount), egItem / propItem, DrillContext + drillItems.
+- KPI cards (Kpi in erdCharts, KPICard) take `list`; wired on Overview (4), Operations (4), Sales (5), Solutioning (5), Finance (8) — the list uses the same rows as the card.
+- Every ChartBox: tapping a bar / point / slice opens the matching engagements or proposals (FY, month, quarter, status, delivery mode or name of client / consultant / industry); falls back to the point values. Per-chart override: `listFor(label, series, value)`.
+- Dashboard.jsx wraps each tab in DrillContext (EC rows; BD lines for Sales / Solutioning).
+- Build not run here (Windows node_modules: rollup native binary missing in the VM) — run `npm run build` locally.

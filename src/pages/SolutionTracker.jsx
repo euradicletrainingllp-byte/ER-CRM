@@ -1054,19 +1054,25 @@ export default function SolutionTracker({ onRefreshed, view }) {
     if (!p || versionNo(r.proposalVersion) > versionNo(p.proposalVersion)) m.set(r.proposalId, r);
     return m;
   }, new Map()).values()];
+  // Replaced versions count as Lost, valued at (own − latest version) (proposalData rule)
+  const verVals = allBdRows.reduce((m, r) => { const a = m.get(r.proposalId) || []; a.push([versionNo(r.proposalVersion), lineValue(r)]); return m.set(r.proposalId, a); }, new Map());
+  const nextVer = r => (verVals.get(r.proposalId) || []).filter(([v]) => v > versionNo(r.proposalVersion)).sort((a, b) => b[0] - a[0])[0];   // latest version
+  const effStatus = r => (nextVer(r) ? 'Lost' : r.bdStatus);
+  const effValue = r => { const nx = nextVer(r); return nx ? Math.max(0, lineValue(r) - nx[1]) : lineValue(r); };
   const kpi = {
     total:    kpiRows.length,
     all:      new Set(allBdRows.map(r => r.proposalId)).size,
     lines:    bdRows.length,
     allLines: allBdRows.length,
     // Line counts (each version counts) — same as the Sales / Solutioning dashboards
-    wonLines:  bdRows.filter(r => r.bdStatus === 'Won').length,
-    lostLines: bdRows.filter(r => r.bdStatus === 'Lost').length,
-    ipLines:   bdRows.filter(r => r.bdStatus === 'In Process').length,
+    wonLines:  bdRows.filter(r => effStatus(r) === 'Won').length,
+    lostLines: bdRows.filter(r => effStatus(r) === 'Lost').length,
+    ipLines:   bdRows.filter(r => effStatus(r) === 'In Process').length,
     // Value — same rule as the Sales / Solutioning dashboards: BD Proposal Value, else the line's Solution Values
     // added up; every line (version) adds its own value, like the Total Proposals count
-    value:    bdRows.reduce((t, r) => t + lineValue(r), 0),
-    wonValue: bdRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + lineValue(r), 0),
+    value:    bdRows.reduce((t, r) => t + effValue(r), 0),
+    wonValue: bdRows.filter(r => effStatus(r) === 'Won').reduce((t, r) => t + effValue(r), 0),
+    lostValue: bdRows.filter(r => effStatus(r) === 'Lost').reduce((t, r) => t + effValue(r), 0),
     wonSolValue: kpiRows.filter(r => r.bdStatus === 'Won').reduce((t, r) => t + solValueOf(r), 0),
     clients:  new Set(kpiRows.map(r => r.clientName).filter(Boolean)).size,
     won:      kpiRows.filter(r => r.bdStatus === 'Won').length,
@@ -1137,6 +1143,10 @@ export default function SolutionTracker({ onRefreshed, view }) {
       r => r.proposalId === form.proposalId && String(r.sno) !== String(skipSno)
     );
     const sameVersion = r => versionNo(r.proposalVersion) === versionNo(form.proposalVersion);
+    // BD Status: a replaced (older) version is Lost; the latest version follows the saved status
+    const latestV = Math.max(versionNo(form.proposalVersion), ...rows.filter(r => r.proposalId === form.proposalId).map(r => versionNo(r.proposalVersion)));
+    const formIsLatest = versionNo(form.proposalVersion) === latestV;
+    const statusFor = r => (versionNo(r.proposalVersion) < latestV ? 'Lost' : formIsLatest ? form.bdStatus : r.bdStatus);
     // Proposal link: copy to items of this version that have no link or still hold the
     // previous BD link — a link edited on a single Solution item is left as it is.
     const newLink = String(form.proposalV1Link || '').trim();
@@ -1149,22 +1159,23 @@ export default function SolutionTracker({ onRefreshed, view }) {
     const changed = otherRows.filter(r =>
       takesLink(r) || takesDiscussion(r) ||
       (form.submissionToClient && sameVersion(r) && r.submissionToClient !== form.submissionToClient) ||
-      (form.bdStatus && r.bdStatus !== form.bdStatus) ||
-      (form.bdStatus && r.solutionTopic && r.status !== form.bdStatus) ||
+      (statusFor(r) && r.bdStatus !== statusFor(r)) ||
+      (statusFor(r) && r.solutionTopic && r.status !== statusFor(r)) ||
       (form.opsChecklist && r.opsChecklist !== form.opsChecklist)
     );
     await Promise.all(changed.map(r => updateSolutionRow(r.sno, {
       ...r,
       ...(form.submissionToClient && sameVersion(r) ? { submissionToClient: form.submissionToClient } : {}),
       ...(takesDiscussion(r) ? { dateOfDiscussion: form.dateOfDiscussion } : {}),
-      ...(form.bdStatus ? { bdStatus: form.bdStatus } : {}),
-      ...(form.bdStatus && r.solutionTopic ? { status: form.bdStatus } : {}),
+      ...(statusFor(r) ? { bdStatus: statusFor(r) } : {}),
+      ...(statusFor(r) && r.solutionTopic ? { status: statusFor(r) } : {}),
       ...(form.opsChecklist ? { opsChecklist: form.opsChecklist } : {}),
       ...(takesLink(r) ? { proposalV1Link: newLink } : {}),
     })));
   }
 
   async function handleSaveBD(form) {
+    if (!form._revision && rows.some(r => r.proposalId === form.proposalId && versionNo(r.proposalVersion) > versionNo(form.proposalVersion))) form = { ...form, bdStatus: 'Lost' };   // replaced version
     if (needsChecklist(form)) { alert(`Please tick the Operations Checklist for this ${form.bdStatus} proposal.`); return; }
     const missingDates = [!form.dateOfDiscussion && 'Date of Discussion', !form.submissionToClient && 'Date of Submission to Client'].filter(Boolean);
     if (missingDates.length) { alert(`Please fill ${missingDates.join(' and ')} — every BD line needs both dates.`); return; }
@@ -1414,7 +1425,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
             <div className="kpi-card blue">
               <div className="kpi-label">In Process</div>
               <div className="kpi-value">{loading ? '…' : kpi.ipLines}</div>
-              <div className="kpi-sub">{kpi.inProc} unique · {kpi.lostLines} lost ({kpi.lost} unique)</div>
+              <div className="kpi-sub">{kpi.inProc} unique · {kpi.lostLines} lost ({kpi.lost} unique) · {fmtL(kpi.lostValue)}</div>
             </div>
           ) : (
             <div className="kpi-card blue">

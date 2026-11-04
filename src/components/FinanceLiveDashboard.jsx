@@ -29,6 +29,7 @@ import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts, invoi
 import { PERIODS, periodRange, periodLabelOf, inRange } from '../services/actionItems.js';
 // Same stage / overdue rules as the Finance Tracker page, so the two always agree
 import { financeStage, overdueDays } from '../pages/FinanceTracker.jsx';
+import { egItem, inrS } from './KpiListModal.jsx';
 import {
   LIVE_FROM_FY, FIN_REVENUE_L, FIN_INVOICES, FIN_BILLING_DAYS, FIN_AVG_PER_DAY, FIN_CREDIT_NOTES, FIN_TARGET_CR,
 } from '../config/dashboardBaseline.js';
@@ -163,10 +164,10 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     const revenue = revRows.reduce((s, r) => s + r.net, 0);         // Price + GST, travel excluded
     const tds = revRows.reduce((s, r) => s + tdsOf(r), 0);           // 10% of Price — deducted by the client, never credited
     const invoiced = inv.reduce((s, r) => s + r.net, 0);          // Price + GST, travel excluded
-    const paid = rows.filter(r => !r.cancelled && r.col > 0 && (r.rec ? inRange(r.rec, range) : (r.inv && inRange(r.inv, range))));
-    const collected = paid.reduce((s, r) => s + r.col, 0);
+    const paid = rows.filter(r => !r.cancelled && r.got > 0 && (r.rec ? inRange(r.rec, range) : (r.inv && inRange(r.inv, range))));
+    const collected = paid.reduce((s, r) => s + r.got, 0);   // sum of Amount Received
     const months = [...new Set(revRows.map(r => MONTHS[slot(revDate(r))]))];
-    return { invoices, revenueL: L(revenue), tdsL: L(tds), pendingL: L(revenue - collected - tds), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
+    return { invRows: inv, revList: revRows, paidRows: paid, invoices, revenueL: L(revenue), tdsL: L(tds), pendingL: L(revenue - collected - tds), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
       suspects: suspectReceipts(engagements) };
   }, [rows, range, basis, engagements]);   // eslint-disable-line react-hooks/exhaustive-deps
   const collectPct = pk.invoicedL > 0 ? Math.round((pk.collectedL / pk.invoicedL) * 100) : null;
@@ -199,7 +200,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   const toInvoice = useMemo(() => {
     const m = new Map();
     // Finance Tracker "To Invoice" + "Invoice Overdue" stages (engagement ended, no invoice yet)
-    rows.filter(r => ['Invoice Overdue', 'To Invoice'].includes(r.stage) && r.amount > 0)
+    rows.filter(r => r.amount > 0 && !r.inv && (['Invoice Overdue', 'To Invoice'].includes(r.stage) || (/^delivered$/i.test(clean(r.status)) && !['Cancelled', 'Not Applicable', 'Pro Bono'].includes(r.stage))))
       .forEach(r => {
         const k = `${keyOf(r.company)}|${keyOf(r.topic)}`;
         if (!m.has(k)) m.set(k, { client: clean(r.company), topic: clean(r.topic), amount: 0, first: r.end, last: r.end, po: clean(r.poStatus), sessions: 0 });
@@ -227,6 +228,15 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   const credit = FIN_CREDIT_NOTES[CURRENT_FY] || [];
   const target = FIN_TARGET_CR[CURRENT_FY];
   const yetL = Math.max(0, dueTotal - overdueTotal);
+  const marketL = toInvoiceL + yetL + overdueTotal;   // To be Raised + Yet to Receive + Overdue
+  const awaiting = dues.filter(d => !d.overdue), overdueList = dues.filter(d => d.overdue);
+  const dueItem = d => ({ ...egItem(d.r, inrS(d.open)), badge: d.overdue ? `Overdue · ${d.pastDays}d` : 'Awaiting', sub: `${clean(d.r.company)} · Inv ${d.r.invNo || '—'} · ${fmtDate(d.r.inv)} · due ${fmtDate(d.dueDate)}` });
+  const tiItem = t => ({ name: t.topic || '(No program)', sub: `${t.client} · ${t.first === t.last ? fmtDate(t.first) : `${fmtDate(t.first)} – ${fmtDate(t.last)}`}${t.sessions > 1 ? ` · ${t.sessions} sessions` : ''}`, right: inrS(t.amount), badge: 'To be raised' });
+  const L_ = {
+    inv: () => pk.invRows.map(r => egItem(r, inrS(r.net))), rev: () => pk.revList.map(r => egItem(r, inrS(r.net))),
+    col: () => pk.paidRows.map(r => ({ ...egItem(r, inrS(r.got)), badge: r.rec ? `Received ${fmtDate(r.rec)}` : 'Received' })), tds: () => pk.revList.map(r => egItem(r, inrS(tdsOf(r)))),
+    raise: () => toInvoice.map(tiItem), yet: () => awaiting.map(dueItem), od: () => overdueList.map(dueItem), mkt: () => [...overdueList.map(dueItem), ...awaiting.map(dueItem), ...toInvoice.map(tiItem)],
+  };
   const summary = [
     ['No. of Invoices Raised', fmtNum(curInvoices)],
     ['Total Revenue (L)', curRevL.toFixed(2)],
@@ -266,12 +276,12 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="kg g4">
-        <Kpi tone="gd" label="No. of Invoices Raised" value={fmtNum(pk.invoices)} sub={`Invoices raised · ${periodName}`} how="Distinct Invoice No with an Invoice date in the period (rows billed on one invoice count once); rows with no Invoice No count by Company + Invoice date; cancelled excluded." />
-        <Kpi tone="tl" label="Total Revenue" value={fmtL(pk.revenueL)} sub={pk.months.length && pk.months.length <= 4 ? `${pk.months.join(' + ')} · price + GST` : `${basis === 'invoice' ? 'Invoiced' : 'Delivered / scheduled'} price + GST · ${periodName}`}
+        <Kpi tone="gd" label="No. of Invoices Raised" list={L_.inv} value={fmtNum(pk.invoices)} sub={`Invoices raised · ${periodName}`} how="Distinct Invoice No with an Invoice date in the period (rows billed on one invoice count once); rows with no Invoice No count by Company + Invoice date; cancelled excluded." />
+        <Kpi tone="tl" label="Total Revenue" list={L_.rev} value={fmtL(pk.revenueL)} sub={pk.months.length && pk.months.length <= 4 ? `${pk.months.join(' + ')} · price + GST` : `${basis === 'invoice' ? 'Invoiced' : 'Delivered / scheduled'} price + GST · ${periodName}`}
              how={basis === 'invoice' ? 'Price (INR) + GST (18%) of rows whose Invoice date falls in the period; travel excluded, cancelled rows excluded. Revenue = Collection + TDS + still to collect.' : 'Price (INR) + GST (18%) of sessions whose start date falls in the period (cancelled / lost / postponed / on hold excluded); travel excluded. Revenue = Collection + TDS + still to collect.'} />
-        <Kpi tone="gn" label="Collection" value={fmtL(pk.collectedL)} sub={`${pk.payments} payment(s) · ${periodName}${collectPct != null ? ` · ${collectPct}% of ${fmtL(pk.invoicedL)} invoiced` : ''} · excl. travel & stay`} tag="Collected" tagTone="up"
+        <Kpi tone="gn" label="Collection" list={L_.col} value={fmtL(pk.collectedL)} sub={`${pk.payments} payment(s) · ${periodName}${collectPct != null ? ` · ${collectPct}% of ${fmtL(pk.invoicedL)} invoiced` : ''} · sum of Amount Received`} tag="Collected" tagTone="up"
              how="Sum of Amount Received on the Received Date in the period (Invoice date when Received Date is blank), travel & stay taken out, never above the invoice value." />
-        <Kpi tone="nv" label="TDS (Not Credited)" value={fmtL(pk.tdsL)} sub={`10% of price · ${periodName} · ${fmtL(pk.collectedL)} + ${fmtL(pk.tdsL)} + ${fmtL(Math.max(0, pk.pendingL))} to collect = ${fmtL(pk.revenueL)}`} tag="Deducted by client" tagTone="warn"
+        <Kpi tone="nv" label="TDS (Not Credited)" list={L_.tds} value={fmtL(pk.tdsL)} sub={`10% of price · ${periodName} · ${fmtL(pk.collectedL)} + ${fmtL(pk.tdsL)} + ${fmtL(Math.max(0, pk.pendingL))} to collect = ${fmtL(pk.revenueL)}`} tag="Deducted by client" tagTone="warn"
              how="TDS (10% of Price) on the same rows as Total Revenue — the client deducts it and pays it to the government, so it never reaches the bank. Collection + TDS + still to collect = Total Revenue; the last part also absorbs timing (payments this period for invoices of an earlier period)." />
       </div>
       {pk.suspects.length > 0 && (
@@ -281,10 +291,10 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
         </div>
       )}
       <div className="kg g4">
-        <Kpi tone="pu" label="To be Raised" value={fmtL(toInvoiceL)} sub={`${toInvoice.length} program(s) delivered, not yet invoiced`} tag="Pending" tagTone="warn" how="Price + GST (18%) − TDS (10%) + travel of sessions that have ended, are not cancelled / NA and have no Invoice date yet (all dates, not the period)." />
-        <Kpi tone="nv" label="Raised within Timeline – Yet to Receive" value={fmtL(yetL)} sub={`Invoiced, within ${CREDIT_DAYS}-day credit period`} tag="Within credit period" how="Unpaid balance — (Price + GST − TDS + travel) − amount received — of invoices raised less than 30 days ago; all years." />
-        <Kpi tone="rd" label="Raised within Timeline – Overdue" value={fmtL(overdueTotal)} sub="Past due date, pending collection" tag="Overdue" tagTone="bad" how="Unpaid balance of invoices whose Invoice date + 30 days has passed and that are not marked Received / NA." />
-        <Kpi tone="rd" label="Total Due in Market" value={fmtL(dueTotal)} sub={`${byClient.length} clients · all outstanding market dues`} tag="Watch" tagTone="bad" how="Yet to receive + Overdue: every invoice not marked Received / NA, any year — Price + GST − TDS + travel, less what has been received." />
+        <Kpi tone="pu" label="To be Raised" list={L_.raise} value={fmtL(toInvoiceL)} sub={`${toInvoice.length} program(s) delivered, not yet invoiced`} tag="Pending" tagTone="warn" how="Price + GST (18%) − TDS (10%) + travel of sessions that have ended, are not cancelled / NA and have no Invoice date yet (all dates, not the period)." />
+        <Kpi tone="nv" label="Raised within Timeline – Yet to Receive" list={L_.yet} value={fmtL(yetL)} sub={`${awaiting.length} invoice(s) awaiting payment, within ${CREDIT_DAYS} days`} tag="Within credit period" how="Unpaid balance — (Price + GST − TDS + travel) − amount received — of invoices raised less than 30 days ago; all years." />
+        <Kpi tone="rd" label="Raised within Timeline – Overdue" list={L_.od} value={fmtL(overdueTotal)} sub={`${overdueList.length} invoice(s) with payment overdue`} tag="Overdue" tagTone="bad" how="Unpaid balance of invoices whose Invoice date + 30 days has passed and that are not marked Received / NA." />
+        <Kpi tone="rd" label="Total Due in Market" list={L_.mkt} value={fmtL(marketL)} sub={`To be raised + yet to receive + overdue · ${byClient.length} clients invoiced`} tag="Watch" tagTone="bad" how="To be Raised + Raised within Timeline – Yet to Receive + Raised within Timeline – Overdue." />
       </div>
 
       <div className="cg c11">
@@ -294,16 +304,18 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
 
       <div className="cg c1">
         <div className="card"><h3>Outstanding Payments Due</h3>
-          <div className="cs">Total outstanding: {fmtL(dueTotal)} across {byClient.length} clients · Amount due now: {fmtL(overdueTotal)} ({byClient.filter(c => c.overdue > 0).length} clients) · values in Rs. Lakhs</div>
-          <div className="tbl-x"><table className="mt">
-            <thead><tr><th>Client / Description</th><th className="nr">Total Outstanding (L)</th><th>Due Dates</th><th>Credit Period</th><th className="nr">Amount Due (L)</th><th className="nr">Past Due Days</th></tr></thead>
+          <div className="cs">Invoices with payment overdue: {fmtL(overdueTotal)} across {overdueList.length} invoice(s), {new Set(overdueList.map(d => keyOf(d.r.company))).size} client(s)</div>
+          <div className="mt-scroll"><table className="mt">
+            <thead><tr><th>Client</th><th>Program</th><th>Invoice No.</th><th>Invoice Date</th><th>Due Date</th><th className="nr">Amount Due (Rs. L)</th><th>Past Due</th></tr></thead>
             <tbody>
-              {byClient.length === 0 && <tr><td colSpan={6} className="erd-empty">No outstanding invoices</td></tr>}
-              {byClient.map(c => (
-                <tr key={c.client}><td style={{ fontWeight: 600 }}>{c.client}</td><td className="nr">{L(c.out).toFixed(2)}</td><td>{[...c.dueMonths].join('-')}</td>
-                  <td>{CREDIT_DAYS} days</td><td className="nr" style={{ color: c.overdue > 0 ? RD : undefined }}>{L(c.overdue).toFixed(2)}</td><td className="nr">{c.past} Days</td></tr>
+              {overdueList.length === 0 && <tr><td colSpan={7} className="erd-empty">No overdue payments</td></tr>}
+              {overdueList.map((d, i) => (
+                <tr key={i}><td style={{ fontWeight: 600 }}>{clean(d.r.company)}</td><td>{clean(d.r.topic)}</td><td style={{ whiteSpace: 'nowrap' }}>{d.r.invNo || '—'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(d.r.inv)}</td><td style={{ whiteSpace: 'nowrap' }}>{fmtDate(d.dueDate)}</td>
+                  <td className="nr" style={{ whiteSpace: 'nowrap' }}>{L(d.open).toFixed(2)}</td>
+                  <td style={{ color: RD, fontWeight: 700 }}>{`${d.pastDays} days`}</td></tr>
               ))}
-              {byClient.length > 0 && <tr className="tot"><td>Total</td><td className="nr">{dueTotal.toFixed(2)}</td><td /><td /><td className="nr">{overdueTotal.toFixed(2)}</td><td /></tr>}
+              {overdueList.length > 0 && <tr className="tot"><td>Total</td><td /><td /><td /><td /><td className="nr">{overdueTotal.toFixed(2)}</td><td /></tr>}
             </tbody>
           </table></div>
         </div>
@@ -311,16 +323,18 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
 
       <div className="cg c1">
         <div className="card"><h3>Outstanding Payments — Invoice-Level Breakdown</h3>
-          <div className="cs">Invoice-level dues: {fmtL(dueTotal)} across {dues.length} line items</div>
+          <div className="cs">Invoices awaiting payment (within credit period): {fmtL(yetL)} across {awaiting.length} invoice(s)</div>
           <div className="mt-scroll"><table className="mt">
-            <thead><tr><th>Client / Description</th><th className="nr">Amount Due (Rs. L)</th><th>Invoice Date</th><th>Due Date</th><th>Type</th></tr></thead>
+            <thead><tr><th>Client</th><th>Program</th><th>Invoice No.</th><th>Invoice Date</th><th>Due Date</th><th className="nr">Amount Due (Rs. L)</th><th>Status</th></tr></thead>
             <tbody>
-              {dues.map((d, i) => (
-                <tr key={i}><td>{clean(d.r.company)} — <span style={{ opacity: 0.75 }}>{clean(d.r.topic)}</span></td><td className="nr" style={{ whiteSpace: 'nowrap' }}>{L(d.open).toFixed(2)}</td>
+              {awaiting.length === 0 && <tr><td colSpan={7} className="erd-empty">No invoices awaiting payment</td></tr>}
+              {awaiting.map((d, i) => (
+                <tr key={i}><td style={{ fontWeight: 600 }}>{clean(d.r.company)}</td><td>{clean(d.r.topic)}</td><td style={{ whiteSpace: 'nowrap' }}>{d.r.invNo || '—'}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(d.r.inv)}</td><td style={{ whiteSpace: 'nowrap' }}>{fmtDate(d.dueDate)}</td>
-                  <td style={{ color: d.overdue ? RD : undefined, fontWeight: d.overdue ? 700 : 400 }}>{d.overdue ? `Overdue · ${d.pastDays} days` : d.r.p === 'Partly Received' ? 'Partly received' : 'Within credit period'}</td></tr>
+                  <td className="nr" style={{ whiteSpace: 'nowrap' }}>{L(d.open).toFixed(2)}</td>
+                  <td>{d.r.p === 'Partly Received' ? 'Partly received' : `${daysBetween(todayISO, d.dueDate)} days left`}</td></tr>
               ))}
-              {dues.length > 0 && <tr className="tot"><td>Total</td><td className="nr">{dueTotal.toFixed(2)}</td><td /><td /><td /></tr>}
+              {awaiting.length > 0 && <tr className="tot"><td>Total</td><td /><td /><td /><td /><td className="nr">{yetL.toFixed(2)}</td><td /></tr>}
             </tbody>
           </table></div>
         </div>
@@ -340,15 +354,6 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
               ))}
               {toInvoice.length > 0 && <tr className="tot"><td>Total</td><td className="nr">{toInvoiceL.toFixed(2)}</td><td /><td /><td /></tr>}
             </tbody>
-          </table></div>
-        </div>
-      </div>
-
-      <div className="cg c1">
-        <div className="card"><h3>Invoice &amp; Payment Summary</h3><div className="cs">{curName} — calculated live from the Engagement Calendar finance columns</div>
-          <div className="tbl-x"><table className="mt">
-            <thead><tr><th>Field</th><th className="nr">Value</th></tr></thead>
-            <tbody>{summary.map(([k, v]) => <tr key={k}><td style={{ fontWeight: 600 }}>{k}</td><td className="nr">{v}</td></tr>)}</tbody>
           </table></div>
         </div>
       </div>

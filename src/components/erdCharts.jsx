@@ -5,6 +5,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import './erdDashboard.css';
+import KpiListModal, { useDrill, drillItems } from './KpiListModal.jsx';
 
 const SCRIPTS = [
   ['Chart', 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'],
@@ -51,13 +52,31 @@ export function loadChartJs() {
 }
 
 /** One Chart.js chart. `config` must be memoised — a new object redraws the chart. */
-export function ChartBox({ config, className = 'ch-wrap', height }) {
+export function ChartBox({ config, className = 'ch-wrap', height, listFor, title }) {
   const canvas = useRef(null);
   const [err, setErr] = useState(null);
+  const [pick, setPick] = useState(null);
+  const drill = useDrill();
+  const lf = useRef(listFor); lf.current = listFor;
+  const dr = useRef(drill); dr.current = drill;
   useEffect(() => {
     let chart = null, dead = false;
     loadChartJs()
-      .then(Chart => { if (!dead && canvas.current) chart = new Chart(canvas.current.getContext('2d'), config); })
+      .then(Chart => {
+        if (dead || !canvas.current) return;
+        const onClick = (ev, els, ch) => {
+          const el = els?.[0]; if (!el) return;
+          const label = String(ch.data.labels?.[el.index] ?? ''), ds = ch.data.datasets[el.datasetIndex] || {};
+          const raw = ds.data?.[el.index], value = typeof raw === 'object' && raw ? (raw.y ?? raw.x) : raw;
+          const items = lf.current ? lf.current(label, ds.label || '', value)
+            : drillItems(dr.current, label, ds.label || '') ||
+            // default: every series' value at the tapped point
+              ch.data.datasets.map(d => { const r = d.data?.[el.index]; return { name: d.label || label, sub: label, right: r == null ? '—' : String(typeof r === 'object' ? (r.y ?? r.x) : r) }; });
+          setPick({ title: [label, ds.label].filter(Boolean).join(' · '), items });
+        };
+        const opts = { ...(config.options || {}), onClick, onHover: (ev, els) => { ev.native && (ev.native.target.style.cursor = els.length ? 'pointer' : 'default'); } };
+        chart = new Chart(canvas.current.getContext('2d'), { ...config, options: opts });
+      })
       .catch(e => setErr(e.message));
     return () => { dead = true; chart?.destroy(); };
   }, [config]);
@@ -65,6 +84,7 @@ export function ChartBox({ config, className = 'ch-wrap', height }) {
     <div className={className} style={height ? { height } : undefined}>
       {err ? <div className="erd-err">Charts could not load ({err}). Check the internet connection and refresh.</div>
            : <canvas ref={canvas} />}
+      {pick && <KpiListModal title={title ? `${title} — ${pick.title}` : pick.title} items={pick.items} onClose={() => setPick(null)} />}
     </div>
   );
 }
@@ -143,9 +163,11 @@ export const clean = v => String(v ?? '').replace(/ /g, ' ').replace(/\s+/g, ' 
 export const keyOf = v => clean(v).toLowerCase();
 
 /** Small KPI tile, same look as the HTML report. `how` = one line saying how the figure is calculated. */
-export function Kpi({ tone, label, value, sub, tag, tagTone = 'info', how }) {
+export function Kpi({ tone, label, value, sub, tag, tagTone = 'info', how, list, listSub }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className={`kpi ${tone}`}>
+    <div className={`kpi ${tone}`} onClick={list ? () => setOpen(true) : undefined} style={list ? { cursor: 'pointer' } : undefined} title={list ? 'Click to see the list' : undefined}>
+      {open && <div onClick={e => e.stopPropagation()}><KpiListModal title={label} sub={listSub} items={list} onClose={() => setOpen(false)} /></div>}
       <div className="lb">{label}</div>
       <div className="vl">{value}</div>
       <div className="sb">{sub}</div>

@@ -260,12 +260,13 @@ export async function updateECFinanceAmounts(engagementKey, amounts, hintDate, e
 export const EC_FINANCE_FIELDS = ['invoiceNo', 'invoice', 'payment', 'receivedDate', 'amountReceived', 'travelExpenses', 'gst', 'travelInvoiceRaised', 'travelInvoiceDate', 'travelReceived', 'travelReceivedAmount', 'travelReceivedDate'];
 
 /** Fixed Payment status values (the EC 'Payment' column). */
-export const PAYMENT_OPTIONS = ['Invoice Not Raised', 'Invoice Raised', 'Partly Received', 'Received', 'NA'];
+export const PAYMENT_OPTIONS = ['Invoice Not Raised', 'Invoice Raised', 'Partly Received', 'Received', 'NA', 'Pro Bono'];
 
 /** Reads any older free-text Payment value as one of PAYMENT_OPTIONS ('' when unknown / blank). */
 export function normPayment(v) {
   const s = String(v ?? '').trim().toLowerCase();
   if (!s) return '';
+  if (/pro\s*-?\s*bono/.test(s)) return 'Pro Bono';
   if (/not\s*raised/.test(s)) return 'Invoice Not Raised';
   if (/part/.test(s)) return 'Partly Received';
   if (/^n\/?a$|not applicable/.test(s)) return 'NA';
@@ -283,10 +284,10 @@ export function ecToOcFinance(ec, changedKeys) {
   if (ch.has('payment')) {
     const p = normPayment(ec.payment);
     out.invoiceGenerated = p === 'Invoice Not Raised' ? 'Not Raised'
-                         : p === 'NA' ? 'NA'
+                         : (p === 'NA' || p === 'Pro Bono') ? 'NA'
                          : p ? 'Raised' : '';
     out.paymentReceived  = p === 'Received' ? 'Yes'
-                         : p === 'NA' ? 'NA'
+                         : (p === 'NA' || p === 'Pro Bono') ? 'NA'
                          : (p === 'Invoice Raised' || p === 'Partly Received') ? 'No' : '';
   }
   return out;

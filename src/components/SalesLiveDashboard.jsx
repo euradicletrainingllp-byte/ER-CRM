@@ -19,6 +19,8 @@ import {
   CURRENT_FY, fyStartOf, fyLong, fyTiny, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
 import { buildProposalLines, monthSlot, uniqueProposals } from './proposalData.js';
+import { egItem, propItem, inrS } from './KpiListModal.jsx';
+
 import { LIVE_FROM_FY, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
 
 const MONTHS = ['April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
@@ -219,12 +221,12 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
                   fixed="earlier quarterly revenue, targets and client history from Dashboard Report Data (12 Oct 2026)" />
 
       <div className="kg g5">
-        <Kpi tone="tl" label="Total Proposals (YTD)" value={tot.n} sub={`${uniqueProposals(curProps)} unique proposals${tot.n > uniqueProposals(curProps) ? ` · ${tot.n - uniqueProposals(curProps)} revisions` : ''}`} how="Proposal lines (Proposal ID + version) dated in this FY — month from Date of Discussion, else BD Month, else submission dates; each revision counts again." />
-        <Kpi tone="gn" label="Won Value (YTD)" value={fmtInr(tot.wonV)} sub={`${tot.wonC} proposals won`} tag="Closed" tagTone="up" how="Sum of BD Proposal Value of this FY's lines with BD Status = Won (BD value only — Solution values not used)." />
-        <Kpi tone="gd" label="In-Process Value" value={fmtInr(tot.ipV)} sub={`${tot.ipC} proposals active`} tag="In negotiation" how="Sum of BD Proposal Value of this FY's lines still In Process in the BD Tracker." />
-        <Kpi tone="nv" label={`${curTarget?.q || `Q${curQ + 1}`} Target Achieved`} value={curTarget?.target ? `${curTarget.pct.toFixed(1)}%` : '--'}
+        <Kpi tone="tl" label="Total Proposals (YTD)" list={() => curProps.map(p => propItem(p))} value={tot.n} sub={`${uniqueProposals(curProps)} unique proposals${tot.n > uniqueProposals(curProps) ? ` · ${tot.n - uniqueProposals(curProps)} revisions` : ''}`} how="Proposal lines (Proposal ID + version) dated in this FY — month from Date of Discussion, else BD Month, else submission dates; each revision counts again." />
+        <Kpi tone="gn" label="Won Value (YTD)" list={() => curProps.filter(p => /won/i.test(p.status)).map(p => propItem(p))} value={fmtInr(tot.wonV)} sub={`${tot.wonC} proposals won`} tag="Closed" tagTone="up" how="Sum of BD Proposal Value of this FY's lines with BD Status = Won (BD value only — Solution values not used)." />
+        <Kpi tone="gd" label="In-Process Value" list={() => curProps.filter(p => /in.?process/i.test(p.status)).map(p => propItem(p))} value={fmtInr(tot.ipV)} sub={`${tot.ipC} proposals active`} tag="In negotiation" how="Sum of BD Proposal Value of this FY's lines still In Process in the BD Tracker." />
+        <Kpi tone="nv" label={`${curTarget?.q || `Q${curQ + 1}`} Target Achieved`} list={() => sessions.filter(e => e.fy === CURRENT_FY && Math.floor(((+e.startDate.slice(5, 7) + 8) % 12) / 3) === curQ).map(e => egItem(e))} value={curTarget?.target ? `${curTarget.pct.toFixed(1)}%` : '--'}
              sub={curTarget?.target ? `of ${fmtInr(curTarget.target)} ${curTarget.q} target` : 'no target set for this quarter'} how="Engagement Calendar Price (INR) of sessions starting this quarter (cancelled / lost / on hold excluded) ÷ the quarter's revenue target." />
-        <Kpi tone="pu" label="Total Unique Clients" value={clientYears.unique} sub="Since inception, till date" tag="All-time" how="Distinct client names — earlier years from the baseline report plus every Engagement Calendar company from FY 2026-27 (name variants merged)." />
+        <Kpi tone="pu" label="Total Unique Clients" list={() => { const m = new Map(); (engagements || []).forEach(e => { const k = String(e.company || '').trim(); if (k) { const g = m.get(k.toLowerCase()) || { name: k, n: 0, last: '' }; g.n++; if ((e.startDate || '') > g.last) g.last = e.startDate || ''; m.set(k.toLowerCase(), g); } }); return [...m.values()].sort((a, b) => b.n - a.n).map(g => ({ name: g.name, sub: `Last session ${g.last || 'TBD'}`, right: `${g.n} session${g.n > 1 ? 's' : ''}` })); }} value={clientYears.unique} sub="Since inception, till date" tag="All-time" how="Distinct client names — earlier years from the baseline report plus every Engagement Calendar company from FY 2026-27 (name variants merged)." />
       </div>
 
       <div className="cg c1">

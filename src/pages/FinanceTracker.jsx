@@ -66,7 +66,9 @@ const dueColor = due => {
 const num = v => money(v);
 const inr = v => (v === '' || v == null ? '—' : '₹ ' + num(v).toLocaleString('en-IN', { maximumFractionDigits: 2 }));
 // Total still expected from the client: Price + GST (18%) − TDS (10%) + Travel, Stay & Misc
-export const totalOf = e => expectedOf(e);
+/** NA / Pro Bono / Cancelled = not billed → nothing to receive. */
+export const notBilled = e => normPayment(e?.payment) === 'NA' || isProBono(e) || /cancel/i.test(String(e?.status ?? ''));
+export const totalOf = e => (notBilled(e) ? 0 : expectedOf(e));
 const keyOf = r => String(r?.engagementKey ?? '').trim();   // hidden save key (Excel flows)
 const snoOf = r => String(r?.sno ?? '').trim();             // reference shown to people
 const validYear = v => { const y = Number(String(v).slice(0, 4)); return y >= 2000 && y <= 2099; };
@@ -80,6 +82,7 @@ const STAGES = {
   'Awaiting Payment': { color: '#1d4ed8', bg: '#dbeafe' },
   'Partly Received':  { color: '#7c3aed', bg: '#ede9fe' },
   'Received':         { color: '#065f46', bg: '#dcfce7' },
+  'Pro Bono':         { color: '#3E3264', bg: '#f3eef7' },
   'Not Applicable':   { color: '#6b7280', bg: '#f3f4f6' },
   'Cancelled':        { color: '#6b7280', bg: '#f3f4f6' },
 };
@@ -88,12 +91,15 @@ export function financeDates(e) {
   const payDue = toIso(e.invoice) ? addDays(toIso(e.invoice), 30) : null;
   return { invDue, payDue };
 }
+/** "Pro bono" anywhere in payment / contract / status / price / comments = not billed. */
+export const isProBono = e => normPayment(e?.payment) === 'Pro Bono' || ['payment', 'contract', 'poStatus', 'status', 'price', 'comments'].some(k => /pro\s*-?\s*bono/i.test(String(e?.[k] ?? '')));
 export function financeStage(e) {
   const { invDue, payDue } = financeDates(e);
   const today = todayIso();
   const p = normPayment(e.payment);
   if (/cancel/i.test(String(e.status ?? ''))) return 'Cancelled';
   if (p === 'Received') return 'Received';
+  if (isProBono(e)) return 'Pro Bono';
   if (p === 'NA') return 'Not Applicable';
   if (p === 'Partly Received') return 'Partly Received';
   if (p === 'Invoice Raised' || toIso(e.invoice)) return payDue && payDue < today ? 'Payment Overdue' : 'Awaiting Payment';
@@ -107,7 +113,7 @@ export function overdueDays(e) {
   const inv = toIso(e.invoice);
   if (!inv) return 0;
   const p = normPayment(e.payment);
-  if (p === 'Received' || p === 'NA' || /cancel/i.test(String(e.status ?? ''))) return 0;
+  if (p === 'Received' || p === 'NA' || isProBono(e) || /cancel/i.test(String(e.status ?? ''))) return 0;
   const due = addDays(inv, 30);
   const days = Math.floor((new Date(todayIso()) - new Date(due)) / 86400000);
   return days > 0 ? days : 0;
@@ -131,7 +137,7 @@ function StageBadge({ stage }) {
 function autoPayment(next) {
   const p = normPayment(next.payment);
   const total = totalOf(next), got = num(next.amountReceived);
-  if (p === 'NA') return next.payment;
+  if (p === 'NA' || p === 'Pro Bono') return next.payment;
   if (toIso(next.receivedDate) || got > 0) {
     if (total > 0 && got > 0 && got < total) return 'Partly Received';
     if (toIso(next.receivedDate) || (total > 0 && got >= total)) return 'Received';
@@ -467,6 +473,7 @@ export default function FinanceTracker({ onRefreshed }) {
       : stageF === 'All To Invoice' ? ['Invoice Overdue', 'To Invoice'].includes(r._stage)
       : stageF === 'All Awaiting Payment' ? ['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r._stage)
       : stageF === 'Overdue (30+ days)' ? overdueDays(r) > 0
+      : stageF === 'Not Billed' ? ['Pro Bono', 'Not Applicable'].includes(r._stage)
       : r._stage === stageF);
     return mQ && mS;
   }).sort((a, b) => String(a.startDate || '9999').localeCompare(String(b.startDate || '9999')) || (Number(snoOf(a)) || 1e9) - (Number(snoOf(b)) || 1e9)),
@@ -507,6 +514,15 @@ export default function FinanceTracker({ onRefreshed }) {
     return !q ? rows : rows.filter(r => [r.company, r.topic, r.egId, r.sno, r.consultant1, r.invoiceNo].some(v => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, search]);
   const count = (...st) => kpiRows.filter(r => st.includes(r._stage)).length;
+  // Overdue filters: cards also show the pending amount of the overdue rows
+  const overdueF = ['Needs Action', 'Invoice Overdue', 'Payment Overdue', 'Overdue (30+ days)'].includes(stageF);
+  const pendingOf = list => list.reduce((s, r) => s + Math.max(0, totalOf(r) - num(r.amountReceived)), 0);
+  const odInvoice = overdueF ? pendingOf(kpiRows.filter(r => r._stage === 'Invoice Overdue')) : 0;
+  const odPayment = overdueF ? pendingOf(kpiRows.filter(r => overdueDays(r) > 0)) : 0;
+  const tapCard = st => { setStageF(st); requestAnimationFrame(() => document.querySelector('.fin-list-scroll')?.scrollTo({ top: 0 })); };
+  const activeCard = (...st) => (st.includes(stageF) ? { outline: '2px solid #AA78A6', outlineOffset: -2 } : {});
+  const notBilledN = kpiRows.filter(r => ['Pro Bono', 'Not Applicable'].includes(r._stage)).length;
+  const pendSub = v => overdueF && <div className="kpi-sub" style={{ color: 'var(--red)', fontWeight: 600 }}>Pending {inr(v)}</div>;
 
   // Pending-fields bar: engagements with finance details due but empty, in the list order
   const pendingBar = useMemo(() => pendingItems(filtered.filter(r => keyOf(r)), FIN_RULES, r => ({
@@ -632,17 +648,20 @@ export default function FinanceTracker({ onRefreshed }) {
 
       {/* KPIs — click to filter */}
       <div className="kpi-compact">
-        <div className="kpi-card accent" style={{ cursor: 'pointer' }} onClick={() => setStageF('All')}>
-          <div className="kpi-label">Engagements · {rangeLabel}</div><div className="kpi-value">{kpiRows.length}</div>{(kpiRows.length !== rows.length || filtered.length !== kpiRows.length) && <div className="kpi-sub">{filtered.length !== kpiRows.length ? `${filtered.length} in list · ` : ''}of {rows.length} in period</div>}
+        <div className="kpi-card accent" style={{ cursor: 'pointer', ...activeCard('All') }} onClick={() => tapCard('All')}>
+          <div className="kpi-label">Engagements · {rangeLabel}</div><div className="kpi-value">{kpiRows.length}</div>{pendSub(odInvoice + odPayment)}{(kpiRows.length !== rows.length || filtered.length !== kpiRows.length) && <div className="kpi-sub">{filtered.length !== kpiRows.length ? `${filtered.length} in list · ` : ''}of {rows.length} in period</div>}
         </div>
-        <div className="kpi-card" style={{ cursor: 'pointer' }} onClick={() => setStageF('All To Invoice')} title="Engagement ended, invoice not raised yet">
-          <div className="kpi-label">To Invoice</div><div className="kpi-value">{count('Invoice Overdue', 'To Invoice')}{overdueTag(count('Invoice Overdue'))}</div>
+        <div className="kpi-card" style={{ cursor: 'pointer', ...activeCard('All To Invoice', 'Invoice Overdue', 'To Invoice') }} onClick={() => tapCard(overdueF ? 'Invoice Overdue' : 'All To Invoice')} title="Engagement ended, invoice not raised yet">
+          <div className="kpi-label">To Invoice</div><div className="kpi-value">{count('Invoice Overdue', 'To Invoice')}{overdueTag(count('Invoice Overdue'))}</div>{pendSub(odInvoice)}
         </div>
-        <div className="kpi-card blue" style={{ cursor: 'pointer' }} onClick={() => setStageF('All Awaiting Payment')} title="Invoice raised, not fully paid">
-          <div className="kpi-label">Awaiting Payment</div><div className="kpi-value">{count('Awaiting Payment', 'Payment Overdue', 'Partly Received')}{overdueTag(kpiRows.filter(r => overdueDays(r) > 0).length)}</div>
+        <div className="kpi-card blue" style={{ cursor: 'pointer', ...activeCard('All Awaiting Payment', 'Overdue (30+ days)', 'Payment Overdue', 'Awaiting Payment', 'Partly Received') }} onClick={() => tapCard(overdueF ? 'Overdue (30+ days)' : 'All Awaiting Payment')} title="Invoice raised, not fully paid">
+          <div className="kpi-label">Awaiting Payment</div><div className="kpi-value">{count('Awaiting Payment', 'Payment Overdue', 'Partly Received')}{overdueTag(kpiRows.filter(r => overdueDays(r) > 0).length)}</div>{pendSub(odPayment)}
         </div>
-        <div className="kpi-card green" style={{ cursor: 'pointer' }} onClick={() => setStageF('Received')}>
+        <div className="kpi-card green" style={{ cursor: 'pointer', ...activeCard('Received') }} onClick={() => tapCard('Received')}>
           <div className="kpi-label">Received</div><div className="kpi-value">{count('Received')}</div>
+        </div>
+        <div className="kpi-card" style={{ cursor: 'pointer', ...activeCard('Not Billed') }} onClick={() => tapCard('Not Billed')} title="Payment Status NA or Pro Bono — not billed">
+          <div className="kpi-label">Not Billed</div><div className="kpi-value">{notBilledN}</div><div className="kpi-sub">NA · Pro Bono</div>
         </div>
       </div>
 
@@ -669,7 +688,7 @@ export default function FinanceTracker({ onRefreshed }) {
             {monthF !== todayIso().slice(0, 7) && <button className="btn btn-outline btn-sm" onClick={goThisMonth}>This month</button>}
             <input className="form-input wide" placeholder="🔍 Company, topic, EG.ID, S No, Invoice No…" value={search} onChange={e => setSearch(e.target.value)} />
             <select className="form-input" value={stageF} onChange={e => setStageF(e.target.value)}>
-              {['All', 'Overdue (30+ days)', 'Needs Action', 'All To Invoice', 'All Awaiting Payment', ...Object.keys(STAGES)].map(s => <option key={s}>{s}</option>)}
+              {['All', 'Overdue (30+ days)', 'Needs Action', 'All To Invoice', 'All Awaiting Payment', 'Not Billed', ...Object.keys(STAGES)].map(s => <option key={s}>{s}</option>)}
             </select>
             {nextUpKey && <button className="btn btn-outline btn-sm" onClick={() => setScrollNonce(n => n + 1)} title="Scroll to the next upcoming delivery">⏭ Next up</button>}
             <button className="btn btn-outline btn-sm" onClick={() => load({ force: true, keepCurrent: true })} disabled={syncing} title={syncing ? 'Refreshing from Excel…' : 'Refresh'}>{syncing ? '⟳' : '↺'}</button>
@@ -681,7 +700,7 @@ export default function FinanceTracker({ onRefreshed }) {
               <span className="card-title">💰 Engagements</span>
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>{syncing && !rangeLoading ? '⟳ ' : ''}{filtered.length} of {rows.length}</span>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto' }}>
+            <div className="fin-list-scroll" style={{ flex: 1, overflowY: 'auto' }}>
               {rangeLoading
                 ? Array.from({ length: 6 }).map((_, i) => <div key={i} className="ec-skel" style={{ height: 64, margin: '8px 12px', borderRadius: 8, background: '#f1f5f9' }} />)
                 : filtered.length === 0

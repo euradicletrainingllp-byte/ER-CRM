@@ -110,6 +110,11 @@ export function buildProposalLines(solutions) {
     rows.forEach(r => { const n = effVersion(r); if (!groups.has(n)) groups.set(n, []); groups.get(n).push(r); });
     const top = Math.max(...groups.keys());
     const all = rows;
+    // Replaced versions: Lost, valued at (own − latest version) (V1 10L, latest 8L = 2L lost; latest 12L = 0)
+    const vKeys = [...groups.keys()].sort((a, b) => a - b);
+    const bdOf = vr => { const a = vr.find(hasBdNo) || vr[0]; return toRupees(a.bdProposalValue) || Math.max(0, ...vr.map(r => toRupees(r.bdProposalValue))); };
+    const solOf = vr => vr.reduce((sum, r) => sum + toRupees(r.solutionValue), 0);
+    const nextOf = () => groups.get(top);   // compare with the latest version
     groups.forEach((vr, n) => {
       const anchor = vr.find(hasBdNo) || vr[0];
       const lineRows = [anchor, ...vr.filter(r => r !== anchor)];
@@ -126,17 +131,19 @@ export function buildProposalLines(solutions) {
       const date = pickDate(fl) || pickDate(f);
 
       const client = clean(anchor.clientName) || clean(f('clientName'));
-      const bdValue = toRupees(anchor.bdProposalValue) || Math.max(0, ...vr.map(r => toRupees(r.bdProposalValue)));
-      const solValue = vr.reduce((sum, r) => sum + toRupees(r.solutionValue), 0);
+      const isLatest = n === top;
+      const bdFull = bdOf(vr), solFull = solOf(vr), nx = isLatest ? null : nextOf(n);
+      const bdValue = nx ? Math.max(0, bdFull - bdOf(nx)) : bdFull;
+      const solValue = nx ? Math.max(0, solFull - solOf(nx)) : solFull;
+      const lineStatus = isLatest ? (clean(anchor.bdStatus) || clean(f('bdStatus'))) : 'Lost';
       const solCount = vr.filter(r => clean(r.solutionTopic)).length;   // solution items in this version
       const quotedValue = bdValue || solValue;
-      const isLatest = n === top;
       out.push({
         id, version: n, key: `${id}|${n}`, isLatest, versionCount: groups.size,
         client,
         topic: clean(anchor.programTopic) || clean(f('programTopic')) || clean(f('solutionTopic')),
         link: clean(fl('proposalV1Link')) || clean(f('proposalV1Link')),
-        status: clean(anchor.bdStatus) || clean(f('bdStatus')),
+        status: lineStatus, replaced: !isLatest, bdFull, solFull,
         oppKey,
         bdNo: clean(anchor.bdSNo),   // this version's own BD S No
         date,
@@ -146,9 +153,10 @@ export function buildProposalLines(solutions) {
         quotedValue,
         value: quotedValue,
         bdValue,     // BD Proposal Value only — used by the Sales tab (matches the BD Tracker)
+        solTopics: [...new Set(vr.map(r => clean(r.solutionTopic).toLowerCase().replace(/\s+/g, ' ')).filter(Boolean))],
         solCount,    // number of solution items (rows with a Solution Topic) in this version
         solValue,    // Solution Values only — used by the Solutioning tab (matches the Solution Tracker)
-        pipeline: pipelineOf(clean(anchor.bdStatus) || f('bdStatus'), f('status')),
+        pipeline: isLatest ? pipelineOf(clean(anchor.bdStatus) || f('bdStatus'), f('status')) : 'lost',
         industry: clean(f('industry')) || industryFromConfig(client),
         developmentCategory: f('developmentCategory'), engagementType: f('engagementType'),
         lineOfService: f('lineOfService'), typeOfService: f('typeOfService'),

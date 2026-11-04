@@ -6,6 +6,7 @@ import { getAllEngagementsResilient, peekAllEngagements, peekList, onListChange,
 import { clScore } from './OpsChecklist.jsx';                         // same readiness score as the Ops Checklist page
 import { buildProposalLines, uniqueProposals } from '../components/proposalData.js';   // same proposal rule as the BD Tracker
 import { refreshToday } from '../components/erdCharts.jsx';
+import { DrillContext, egItem, propItem } from '../components/KpiListModal.jsx';
 import OpsLiveDashboard from '../components/OpsLiveDashboard.jsx';
 import SolLiveDashboard from '../components/SolLiveDashboard.jsx';
 import SalesLiveDashboard from '../components/SalesLiveDashboard.jsx';
@@ -222,32 +223,32 @@ export default function Dashboard({ onRefreshed }) {
         loading ? (
           <LoadingState message="Loading Engagement Calendar finance data…" />
         ) : (
-          <FinanceLiveDashboard engagements={engData} refreshing={refreshing} />
+          <DrillContext.Provider value={{ engagements: engData }}><FinanceLiveDashboard engagements={engData} refreshing={refreshing} /></DrillContext.Provider>
         )
       ) : tab === 'sales' ? (
         !solData || loading ? (
           <LoadingState message="Loading BD Tracker and Engagement Calendar…" />
         ) : (
-          <SalesLiveDashboard solutions={solData} engagements={engData} refreshing={refreshing} />
+          <DrillContext.Provider value={{ engagements: engData, proposals: bdLines, val: 'bd', prefer: 'prop' }}><SalesLiveDashboard solutions={solData} engagements={engData} refreshing={refreshing} /></DrillContext.Provider>
         )
       ) : tab === 'solutioning' ? (
         !solData ? (
           <LoadingState message="Loading Solution Tracker and BD Tracker…" />
         ) : (
-          <SolLiveDashboard solutions={solData} refreshing={refreshing} />
+          <DrillContext.Provider value={{ proposals: bdLines, val: 'sol', prefer: 'prop' }}><SolLiveDashboard solutions={solData} refreshing={refreshing} /></DrillContext.Provider>
         )
       ) : loading ? (
         <LoadingState message="Loading CRM data from OneDrive Excel…" />
       ) : tab === 'operations' ? (
-        <OpsLiveDashboard engagements={engData} refreshing={refreshing} />
+        <DrillContext.Provider value={{ engagements: engData }}><OpsLiveDashboard engagements={engData} refreshing={refreshing} /></DrillContext.Provider>
       ) : (
       <>
       {/* KPIs */}
       <div className="kpi-grid">
-        <KPICard label="Total Engagements" value={engData.length} sub="All time from Excel" icon="📋" variant="accent" how="Count of every Engagement Calendar row with a company — all years, all statuses." />
-        <KPICard label="Revenue — Delivered" value={fmt(revenue)} sub={`${delivered.length} delivered sessions`} icon="💰" variant="green" how="Sum of Price (INR) of rows with Status = Delivered, all years; GST and travel excluded." />
-        <KPICard label="Scheduled Sessions" value={scheduled} sub={`${tentative} tentative`} icon="🗓" variant="blue" how="Rows with Status = Scheduled (any date); the sub-line counts Status = Tentative." />
-        <KPICard label="BD Prospects" value={solData ? bdCount : '…'} sub={solData ? `Unique proposals in BD Tracker${bdLines.length > bdCount ? ` · ${bdLines.length} incl. revisions` : ''}` : 'Loading BD Tracker…'} icon="🎯" variant="purple" how="Unique Proposal IDs in the BD Tracker; revisions (V2, V3 …) of the same proposal count once." />
+        <KPICard label="Total Engagements" list={() => engData.map(e => egItem(e))} value={engData.length} sub="All time from Excel" icon="📋" variant="accent" how="Count of every Engagement Calendar row with a company — all years, all statuses." />
+        <KPICard label="Revenue — Delivered" list={() => delivered.map(e => egItem(e))} value={fmt(revenue)} sub={`${delivered.length} delivered sessions`} icon="💰" variant="green" how="Sum of Price (INR) of rows with Status = Delivered, all years; GST and travel excluded." />
+        <KPICard label="Scheduled Sessions" list={() => engData.filter(e => /^(scheduled|tentative)$/i.test(String(e.status ?? '').trim())).sort((a, b) => String(a.startDate || '9').localeCompare(String(b.startDate || '9'))).map(e => egItem(e))} value={scheduled} sub={`${tentative} tentative`} icon="🗓" variant="blue" how="Rows with Status = Scheduled (any date); the sub-line counts Status = Tentative." />
+        <KPICard label="BD Prospects" list={() => bdLines.filter(p => p.isLatest).map(p => propItem(p))} value={solData ? bdCount : '…'} sub={solData ? `Unique proposals in BD Tracker${bdLines.length > bdCount ? ` · ${bdLines.length} incl. revisions` : ''}` : 'Loading BD Tracker…'} icon="🎯" variant="purple" how="Unique Proposal IDs in the BD Tracker; revisions (V2, V3 …) of the same proposal count once." />
       </div>
 
       <div className="grid-2">

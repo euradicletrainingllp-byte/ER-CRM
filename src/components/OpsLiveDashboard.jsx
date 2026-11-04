@@ -21,8 +21,14 @@ import { LIVE_FROM_FY, OPS_FY, OPS_CONSULTANT_PREV, OPS_CLIENT_PREV, OPS_FEEDBAC
 
 const NOT_A_PERSON = /^(euradicle|er pmo team|tbd|na|n\/a|-|—)$/i;
 const isDelivered = e => /^delivered$/i.test(clean(e.status));
-const isUpcoming  = e => /^(scheduled|tentative|re-?schedule)$/i.test(clean(e.status)) && e.startDate >= todayISO;
+const hasDate = e => /^\d{4}-\d{2}-\d{2}$/.test(e.startDate || '');
+const isCancelled = e => /cancel|lost|drop|postpon|hold/i.test(clean(e.status));
+// Dates TBD: a row with an Index / S No that is not delivered or cancelled is an upcoming engagement
+const isUpcoming  = e => (hasDate(e)
+  ? /^(scheduled|tentative|re-?schedule)$/i.test(clean(e.status)) && e.startDate >= todayISO
+  : !isDelivered(e) && !isCancelled(e));
 const daysOf = e => (Number(e.day) > 0 ? Number(e.day) : 0);
+import { egItem, propItem } from './KpiListModal.jsx';
 const consultantsOf = e => [...new Set([e.consultant1, e.consultant2, e.consultant3].map(clean).filter(n => n && !NOT_A_PERSON.test(n)))];
 const modeOf = e => {
   const raw = clean(e.locationRaw ?? e.location);
@@ -87,16 +93,17 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
   const unit = countBy === 'projects' ? 'Projects' : 'Sessions';
 
   // Live rows: usable start date and FY from LIVE_FROM_FY onward
-  const live = useMemo(() => (engagements || [])
-    .filter(e => /^\d{4}-\d{2}-\d{2}$/.test(e.startDate || ''))
-    .map(e => ({ ...e, fy: fyStartOf(e.startDate) }))
-    .filter(e => e.fy >= LIVE_FROM_FY), [engagements]);
+  // Every EC row with a date, or with an Index / S No and dates TBD (counted in the current FY)
+  const all = useMemo(() => (engagements || [])
+    .filter(e => hasDate(e) || ((clean(e.engagementKey) || clean(e.sno)) && (clean(e.company) || clean(e.topic))))
+    .map(e => ({ ...e, fy: hasDate(e) ? fyStartOf(e.startDate) : CURRENT_FY })), [engagements]);
+  const live = useMemo(() => all.filter(e => e.fy >= LIVE_FROM_FY), [all]);
   const cur = useMemo(() => live.filter(e => e.fy === CURRENT_FY), [live]);
 
   /* Financial Year table: fixed years + live years */
   const fyData = useMemo(() => {
     const del = counter(countBy), up = counter(countBy), ip = counter(countBy), vi = counter(countBy);
-    live.forEach(e => {
+    all.forEach(e => {
       if (isDelivered(e)) {
         del.add(e.fy, e);
         const m = modeOf(e);
@@ -107,8 +114,31 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
     for (let y = LIVE_FROM_FY; y <= CURRENT_FY; y++) {
       liveRows.push({ fy: y, inPerson: ip.get(y), virtual: vi.get(y), total: del.get(y), upcoming: up.get(y), live: true });
     }
-    return [...OPS_FY, ...liveRows];
-  }, [live, countBy]);
+    const early = OPS_FY.map(b => (del.get(b.fy) > 0 ? { fy: b.fy, inPerson: ip.get(b.fy), virtual: vi.get(b.fy), total: del.get(b.fy), upcoming: 0, live: true } : b));
+    return [...early, ...liveRows];
+  }, [all, countBy]);
+
+  /* Year-on-year comparison: consultant days / client projects per FY (EC first, baseline when EC has no delivered rows that year) */
+  const compare = useMemo(() => {
+    const years = [...new Set([...OPS_FY.map(b => b.fy), CURRENT_FY - 2, CURRENT_FY - 1, CURRENT_FY])].filter(y => y >= CURRENT_FY - 3).sort();
+    const build = (pick, baseline) => {
+      const m = new Map(), from = new Map();
+      const put = (name, y, v) => { const k = keyOf(name); if (!m.has(k)) m.set(k, { label: name, v: {} }); const x = m.get(k).v; x[y] = (x[y] || 0) + v; };
+      all.forEach(e => { if (years.includes(e.fy) && (isDelivered(e) || (e.fy === CURRENT_FY && isUpcoming(e)))) { from.set(e.fy, true); pick(e).forEach(([n, v]) => put(n, e.fy, v)); } });
+      baseline.forEach(b => { const y = Number(String(b.label).match(/\d{4}/)?.[0]); if (years.includes(y) && !from.get(y)) b.data.forEach(([n, v]) => put(n, y, v)); });
+      const rows = [...m.values()].map(r => ({ ...r, tot: years.reduce((t, y) => t + (r.v[y] || 0), 0) })).sort((a, b) => b.tot - a.tot).slice(0, 15);
+      const pal = [PU, TL, NV, GD];
+      return { rows, cfg: { type: 'bar', data: { labels: rows.map(r => r.label), datasets: years.map((y, i) => ({
+          label: fyShort(y) + (y === CURRENT_FY ? ' (incl. upcoming)' : ''), data: rows.map(r => Math.round((r.v[y] || 0) * 100) / 100),
+          backgroundColor: y === CURRENT_FY ? GD : pal[i % pal.length], borderRadius: 3 })) },
+        options: { ...bOpts(false, false), indexAxis: 'y', plugins: { legend: { position: 'top' }, datalabels: { display: false } } } } };
+    };
+    const seen = new Set();
+    return {
+      cons: build(e => consultantsOf(e).map(n => [n, daysOf(e)]), OPS_CONSULTANT_PREV),
+      cli: build(e => { const n = clean(e.company), id = clean(e.egId) || `row-${e.sno}`; if (!n || seen.has(id + n)) return []; seen.add(id + n); return [[n, 1]]; }, OPS_CLIENT_PREV),
+    };
+  }, [all]);
 
   /* Client status — current FY */
   const clients = useMemo(() => {
@@ -139,6 +169,16 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
   }, [cur]);
 
   /* Feedback — fixed list from Excel + live scores per program */
+  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const fbRows = useMemo(() => {
+    const rows = all.filter(e => hasDate(e) && (feedbackOf(e) != null || (isDelivered(e) && e.startDate >= weekAgo && e.startDate <= todayISO)))
+      .map(e => ({ key: `${e.engagementKey || e.sno}`, label: clean(e.topic) || '(No topic)', client: clean(e.company), date: e.endDate && hasDate({ startDate: e.endDate }) ? e.endDate : e.startDate, score: feedbackOf(e) }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+    const scored = rows.filter(r => r.score != null);
+    const base = scored.length ? [] : OPS_FEEDBACK.map(([label, score]) => ({ key: 'b-' + label, label, client: '', date: '', score }));
+    const list = [...rows, ...base], sc = list.filter(r => r.score != null);
+    return { list, avg: sc.length ? sc.reduce((t, r) => t + r.score, 0) / sc.length : 0, n: sc.length, week: rows.filter(r => r.date >= weekAgo).length };
+  }, [all, weekAgo]);
   const feedback = useMemo(() => {
     const m = new Map();
     OPS_FEEDBACK.forEach(([label, score]) => m.set(keyOf(label), { label, score, n: null, latest: '' }));
@@ -199,7 +239,7 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
   // Sessions already over but still Scheduled / Tentative / Re-schedule: counted neither as delivered
   // nor as upcoming until their Status is updated in the Engagement Calendar.
   const staleStatus = live.filter(e => /^(scheduled|tentative|re-?schedule)$/i.test(clean(e.status))
-    && (/^\d{4}-\d{2}-\d{2}$/.test(e.endDate || '') ? e.endDate : e.startDate) < todayISO);
+    && hasDate(e) && (/^\d{4}-\d{2}-\d{2}$/.test(e.endDate || '') ? e.endDate : e.startDate) < todayISO);
 
   return (
     <div className="erd" style={{ opacity: refreshing ? 0.85 : 1, transition: 'opacity .2s' }}>
@@ -223,10 +263,10 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="kg g4">
-        <Kpi tone="tl" label={`FY ${fyShort(CURRENT_FY).slice(2)} Delivered`} value={curRow.total} sub={`${unit} completed this FY`} how={`Engagement Calendar rows with Status = Delivered and a start date in this FY, counted once per ${countBy === 'sessions' ? 'session (row)' : 'project (EG ID)'}.`} />
-        <Kpi tone="gd" label={`FY ${fyShort(CURRENT_FY).slice(2)} Upcoming`} value={curRow.upcoming} sub={`${unit} in pipeline`} how={`Status Scheduled / Tentative / Re-schedule with a start date from today onward in this FY, counted once per ${countBy === 'sessions' ? 'session (row)' : 'project (EG ID)'}.`} />
-        <Kpi tone="gn" label="Best Year (Delivered)" value={best.total} sub={`FY ${fyShort(best.fy)}`} tag="▲ Record" tagTone="up" how="Highest Delivered count of any FY — earlier years from the Dashboard Report Data, live years from the Engagement Calendar." />
-        <Kpi tone="nv" label="Key Account" value={keyAccount && keyAccount.upcoming > 0 ? keyAccount.label : '--'}
+        <Kpi tone="tl" label={`FY ${fyShort(CURRENT_FY).slice(2)} Delivered`} list={() => live.filter(e => e.fy === CURRENT_FY && isDelivered(e)).map(e => egItem(e))} value={curRow.total} sub={`${unit} completed this FY`} how={`Engagement Calendar rows with Status = Delivered and a start date in this FY, counted once per ${countBy === 'sessions' ? 'session (row)' : 'project (EG ID)'}.`} />
+        <Kpi tone="gd" label={`FY ${fyShort(CURRENT_FY).slice(2)} Upcoming`} list={() => live.filter(e => e.fy === CURRENT_FY && isUpcoming(e)).sort((a, b) => String(a.startDate || '9').localeCompare(String(b.startDate || '9'))).map(e => egItem(e))} value={curRow.upcoming} sub={`${unit} in pipeline`} how={`Status Scheduled / Tentative / Re-schedule with a start date from today onward in this FY, counted once per ${countBy === 'sessions' ? 'session (row)' : 'project (EG ID)'}.`} />
+        <Kpi tone="gn" label="Best Year (Delivered)" list={() => all.filter(e => e.fy === best.fy && isDelivered(e)).map(e => egItem(e))} value={best.total} sub={`FY ${fyShort(best.fy)}`} tag="▲ Record" tagTone="up" how="Highest Delivered count of any FY — earlier years from the Dashboard Report Data, live years from the Engagement Calendar." />
+        <Kpi tone="nv" label="Key Account" list={keyAccount ? () => all.filter(e => e.fy === CURRENT_FY && isUpcoming(e) && keyOf(e.company) === keyOf(keyAccount.label)).map(e => egItem(e)) : undefined} value={keyAccount && keyAccount.upcoming > 0 ? keyAccount.label : '--'}
              sub={keyAccount && keyAccount.upcoming > 0 ? `${keyAccount.upcoming} upcoming ${unit.toLowerCase()}` : 'Largest upcoming pipeline'} tag="Top Client" how="Client with the most upcoming (Scheduled / Tentative / Re-schedule, today onward) projects or sessions." />
       </div>
 
@@ -256,29 +296,29 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
 
       <div className="cg c1">
         <div className="card"><h3>Recent Program Feedback</h3>
-          <div className="cs">Post-program feedback scores (out of 5) — {feedback.length} programs, average {fbAvg.toFixed(2)}</div>
-          <ChartBox config={fbCfg} height={heightFor(feedback.length, 30)} />
-          <div className="tbl-x" style={{ marginTop: 12 }}>
+          <div className="cs">Overall average <b>{fbRows.avg ? fbRows.avg.toFixed(2) : 'N/A'}</b> / 5 across {fbRows.n} scored sessions · {fbRows.week} delivered in the last 7 days (top) · scroll for earlier programs</div>
+          <div className="tbl-x" style={{ marginTop: 12, maxHeight: 340, overflowY: 'auto' }}>
             <table className="mt">
-              <thead><tr><th>Program Name</th><th className="nr">Feedback Score (Out of 5)</th><th className="nr">Sessions Scored</th><th className="nr">Latest Session</th></tr></thead>
-              <tbody>{feedback.map(f => (
-                <tr key={f.label}><td style={{ fontWeight: 600 }}>{f.label}</td><td className="nr">{f.score.toFixed(2)}</td>
-                  <td className="nr">{f.n ?? '—'}</td><td className="nr">{f.latest ? fmtDate(f.latest) : '—'}</td></tr>
-              ))}</tbody>
+              <thead style={{ position: 'sticky', top: 0, background: '#F8F9FB', zIndex: 1 }}><tr><th>Program</th><th>Client</th><th className="nr">Delivered</th><th className="nr">Feedback (out of 5)</th></tr></thead>
+              <tbody>
+                {fbRows.list.length === 0 && <tr><td colSpan={4} className="erd-empty">No feedback yet</td></tr>}
+                {fbRows.list.map(f => (
+                  <tr key={f.key + f.date} style={f.date >= weekAgo ? { background: '#f3eef7' } : undefined}>
+                    <td style={{ fontWeight: 600 }}>{f.label}</td><td>{f.client || '—'}</td><td className="nr">{f.date ? fmtDate(f.date) : '—'}</td>
+                    <td className="nr" style={{ fontWeight: 600, color: f.score == null ? '#6B7280' : f.score >= 4.5 ? '#0AC44B' : f.score >= 4 ? '#2D3047' : '#E98272' }}>{f.score == null ? 'Awaited' : f.score.toFixed(2)}</td></tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </div>
       </div>
 
-      <div className="cg c1">
-        <div className="card"><h3>Consultant Days — Previous Years</h3><div className="cs">Previous financial years, by trainer — one chart per year</div>
-          <MiniYearCharts blocks={OPS_CONSULTANT_PREV} palette={PREV_DAYS_PALETTE} unit="Days" titleOf={titleDays} />
+      <div className="cg c11">
+        <div className="card"><h3>Consultant Days — Year on Year</h3><div className="cs">Delivered days per FY (current FY includes upcoming) · top 15 · from the Engagement Calendar</div>
+          {compare.cons.rows.length ? <ChartBox config={compare.cons.cfg} height={heightFor(compare.cons.rows.length, 44, 300)} /> : <div className="erd-empty">No consultant data</div>}
         </div>
-      </div>
-
-      <div className="cg c1">
-        <div className="card"><h3>Client Status — Historical by FY</h3><div className="cs">Projects delivered per client — one chart per year</div>
-          <MiniYearCharts blocks={OPS_CLIENT_PREV} palette={PREV_CLIENT_PALETTE} unit="Projects" titleOf={titleClients} />
+        <div className="card"><h3>Client Status — Year on Year</h3><div className="cs">Projects delivered per FY (current FY includes upcoming) · top 15 · from the Engagement Calendar</div>
+          {compare.cli.rows.length ? <ChartBox config={compare.cli.cfg} height={heightFor(compare.cli.rows.length, 44, 300)} /> : <div className="erd-empty">No client data</div>}
         </div>
       </div>
     </div>

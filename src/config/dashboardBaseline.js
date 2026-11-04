@@ -111,7 +111,7 @@ export const SALES_QUARTERLY_REVENUE = {
 
 // Quarterly revenue targets (Rs.), Q1 → Q4 — "Achieved" is live. null = no target set yet.
 export const SALES_TARGETS = {
-  2026: [11000000, 11700000, 10200000, null],
+  2026: [11000000, 11700000, 10200000, 8100000],
 };
 
 // Client Engagement by Financial Year (FY 2026-27 onward is live from the Engagement Calendar)

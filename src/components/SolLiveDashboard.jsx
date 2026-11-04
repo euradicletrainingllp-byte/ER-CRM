@@ -19,6 +19,8 @@ import {
   CURRENT_FY, fyStartOf, fyLong, fyTiny, pad2, clean, keyOf,
 } from './erdCharts.jsx';
 import { buildProposalLines, monthSlot, uniqueProposals } from './proposalData.js';
+import { egItem, propItem, inrS } from './KpiListModal.jsx';
+
 import { LIVE_FROM_FY, SOL_BASELINE } from '../config/dashboardBaseline.js';
 
 const NR = 'Not recorded';
@@ -141,7 +143,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
   /* KPIs */
   const solCur = useMemo(() => {
     const cur = proposals.filter(p => p.fy === CURRENT_FY);
-    return { n: cur.reduce((s, p) => s + (p.solCount || 0), 0), v: cur.reduce((s, p) => s + (p.solValue || 0), 0), lines: cur.filter(p => p.solCount > 0).length };
+    return { n: cur.reduce((s, p) => s + (p.solCount || 0), 0), v: cur.reduce((s, p) => s + (p.solValue || 0), 0), lines: cur.filter(p => p.solCount > 0).length, unique: new Set(cur.flatMap(p => p.solTopics || [])).size };
   }, [proposals]);
   const engTotal = mixes.engagementType.reduce((s, r) => s + r.curCount, 0);
   const journey = mixes.engagementType.find(r => /journey/i.test(r.label)) || { curCount: 0 };
@@ -168,11 +170,11 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
       <SourceNote live={`${fyLong(LIVE_FROM_FY)} onward from the Solution Tracker`} fixed="FY 2025-26 from Dashboard Report Data (26 Oct 2026)" />
 
       <div className="kg g5">
-        <Kpi tone="tl" label={`FY ${curTiny} Total Proposals`} value={Cd.summary?.total ?? 0} sub={Cd.summary ? `${Cd.summary.unique} unique proposals${Cd.summary.total > Cd.summary.unique ? ` · ${Cd.summary.total - Cd.summary.unique} revisions` : ''}` : 'Submitted this financial year'} how="Proposal lines (Proposal ID + version) dated in this FY in the Solution Tracker; each revision counts again." />
-        <Kpi tone="pu" label={`FY ${curTiny} Solutions`} value={solCur.n} sub={`${fmtShort(solCur.v)} solution value · ${solCur.lines} proposals with solutions`} how="Solution items (Solution Tracker rows with a Solution Topic) on this FY's proposal lines; each revision's items count again. Value = Solution Values." />
-        <Kpi tone="gn" label="Journey Engagements" value={journey.curCount} sub={engTotal > 0 ? `${Math.round((journey.curCount / engTotal) * 100)}% of ${engTotal} total` : '--'} tag="Demand shift" tagTone="up" how="This FY's proposals whose Engagement Type is a learning journey ÷ all proposals with an Engagement Type." />
-        <Kpi tone="gd" label="Top Industry" value={topInd?.curCount ? topInd.label : '--'} sub={topInd?.curCount ? `${topInd.curCount} opportunities this FY` : 'most active sector'} how="Industry with the most opportunities this FY (one per proposal — revisions merged; blank industry ignored)." />
-        <Kpi tone="nv" label="Customization Rate" value={`${custTotal ? Math.round((custRow.curCount / custTotal) * 100) : 0}%`} sub={`${custRow.curCount} of ${custTotal} proposals`} tag="Fully custom" how="Proposals with Program Type = Customized ÷ proposals with a Program Type filled, this FY." />
+        <Kpi tone="tl" label={`FY ${curTiny} Total Proposals`} list={() => proposals.filter(p => p.fy === CURRENT_FY).map(p => propItem(p, 'sol'))} value={Cd.summary?.total ?? 0} sub={Cd.summary ? `${Cd.summary.unique} unique proposals${Cd.summary.total > Cd.summary.unique ? ` · ${Cd.summary.total - Cd.summary.unique} revisions` : ''}` : 'Submitted this financial year'} how="Proposal lines (Proposal ID + version) dated in this FY in the Solution Tracker; each revision counts again." />
+        <Kpi tone="pu" label={`FY ${curTiny} Solutions`} list={() => proposals.filter(p => p.fy === CURRENT_FY && p.solCount > 0).map(p => ({ ...propItem(p, 'sol'), sub: `${(p.solTopics || []).join(', ') || '—'} · P.ID ${p.id} V${p.version}` }))} value={solCur.n} sub={`${solCur.unique} unique solutions · ${fmtShort(solCur.v)} solution value · ${solCur.lines} proposals with solutions`} how="Solution items (Solution Tracker rows with a Solution Topic) on this FY's proposal lines; each revision's items count again. Value = Solution Values. Unique = distinct Solution Topics (case and spaces ignored)." />
+        <Kpi tone="gn" label="Journey Engagements" list={() => proposals.filter(p => p.fy === CURRENT_FY && /journey/i.test(p.engagementType)).map(p => propItem(p, 'sol'))} value={journey.curCount} sub={engTotal > 0 ? `${Math.round((journey.curCount / engTotal) * 100)}% of ${engTotal} total` : '--'} tag="Demand shift" tagTone="up" how="This FY's proposals whose Engagement Type is a learning journey ÷ all proposals with an Engagement Type." />
+        <Kpi tone="gd" label="Top Industry" list={topInd ? () => proposals.filter(p => p.fy === CURRENT_FY && p.isLatest && p.industry === topInd.label).map(p => propItem(p, 'sol')) : undefined} value={topInd?.curCount ? topInd.label : '--'} sub={topInd?.curCount ? `${topInd.curCount} opportunities this FY` : 'most active sector'} how="Industry with the most opportunities this FY (one per proposal — revisions merged; blank industry ignored)." />
+        <Kpi tone="nv" label="Customization Rate" list={() => proposals.filter(p => p.fy === CURRENT_FY && p.isLatest && /customiz/i.test(p.customization)).map(p => propItem(p, 'sol'))} value={`${custTotal ? Math.round((custRow.curCount / custTotal) * 100) : 0}%`} sub={`${custRow.curCount} of ${custTotal} proposals`} tag="Fully custom" how="Proposals with Program Type = Customized ÷ proposals with a Program Type filled, this FY." />
       </div>
 
       <SolPair title="Development Category Mix" sub={`${vs} — Count and Value`} rows={mixes.developmentCategory} prevLabel={prevLabel} curLabel={curLabel} trunc={24} />
