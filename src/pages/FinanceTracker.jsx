@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { ErrorState } from '../components/LoadingState.jsx';
 import {
-  peekList, getOpsChecklist, ecHasExtraCols, ecHasInvoiceNo,
+  peekList, getOpsChecklist, ecHasExtraCols, ecHasInvoiceNo, ecHasBillCols,
   getAllEngagementsCached, peekAllEngagements,
 } from '../services/api.js';
 import {
@@ -12,7 +13,8 @@ import { usePermissions } from '../hooks/usePermissions.js';
 import ExportButton from '../components/ExportButton.jsx';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, FIN_RULES } from '../config/pendingFields.js';
-import { money, gstOf, tdsOf, receivableOf, expectedOf, GST_RATE, TDS_RATE } from '../services/money.js';
+import { money, gstOf, tdsOf, receivableOf, expectedOf, GST_RATE, TDS_RATE, creditNotesOf, creditTotalOf } from '../services/money.js';
+import { getPOs, peekPOs, poConfigured, poUsage, poStatus, splitIdx } from '../services/poApi.js';
 
 /**
  * Finance Tracker
@@ -160,11 +162,13 @@ const Section = ({ children }) => (
 // ─── Detail panel ────────────────────────────────────────────────────────────
 // Travel billing (Engagement Calendar columns added 30 Oct 2026). Price breakup is edited in the Engagement Calendar.
 const EXTRA_KEYS = ['travelInvoiceRaised', 'travelInvoiceDate', 'travelReceived', 'travelReceivedAmount', 'travelReceivedDate'];
-const EDIT_KEYS = ['payment', 'invoiceNo', 'invoice', 'amountReceived', 'receivedDate', 'travelExpenses', ...EXTRA_KEYS];   // GST is calculated (18% of Price)
+const BILL_KEYS = ['travelInvoiceNo', 'cancelledInvoiceNo', 'creditNotes', 'creditNoteTotal'];
+const EDIT_KEYS = ['payment', 'invoiceNo', 'invoice', 'amountReceived', 'receivedDate', 'travelExpenses', ...EXTRA_KEYS, ...BILL_KEYS];   // GST is calculated (18% of Price)
 const fromRow = e => ({
   payment: e.payment ?? '', invoiceNo: e.invoiceNo ?? '', invoice: toIso(e.invoice), amountReceived: e.amountReceived ?? '',
   receivedDate: toIso(e.receivedDate), travelExpenses: e.travelExpenses ?? '',
   ...Object.fromEntries(EXTRA_KEYS.map(k => [k, k.endsWith('Date') ? toIso(e[k]) : (e[k] ?? '')])),
+  ...Object.fromEntries(BILL_KEYS.map(k => [k, e[k] ?? ''])),
 });
 
 
@@ -180,7 +184,7 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
     const busy = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') ? el.name : '';
     const r = fromRow(ec);
     setForm(f => Object.fromEntries(EDIT_KEYS.map(k => [k, k === busy ? f[k] : r[k]])));
-  }, [ec.payment, ec.invoiceNo, ec.invoice, ec.amountReceived, ec.receivedDate, ec.travelExpenses, ec.gst, ...EXTRA_KEYS.map(k => ec[k])]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ec.payment, ec.invoiceNo, ec.invoice, ec.amountReceived, ec.receivedDate, ec.travelExpenses, ec.gst, ...EXTRA_KEYS.map(k => ec[k]), ...BILL_KEYS.map(k => ec[k])]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const live = { ...ec, ...form };
   const stage = financeStage(live);
@@ -208,6 +212,15 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
     setForm(next);
     onEdit(ec, changes);
   };
+  // Several fields at once (credit notes list + its total)
+  const setMany = obj => { setForm(f => ({ ...f, ...obj })); onEdit(ec, obj); };
+  const cnList = creditNotesOf(form);
+  const [cnDraft, setCnDraft] = useState({ no: '', date: '', amount: '', reason: '' });
+  const saveCn = list => setMany({ creditNotes: list.length ? JSON.stringify(list) : '', creditNoteTotal: list.length ? String(list.reduce((t, c) => t + money(c.amount), 0)) : '' });
+  // PO covering this engagement (PO Tracker, by Index)
+  const [pos, setPos] = useState(() => peekPOs() || []);
+  useEffect(() => { if (poConfigured() && !pos.length) getPOs().then(setPos).catch(() => {}); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const myPOs = pos.filter(po => splitIdx(po.indexes).includes(String(ec.engagementKey)));
 
   const p = normPayment(form.payment);
   const oc = link.state === 'ok' ? link.oc : null;
@@ -337,6 +350,39 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
               </Field>
             )}
 
+            <Section>Invoices, Credit Notes &amp; PO</Section>
+            {ecHasBillCols() ? (<>
+              <Field label="Travel Invoice No">{canEdit ? <input name="travelInvoiceNo" className="form-input" style={{ fontSize: 12 }} value={form.travelInvoiceNo} onChange={edit('travelInvoiceNo')} placeholder="ER/0xx/26-27" /> : <Val>{form.travelInvoiceNo}</Val>}</Field>
+              <Field label="Cancelled Invoice No">{canEdit ? <input name="cancelledInvoiceNo" className="form-input" style={{ fontSize: 12 }} value={form.cancelledInvoiceNo} onChange={edit('cancelledInvoiceNo')} placeholder="ER/0xx/26-27" /> : <Val>{form.cancelledInvoiceNo}</Val>}</Field>
+              <Field label={`Credit Notes${cnList.length ? ` · total ${inr(creditTotalOf(form))}` : ''}`} full>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {cnList.length === 0 && <Val style={{ color: 'var(--muted)', fontWeight: 400 }}>No credit notes</Val>}
+                  {cnList.map((c, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, background: '#F8F9FB', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px' }}>
+                      <b>{c.no || '—'}</b><span>{c.date ? fmtDate(c.date) : ''}</span><span style={{ flex: 1, color: 'var(--muted)' }}>{c.reason}</span><b>{inr(money(c.amount))}</b>
+                      {canEdit && <button type="button" className="btn btn-sm" style={{ padding: '0 6px' }} title="Remove" onClick={() => saveCn(cnList.filter((_, j) => j !== i))}>×</button>}
+                    </div>))}
+                  {canEdit && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr 1.6fr auto', gap: 6 }}>
+                      <input className="form-input" style={{ fontSize: 12 }} placeholder="CN no." value={cnDraft.no} onChange={e => setCnDraft(d => ({ ...d, no: e.target.value }))} />
+                      <input className="form-input" style={{ fontSize: 12 }} type="date" value={cnDraft.date} onChange={e => setCnDraft(d => ({ ...d, date: e.target.value }))} />
+                      <input className="form-input" style={{ fontSize: 12 }} type="number" min="0" placeholder="Amount ₹" value={cnDraft.amount} onChange={e => setCnDraft(d => ({ ...d, amount: e.target.value }))} />
+                      <input className="form-input" style={{ fontSize: 12 }} placeholder="Reason" value={cnDraft.reason} onChange={e => setCnDraft(d => ({ ...d, reason: e.target.value }))} />
+                      <button type="button" className="btn btn-sm btn-primary" disabled={!cnDraft.no || !(money(cnDraft.amount) > 0)}
+                        onClick={() => { saveCn([...cnList, { ...cnDraft, amount: money(cnDraft.amount) }]); setCnDraft({ no: '', date: '', amount: '', reason: '' }); }}>Add</button>
+                    </div>)}
+                </div>
+              </Field>
+            </>) : (
+              <Field label="Credit notes" full><Val style={{ color: 'var(--muted)', fontWeight: 400 }}>Add the Travel Invoice No, Cancelled Invoice No, Credit Notes and Credit Note Total (INR) columns to the Engagement Calendar table to use these fields.</Val></Field>
+            )}
+            <Field label="Purchase Order" full>
+              {!poConfigured() ? <Val style={{ color: 'var(--muted)', fontWeight: 400 }}>PO Tracker not connected yet</Val>
+                : myPOs.length === 0 ? <Val style={{ color: 'var(--muted)', fontWeight: 400 }}>Not linked to a PO (link it in PO Tracker by Index {ec.engagementKey})</Val>
+                : myPOs.map(po => { const all = peekAllEngagements() || []; const u = poUsage(po, all.length ? all : [ec]); return (
+                  <Val key={po.poId}><Link to={`/po?po=${encodeURIComponent(po.poId)}`}>{po.poNumber || po.poId}</Link> · {poStatus(po, u)} · used {inr(u.used)} of {inr(money(po.value))} · <b style={{ color: u.balance < 0 ? '#b91c1c' : undefined }}>balance {inr(u.balance)}</b></Val>); })}
+            </Field>
+
             <Section>Ops Checklist</Section>
             {oc ? (
               <>
@@ -402,7 +448,7 @@ export default function FinanceTracker({ onRefreshed }) {
   const [savingKeys, setSavingKeys] = useState(() => new Set());
   const [focusN, setFocusN] = useState(0);
 
-  const { canEdit } = usePermissions();
+  const { canEdit, canAccess } = usePermissions();
   const canEditFin = canEdit('finance');
 
   const toastTimer = useRef(null);
@@ -692,6 +738,7 @@ export default function FinanceTracker({ onRefreshed }) {
             </select>
             {nextUpKey && <button className="btn btn-outline btn-sm" onClick={() => setScrollNonce(n => n + 1)} title="Scroll to the next upcoming delivery">⏭ Next up</button>}
             <button className="btn btn-outline btn-sm" onClick={() => load({ force: true, keepCurrent: true })} disabled={syncing} title={syncing ? 'Refreshing from Excel…' : 'Refresh'}>{syncing ? '⟳' : '↺'}</button>
+            {canAccess('po') && <Link className="btn btn-outline btn-sm" to="/po" title="Open the PO Tracker">🧾 PO Tracker</Link>}
             <ExportButton page="finance" filename={`Finance Tracker ${rangeLabel}`} sheetName="Finance Tracker" rows={() => filtered} columns={exportCols} disabled={rangeLoading} />
           </div>
 

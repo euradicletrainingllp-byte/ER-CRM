@@ -13,13 +13,14 @@
  * (the Excel did the same — e.g. its Q3 figure includes scheduled November sessions).
  * The Monthly Revenue chart splits that into Delivered and Scheduled.
  */
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   ChartBox, Kpi, SourceNote, NV, TL, GD, GN, PU, RD, bOpts, dlInr, dlStack, dlStackInr, dlInrH, fmtInr, fmtShort, inrAxis, heightFor,
   CURRENT_FY, fyStartOf, fyLong, fyTiny, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
 import { buildProposalLines, monthSlot, uniqueProposals } from './proposalData.js';
 import { egItem, propItem, inrS } from './KpiListModal.jsx';
+import { getPOs, peekPOs, poConfigured, poUsage, poStatus } from '../services/poApi.js';
 
 import { LIVE_FROM_FY, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
 
@@ -101,8 +102,16 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   }, [revenue]);   // eslint-disable-line react-hooks/exhaustive-deps
   const curTarget = targets.find(t => t.live);
 
-  /* ── Order book: Won proposals vs Engagement Calendar sessions ── */
-  const orderBook = useMemo(() => {
+  /* ── Order book from the PO Tracker: PO value vs linked Engagement Calendar sessions (Index) ── */
+  const [pos, setPos] = useState(() => peekPOs() || []);
+  useEffect(() => { if (poConfigured()) getPOs().then(setPos).catch(() => {}); }, []);
+  const poBook = useMemo(() => pos.filter(po => Number(po.value) > 0).map(po => {
+    const u = poUsage(po, engagements || []), st = poStatus(po, u);
+    const delivered = u.rows.filter(isDelivered).reduce((t, e) => t + (Number(e.price) || 0), 0);
+    return { po, st, u, booked: Number(po.value), delivered, confirmed: u.used, balance: u.balance };
+  }).filter(r => r.st !== 'Closed').sort((a, b) => b.balance - a.balance || b.booked - a.booked), [pos, engagements]);
+  /* Fallback when no POs are recorded: Won proposals (BD Tracker) vs Engagement Calendar sessions */
+  const orderBookWon = useMemo(() => {
     const won = proposals.filter(p => p.isLatest && p.pipeline === 'closed');
     const rows = won.map(p => ({ p, booked: p.value, delivered: 0, confirmed: 0, curFy: p.fy === CURRENT_FY }));
     sessions.forEach(e => {
@@ -122,6 +131,8 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       .map(r => ({ ...r, balance: r.booked - r.confirmed }))
       .sort((a, b) => b.booked - a.booked);
   }, [proposals, sessions]);
+  const usePo = true;   // PO Tracker only — no fallback to proposals
+  const orderBook = poBook; void orderBookWon;
   const ob = orderBook.reduce((t, r) => ({ booked: t.booked + r.booked, delivered: t.delivered + r.delivered, confirmed: t.confirmed + r.confirmed, balance: t.balance + r.balance }),
     { booked: 0, delivered: 0, confirmed: 0, balance: 0 });
 
@@ -267,20 +278,22 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
 
       <div className="cg c11">
         <div className="card"><h3>Monthly Revenue — {curName}</h3><div className="cs">Revenue per month from the Engagement Calendar (Price INR, by session start date)</div><ChartBox config={monthlyCfg} /></div>
-        <div className="card"><h3>Order Book — Active Programs</h3><div className="cs">Won proposals (BD Tracker) vs Engagement Calendar sessions: booked vs delivered vs confirmed vs balance</div>
+        <div className="card"><h3>Order Book — Active Programs</h3><div className="cs">PO Tracker: PO value vs linked Engagement Calendar sessions — delivered, confirmed by dates, balance</div>
           <div className="mt-scroll" style={{ overflowX: 'auto' }}><table className="mt compact">
-            <thead><tr><th>Client</th><th>Program</th><th className="nr">Booked</th><th className="nr">Delivered</th><th className="nr">Confirmed by Dates</th><th className="nr">Balance</th></tr></thead>
+            <thead><tr><th>Client</th><th>{usePo ? 'PO / Scope' : 'Program'}</th><th className="nr">{usePo ? 'PO Value' : 'Booked'}</th><th className="nr">Delivered</th><th className="nr">Confirmed by Dates</th><th className="nr">Balance</th></tr></thead>
             <tbody>
-              {orderBook.length === 0 && <tr><td colSpan={6} className="erd-empty">No won proposals with a value in {curName} yet</td></tr>}
+              {orderBook.length === 0 && <tr><td colSpan={6} className="erd-empty">{poConfigured() ? 'No POs recorded yet — add them in the PO Tracker' : 'PO Tracker not connected yet (PO_CRUD flow URL missing)'}</td></tr>}
               {orderBook.map(r => (
-                <tr key={r.p.id}><td>{r.p.client || r.p.id}</td><td style={{ fontSize: 12, opacity: 0.75 }}>{r.p.topic}</td>
+                <tr key={usePo ? r.po.poId : r.p.id}>{usePo
+                  ? <><td>{r.po.client}</td><td style={{ fontSize: 12 }}><b>{r.po.poNumber || r.po.poId}</b> · {r.st}<div style={{ opacity: 0.75 }}>{r.po.scope || `${r.u.ids.length} engagement(s)`}</div></td></>
+                  : <><td>{r.p.client || r.p.id}</td><td style={{ fontSize: 12, opacity: 0.75 }}>{r.p.topic}</td></>}
                   <td className="nr">{fmtInr(r.booked)}</td><td className="nr">{fmtInr(r.delivered)}</td><td className="nr">{fmtInr(r.confirmed)}</td>
                   <td className="nr" style={{ color: r.balance > 500000 ? GD : undefined }}>{r.balance < 0 ? '-' : ''}{fmtInr(r.balance)}</td></tr>
               ))}
               {orderBook.length > 0 && <tr className="tot"><td colSpan={2}>Total</td><td className="nr">{fmtInr(ob.booked)}</td><td className="nr">{fmtInr(ob.delivered)}</td><td className="nr">{fmtInr(ob.confirmed)}</td><td className="nr">{ob.balance < 0 ? '-' : ''}{fmtInr(ob.balance)}</td></tr>}
             </tbody>
           </table></div>
-          <div className="mt-note">Sessions are matched to a proposal by Proposal Link, otherwise by client name + program topic.</div>
+          <div className="mt-note">{usePo ? 'Engagements are linked to a PO by their Index in the PO Tracker. Confirmed = Price of linked sessions (cancelled / lost excluded); Balance = PO value − confirmed. Closed POs hidden.' : 'Sessions are matched to a proposal by Proposal Link, otherwise by client name + program topic.'}</div>
         </div>
       </div>
 

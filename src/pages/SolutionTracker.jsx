@@ -906,7 +906,7 @@ function DeleteDialog({ label, onConfirm, onCancel, saving, type, linkedCount })
 export default function SolutionTracker({ onRefreshed, view }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { canCreate, canUpdate, canDelete, canEdit } = usePermissions();
+  const { canCreate, canUpdate, canDelete, canEdit, canAccess } = usePermissions();
 
   const [rows, setRows]       = useState(() => peekList('solution') || []);
   const [loading, setLoading] = useState(() => !peekList('solution'));   // full loader only on the very first visit
@@ -1476,6 +1476,7 @@ export default function SolutionTracker({ onRefreshed, view }) {
             <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing}>
               ↺ Refresh
             </button>
+            {view === 'bd' && canAccess('po') && <button className="btn btn-outline btn-sm" onClick={() => navigate('/po')} title="Open the PO Tracker">🧾 PO Tracker</button>}
             {view === 'bd' ? (
               <ExportButton
                 page="bd" filename="BD Tracker" sheetName="BD Tracker"

@@ -48,6 +48,7 @@ const GROUPS = [
   { id: 'finance', label: 'Finance', pages: [
     { key: 'finance', label: 'Finance Tracker', Icon: Wallet, desc: 'Invoices and payments. View also unlocks amounts in Clients, Consultants and Founder\'s Desk' },
     { key: 'vendors', label: 'Vendor Services', Icon: Receipt, desc: 'Vendor costs, client billing, vendor payments' },
+    { key: 'po', label: 'PO Tracker', Icon: Receipt, desc: 'Client POs, engagements covered, used and balance' },
   ] },
 ];
 const PAGES = GROUPS.flatMap(g => g.pages);
@@ -80,7 +81,7 @@ const ROLES = [
   { id: 'content', label: 'Content', desc: 'Content Dev, Projects',
     map: { dashboard: 'view', 'content-dev': 'full', tasks: 'edit', engagement: 'view', ops: 'view', consultants: 'view' } },
   { id: 'finance', label: 'Finance', desc: 'Finance, Vendors, view money everywhere',
-    map: { dashboard: 'view', finance: 'full', vendors: 'full', engagement: 'view', clients: 'view', bd: 'view', ops: 'view', founder: 'view' } },
+    map: { dashboard: 'view', finance: 'full', vendors: 'full', po: 'full', engagement: 'view', clients: 'view', bd: 'view', ops: 'view', founder: 'view' } },
   { id: 'none', label: 'No access', desc: 'Remove all access', map: {} },
 ];
 const roleCrud = role => Object.fromEntries(PAGES.map(p => [p.key, { ...LEVEL_CRUD[role.map[p.key] || 'none'] }]));

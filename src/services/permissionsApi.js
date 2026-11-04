@@ -41,6 +41,7 @@ export const PAGE_PREFIX = {
   'founder':     'Founder',
   'tasks':       'Task',
   'consultants': 'Consultant',
+  'po':          'PO',
   'clients':     'Client',
 };
 const PAGES = Object.keys(PAGE_PREFIX);

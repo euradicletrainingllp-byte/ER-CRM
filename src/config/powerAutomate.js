@@ -63,6 +63,9 @@ const FLOW_URLS = {
   // Payload: { action: get | create | update | delete, sno: <Consultant ID>, ...exact column headers }
   // Flow writes the whole body as the row: removeProperty(removeProperty(triggerBody(),'action'),'sno')
   // Leave "" until the flow exists — the page then shows a "not connected yet" message.
+  // ── PO TRACKER (4 Nov 2026) — ER_Engagement_Master → POTable, key "PO ID"; same flow pattern as Consultants
+  PO_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/28/workflows/7b90a47cf84246bca9186f690f0dc912/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=lLdp13A12eLzX_LwwL6MY31EMU8pM7Ej1xilxtMobJk",
+
   CONSULTANTS_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/10/workflows/d24bfb6bd95f4cf0b42fc24305c44e90/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=pDaN3a8XLBbxy4HZJR4ODC_pKutCShfUBOpit59RnGM",
 
   // ── CLIENT DIRECTORY (one file, five tables, ONE flow) ─────────────────────

@@ -25,6 +25,7 @@ import {
   CURRENT_FY, fyStartOf, fyLong, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
 import { normPayment } from '../services/syncWithEC.js';
+import { creditNotesOf } from '../services/money.js';
 import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts, invoiceNoOf, tdsOf } from '../services/money.js';
 import { PERIODS, periodRange, periodLabelOf, inRange } from '../services/actionItems.js';
 // Same stage / overdue rules as the Finance Tracker page, so the two always agree
@@ -159,7 +160,14 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   /* ── Selected period (KPI cards) ── */
   const pk = useMemo(() => {
     const inv = rows.filter(r => r.inv && !r.cancelled && inRange(r.inv, range));
-    const invoices = new Set(inv.flatMap(invKeys)).size;
+    const progKeys = new Set(inv.flatMap(invKeys));
+    const toks = v => String(v || '').split(/[,;&\n]+/).map(x => x.trim()).filter(Boolean);
+    // Cancelled invoice numbers (row's invoice date, else start date, in the period) — counted with program invoices
+    const cancelled = new Set(rows.filter(r => inRange(r.inv || r.start || '', range)).flatMap(r => toks(r.cancelledInvoiceNo)).filter(x => !progKeys.has(`#${x}`)));
+    // Travel & stay invoices: separate numbers, by Travel Invoice Date (else Invoice date)
+    const travel = new Set(rows.filter(r => r.travelInvoiceNo && inRange(toIso(r.travelInvoiceDate) || r.inv || '', range)).flatMap(r => toks(r.travelInvoiceNo)));
+    const cns = rows.flatMap(r => creditNotesOf(r).map(c => ({ ...c, r }))).filter(c => inRange(toIso(c.date) || c.r.inv || '', range));
+    const invoices = progKeys.size + cancelled.size;
     const revRows = rows.filter(r => { const d = revDate(r); return d && inRange(d, range); });
     const revenue = revRows.reduce((s, r) => s + r.net, 0);         // Price + GST, travel excluded
     const tds = revRows.reduce((s, r) => s + tdsOf(r), 0);           // 10% of Price — deducted by the client, never credited
@@ -167,7 +175,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     const paid = rows.filter(r => !r.cancelled && r.got > 0 && (r.rec ? inRange(r.rec, range) : (r.inv && inRange(r.inv, range))));
     const collected = paid.reduce((s, r) => s + r.got, 0);   // sum of Amount Received
     const months = [...new Set(revRows.map(r => MONTHS[slot(revDate(r))]))];
-    return { invRows: inv, revList: revRows, paidRows: paid, invoices, revenueL: L(revenue), tdsL: L(tds), pendingL: L(revenue - collected - tds), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
+    return { progN: progKeys.size, cancelledN: cancelled.size, travelN: travel.size, cns, cnValue: cns.reduce((t, c) => t + money(c.amount), 0), invRows: inv, revList: revRows, paidRows: paid, invoices, revenueL: L(revenue), tdsL: L(tds), pendingL: L(revenue - collected - tds), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
       suspects: suspectReceipts(engagements) };
   }, [rows, range, basis, engagements]);   // eslint-disable-line react-hooks/exhaustive-deps
   const collectPct = pk.invoicedL > 0 ? Math.round((pk.collectedL / pk.invoicedL) * 100) : null;
@@ -225,7 +233,9 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     return { rows: out, grand: { fy: 'Grand Total', rev: tr, days: td, avg: td > 0 ? tr / td : 0, note: '' } };
   }, [live]);
 
-  const credit = FIN_CREDIT_NOTES[CURRENT_FY] || [];
+  // Live credit notes (EC "Credit Notes") for the current FY; the fixed Excel list only when none are recorded yet
+  const liveCn = rows.flatMap(r => creditNotesOf(r).map(c => ({ c, r }))).filter(({ c, r }) => { const d = toIso(c.date) || r.inv; return d && fyStartOf(d) === CURRENT_FY; });
+  const credit = liveCn.length ? liveCn.map(({ c, r }) => [`${c.no} — ${clean(r.company)}`, 1, money(c.amount), [c.date ? fmtDate(toIso(c.date)) : '', clean(c.reason), clean(r.topic)].filter(Boolean).join(' · ')]) : (FIN_CREDIT_NOTES[CURRENT_FY] || []);
   const target = FIN_TARGET_CR[CURRENT_FY];
   const yetL = Math.max(0, dueTotal - overdueTotal);
   const marketL = toInvoiceL + yetL + overdueTotal;   // To be Raised + Yet to Receive + Overdue
@@ -276,7 +286,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="kg g4">
-        <Kpi tone="gd" label="No. of Invoices Raised" list={L_.inv} value={fmtNum(pk.invoices)} sub={`Invoices raised · ${periodName}`} how="Distinct Invoice No with an Invoice date in the period (rows billed on one invoice count once); rows with no Invoice No count by Company + Invoice date; cancelled excluded." />
+        <Kpi tone="gd" label="No. of Invoices Raised" list={L_.inv} value={fmtNum(pk.invoices)} sub={`${pk.progN} program + ${pk.cancelledN} cancelled · ${pk.travelN} travel & stay (separate) · ${pk.cns.length} credit note(s) ${fmtL(L(pk.cnValue))} · ${periodName}`} how="Program invoices = distinct Invoice No with an Invoice date in the period (rows with no number count by Company + Invoice date), plus Cancelled Invoice No. Travel & stay invoices (Travel Invoice No) and credit notes are shown separately, not in the total." />
         <Kpi tone="tl" label="Total Revenue" list={L_.rev} value={fmtL(pk.revenueL)} sub={pk.months.length && pk.months.length <= 4 ? `${pk.months.join(' + ')} · price + GST` : `${basis === 'invoice' ? 'Invoiced' : 'Delivered / scheduled'} price + GST · ${periodName}`}
              how={basis === 'invoice' ? 'Price (INR) + GST (18%) of rows whose Invoice date falls in the period; travel excluded, cancelled rows excluded. Revenue = Collection + TDS + still to collect.' : 'Price (INR) + GST (18%) of sessions whose start date falls in the period (cancelled / lost / postponed / on hold excluded); travel excluded. Revenue = Collection + TDS + still to collect.'} />
         <Kpi tone="gn" label="Collection" list={L_.col} value={fmtL(pk.collectedL)} sub={`${pk.payments} payment(s) · ${periodName}${collectPct != null ? ` · ${collectPct}% of ${fmtL(pk.invoicedL)} invoiced` : ''} · sum of Amount Received`} tag="Collected" tagTone="up"
@@ -375,7 +385,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="cg c1">
-        <div className="card"><h3>Credit Notes — {curName}</h3><div className="cs">Credit notes raised this financial year (no tracker column yet — values from the Excel)</div>
+        <div className="card"><h3>Credit Notes — {curName}</h3><div className="cs">{liveCn.length ? 'From the Engagement Calendar "Credit Notes" column (Finance Tracker)' : 'No credit notes recorded in the Engagement Calendar yet — fixed values from the Excel'}</div>
           <table className="mt">
             <thead><tr><th>Credit Note</th><th className="nr">Count</th><th className="nr">Value</th><th>Date / Notes</th></tr></thead>
             <tbody>

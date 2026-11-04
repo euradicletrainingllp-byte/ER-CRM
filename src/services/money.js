@@ -71,7 +71,11 @@ export const tdsOf = e => r2(money(e?.price) * TDS_RATE);
 /** Price + GST − TDS — what the client actually pays for the program (travel excluded). */
 export const receivableOf = e => r2(money(e?.price) + gstOf(e) - tdsOf(e));
 /** Amount to be received + Travel, Stay & Misc — everything the client still has to pay us. */
-export const expectedOf = e => r2(receivableOf(e) + money(e?.travelExpenses));
+/** Credit notes on an engagement: JSON list [{no, date, amount, reason}] in "Credit Notes"; total in "Credit Note Total (INR)". */
+export const creditNotesOf = e => { try { const v = JSON.parse(String(e?.creditNotes || '[]')); return Array.isArray(v) ? v.filter(c => c && (c.no || c.amount)) : []; } catch { return []; } };
+export const creditTotalOf = e => { const l = creditNotesOf(e); return r2(l.length ? l.reduce((s, c) => s + money(c.amount), 0) : money(e?.creditNoteTotal)); };
+/** What the client still has to pay: Price + GST − TDS + Travel − credit notes. */
+export const expectedOf = e => r2(Math.max(0, receivableOf(e) + money(e?.travelExpenses) - creditTotalOf(e)));
 
 /** Billed amount: Price + GST (18%) + Travel, Stay & Misc. */
 export const invoiceTotal = e => r2(money(e?.price) + gstOf(e) + money(e?.travelExpenses));

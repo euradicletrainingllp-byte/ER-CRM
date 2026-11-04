@@ -36,6 +36,7 @@ export const PERMISSIONS = {
       founder:       { ...ALL_CRUD },
       tasks:         { ...ALL_CRUD },
       consultants:   { ...ALL_CRUD },
+      po:            { ...ALL_CRUD },
       clients:       { ...ALL_CRUD },
     },
   },

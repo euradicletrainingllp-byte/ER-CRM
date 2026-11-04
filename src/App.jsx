@@ -12,6 +12,7 @@ import LeadTracker        from './pages/LeadTracker.jsx';
 import VendorTracker      from './pages/VendorTracker.jsx';
 import TaskTracker        from './pages/TaskTracker.jsx';
 import ConsultantDirectory from './pages/ConsultantDirectory.jsx';
+import POTracker from './pages/POTracker.jsx';
 import ClientDirectory from './pages/ClientDirectory.jsx';
 import TaskFloat          from './components/TaskFloat.jsx';
 import { TourProvider }   from './components/tour/TourProvider.jsx';
@@ -48,7 +49,7 @@ function DeniedPage({ page }) {
 
 // Activity log: page key for each route (used for PAGE_VIEW rows)
 const ROUTE_MODULE = {
-  '/': 'dashboard', '/founder': 'founder', '/tasks': 'tasks', '/leads': 'leads', '/vendors': 'vendors', '/consultants': 'consultants', '/clients': 'clients', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
+  '/': 'dashboard', '/founder': 'founder', '/tasks': 'tasks', '/leads': 'leads', '/vendors': 'vendors', '/consultants': 'consultants', '/po': 'po', '/clients': 'clients', '/bd-tracker': 'bd', '/engagement': 'engagement', '/ops': 'ops', '/finance': 'finance',
   '/content-dev': 'content-dev', '/solution': 'solution', '/er-calendar': 'engagement', '/admin': 'permissions',
 };
 
@@ -133,6 +134,11 @@ function Shell() {
             <Route path="/clients" element={
               <PermissionRoute page="clients">
                 <ClientDirectory onRefreshed={setLastRefreshed} />
+              </PermissionRoute>
+            } />
+            <Route path="/po" element={
+              <PermissionRoute page="po">
+                <POTracker onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
             <Route path="/consultants" element={

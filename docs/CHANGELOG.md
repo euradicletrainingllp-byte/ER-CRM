@@ -70,3 +70,13 @@
 - Build not run here (Windows node_modules: rollup native binary missing in the VM) — run `npm run build` locally.
 - 2026-11-04 (d): Popup lists — double-tap an engagement row → /engagement opens its Edit form (state editEc); a proposal row → /bd-tracker opens that version's BD Edit form (state editBd). Needs edit rights. Files: KpiListModal.jsx, EngagementCalendar.jsx, SolutionTracker.jsx.
 - 2026-11-04 (e): Popup lists — "Excel" button top-right downloads the shown list (search applied): engagement columns (S No, Index, EG ID, client, program, dates, consultants, location, status, price, invoice, payment, received, feedback, list amount) or proposal columns (P.ID, version, client, topic, date, status, BD / Solution value, topics, industry, type). Logged as EXPORT. File: KpiListModal.jsx.
+
+## 2026-11-04 — Credit notes, travel / cancelled invoice nos, PO Tracker
+- EC columns (api.js EC_BILL_COLS, own flag ecHasBillCols): Travel Invoice No, Cancelled Invoice No, Credit Notes (JSON [{no,date,amount,reason}]), Credit Note Total (INR). Written on every EC save once Excel has them; Finance Tracker panel edits them (credit-note list add/remove).
+- money.js: creditNotesOf / creditTotalOf; expectedOf (dues, balance) now minus credit notes.
+- Finance dashboard: invoices = program + cancelled; travel invoices and credit notes in the sub-line; Credit Notes table live from EC (fixed FIN_CREDIT_NOTES only when none recorded).
+- New PO Tracker /po (POTracker.jsx, poApi.js): POTable, key PO ID; Engagement Index list; Used = Σ Price of linked EC rows; Balance; status Active / Fully Used / Expired / Closed; Finance panel shows the PO + balance.
+- Permissions: page po (prefix PO) — POCreate / PORead / POUpdate / PODelete.
+- Pending: PO_CRUD flow + URL, ENGAGEMENT_CRUD mapping of the 4 columns, 4 PermissionsTable columns + Save Permissions mapping.
+- 2026-11-04 (f): "🧾 PO Tracker" button in Finance Tracker header and BD Tracker (BD view) header, shown with PO view access; Finance panel PO link opens /po?po=<PO ID> in the app.
+- 2026-11-04 (g): Sales dashboard Order Book reads the PO Tracker (PO value, delivered / confirmed = Price of linked EC rows by Index, balance; Closed hidden). No fallback: empty until POs are recorded. File: SalesLiveDashboard.jsx.

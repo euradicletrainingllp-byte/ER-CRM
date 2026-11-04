@@ -15,6 +15,7 @@ const NAV = [
   { path: '/content-dev', page: 'content-dev',icon: '📘', label: 'Content Dev Tracker' },
   { path: '/vendors',     page: 'vendors',    icon: '🧾', label: 'Vendor Services'     },
   { path: '/clients',     page: 'clients',    icon: '🏢', label: 'Client Directory'    },
+  { path: '/po',          page: 'po',         icon: '🧾', label: 'PO Tracker' },
   { path: '/consultants', page: 'consultants',icon: '🧑‍🏫', label: 'Consultant Directory' },
 ];
 

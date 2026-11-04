@@ -21,6 +21,7 @@ const AUDIT_MODULE = {
   VENDOR_CRUD:        'vendors',
   TASKS_CRUD:         'tasks',
   CONSULTANTS_CRUD:   'consultants',
+  PO_CRUD:            'po',
   CLIENTS_CRUD:       'clients',
 };
 const AUDIT_ACTION = { get: 'READ', create: 'CREATE', update: 'UPDATE', delete: 'DELETE' };
@@ -200,6 +201,10 @@ export const EC_EXTRA_COLS = [
 const headerVariants = h => [...new Set([h, h.replace(/[^A-Za-z0-9]/g, '_'), h.replace(/[^A-Za-z0-9]+/g, '_'), h.replace(/[^A-Za-z0-9]+/g, '_').replace(/_+$/, '')])];
 // Sent only once the Excel table has these columns (seen in a read) — before that, saves stay exactly as they were
 let _ecHasExtraCols = false;
+// Travel / cancelled invoice numbers + credit notes (4 Nov 2026) — own flag: sent only once the EC table has them
+export const EC_BILL_COLS = [['travelInvoiceNo', 'Travel Invoice No'], ['cancelledInvoiceNo', 'Cancelled Invoice No'], ['creditNotes', 'Credit Notes'], ['creditNoteTotal', 'Credit Note Total (INR)', 'num']];
+let _ecHasBillCols = false;
+export const ecHasBillCols = () => _ecHasBillCols;
 export const ecHasExtraCols = () => _ecHasExtraCols;
 function readEcExtras(r) {
   const out = {};
@@ -207,6 +212,11 @@ function readEcExtras(r) {
     const raw = getField(r, ...headerVariants(h), k);
     if (raw !== undefined) _ecHasExtraCols = true;
     out[k] = raw == null || String(raw).trim() === '' ? '' : type === 'num' ? toAmount(raw) : type === 'date' ? formatDate(raw) : String(raw);
+  });
+  EC_BILL_COLS.forEach(([k, h, type]) => {
+    const raw = getField(r, ...headerVariants(h), k);
+    if (raw !== undefined) _ecHasBillCols = true;
+    out[k] = raw == null || String(raw).trim() === '' ? '' : type === 'num' ? toAmount(raw) : String(raw).trim();
   });
   const invNo = getField(r, ...headerVariants('Invoice No'), 'Invoice Number', 'Invoice_Number', 'invoiceNo');
   if (invNo !== undefined) _ecHasInvoiceNo = true;
@@ -222,6 +232,7 @@ export const ecHasInvoiceNo = () => _ecHasInvoiceNo;
 export const ecExtraFields = e => ({
   ...(_ecHasExtraCols ? Object.fromEntries(EC_EXTRA_COLS.map(([k, h]) => [h, e?.[k] ?? ''])) : {}),
   ...(_ecHasInvoiceNo ? { 'Invoice No': String(e?.invoiceNo ?? '').trim() } : {}),
+  ...(_ecHasBillCols ? Object.fromEntries(EC_BILL_COLS.map(([k, h]) => [h, e?.[k] ?? ''])) : {}),
 });
 
 function getField(r, ...keys) {
