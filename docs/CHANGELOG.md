@@ -106,3 +106,29 @@
 - Manual: Engagement Calendar updates (DBS ER/069–070 re-invoice, Ford ER/066–067 invoice dates, GST 0 for Ford/DBS, travel invoice nos, Vertiv / Air India invoice dates).
 - `src/components/FinanceLiveDashboard.jsx`: Total Due in Market = Raised within Timeline – Yet to Receive + Overdue; To be Raised no longer added (value, list, sub-text, "How" note).
 - `FinanceLiveDashboard.jsx` card rules: Raised = Invoice date / Invoice No / Payment Invoice Raised or Partly Received. To be Raised = not raised (ended/delivered). Yet to Receive = raised, Invoice date + 30 days not crossed (no date = not crossed). Overdue = raised, due date crossed. Closed = Received / Cancelled / NA / Pro Bono. "How" notes updated.
+
+## 2026-11-05 — Sales dashboard re-layout
+- Sales tab grouped into three source bands: BD Tracker → Engagement Calendar → Clients (KPIs split per band).
+- Expected Major Pipeline: every In Process proposal (latest version, any FY), scrollable chart; proposals without a BD value listed below.
+- Monthly Revenue Key Clients: table → stacked bar (top 8 clients + Others, month total on top).
+- Client Engagement by FY: table → Returning vs New stacked bar + per-FY client chips (new clients highlighted, live years).
+- Quarterly Targets table moved beside its chart; long lists scroll inside their card (pipeline, order book, chips).
+- Files: src/components/SalesLiveDashboard.jsx, src/components/erdDashboard.css. Backup: backups/sales-dash-*.tgz
+- Manual setup pending: none.
+
+## 2026-11-05 — Finance Tracker amount cards
+- KPI row now shows amounts, counts as tag lines: Total Revenue (price, hero) · To be Raised (Price+GST+travel) · Billed Yet to Receive · Billed Overdue (balance = Price+GST−TDS+travel − received) · Collected (Received Date in period) · Not Billed.
+- Added a revenue flow bar (to raise / yet to receive / overdue / collected). Cards still filter the list.
+- Files: src/pages/FinanceTracker.jsx, src/styles/index.css. Backup: backups/finance-kpi-*.tgz
+
+## 2026-11-06 — Finance dashboard: receivables, pending billing, credit notes visuals
+- Outstanding Payments Due + Invoice-Level Breakdown → "Receivables by Client": ageing tiles + stacked bar per client (within credit / 1–30 / 31–60 / 60+); tap = engagements list; double-tap = open in Finance Tracker.
+- To be Invoiced → stacked bars per client by days since last session; same tap / double-tap.
+- Credit notes only from the Finance Tracker "Credit Notes" field (fixed Excel list dropped); cancelled invoices shown as tags grouped by client.
+- Finance Tracker reads the hand-off (sessionStorage ercrm.fin.open): selects the engagement, sets its FY, scrolls to it.
+- Files: src/components/FinanceReceivables.jsx (new), FinanceLiveDashboard.jsx, erdDashboard.css, src/pages/FinanceTracker.jsx. Backup: backups/finance-receivables-*.tgz
+
+## 2026-11-06 — Sales dashboard: Clients section redesign
+- New src/components/SalesClients.jsx: 4 tiles (unique, active vs last FY, new, top-client share) · ranked Revenue by Client (delivered/scheduled, tap → month strip) · Client Mix doughnut (top 6 + Others) · Client Growth (returning/new + total line) · Client Roster tabs per FY.
+- Removed old key-clients stacked chart, FY chart + chip list and the single Total Unique Clients card.
+- Files: SalesClients.jsx (new), SalesLiveDashboard.jsx, erdDashboard.css. Backup: backups/sales-clients-*.tgz

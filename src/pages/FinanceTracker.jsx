@@ -13,7 +13,7 @@ import { usePermissions } from '../hooks/usePermissions.js';
 import ExportButton from '../components/ExportButton.jsx';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, FIN_RULES } from '../config/pendingFields.js';
-import { money, gstOf, tdsOf, receivableOf, expectedOf, GST_RATE, TDS_RATE, creditNotesOf, creditTotalOf } from '../services/money.js';
+import { money, gstOf, tdsOf, receivableOf, expectedOf, GST_RATE, TDS_RATE, creditNotesOf, creditTotalOf, collectedOf, invoiceTotal } from '../services/money.js';
 import { getPOs, peekPOs, poConfigured, poUsage, poStatus, splitIdx } from '../services/poApi.js';
 
 /**
@@ -552,6 +552,20 @@ export default function FinanceTracker({ onRefreshed }) {
     return () => clearTimeout(t);
   }, [rangeLoading, syncing, nextUpKey, fyF, monthF, scrollNonce]);
 
+  // Hand-off from Dashboard → Finance (double-tap an engagement): open it here for editing
+  const handoff = useRef((() => { try { const k = sessionStorage.getItem('ercrm.fin.open'); sessionStorage.removeItem('ercrm.fin.open'); return k; } catch { return null; } })());
+  useEffect(() => {
+    const k = handoff.current; if (!k || !data.length) return;
+    const row = data.find(e => keyOf(e) === k);
+    if (!row) return;
+    handoff.current = null;
+    const d = isoStart(row);
+    setFyF(d ? String(fyOf(d)) : 'all'); setMonthF('all'); setStageF('All'); setSearch('');
+    setSelected(k); setFocusN(n => n + 1);
+    scrolledFor.current = `${d ? String(fyOf(d)) : 'all'}|all|${scrollNonce}`;   // keep the auto-scroll from moving away
+    setTimeout(() => rowRefs.current[k]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 450);
+  }, [data]);   // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // KPI counts follow the period and the search. The stage filter is not applied to the
   // cards — the cards ARE the stage filter (click to filter), so applying it would zero the others.
@@ -569,6 +583,38 @@ export default function FinanceTracker({ onRefreshed }) {
   const activeCard = (...st) => (st.includes(stageF) ? { outline: '2px solid #AA78A6', outlineOffset: -2 } : {});
   const notBilledN = kpiRows.filter(r => ['Pro Bono', 'Not Applicable'].includes(r._stage)).length;
   const pendSub = v => overdueF && <div className="kpi-sub" style={{ color: 'var(--red)', fontWeight: 600 }}>Pending {inr(v)}</div>;
+
+  // Amount cards (5 Nov 2026) — follow the FY / month filter and the search, like the counts
+  const fin = useMemo(() => {
+    const live = kpiRows.filter(r => r._stage !== 'Cancelled');
+    const revenue = live.reduce((t, r) => t + num(r.price), 0);
+    const gst = live.reduce((t, r) => t + gstOf(r), 0), travel = live.reduce((t, r) => t + num(r.travelExpenses), 0);
+    const raise = kpiRows.filter(r => ['To Invoice', 'Invoice Overdue'].includes(r._stage));
+    const billed = kpiRows.filter(r => ['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r._stage))
+      .map(r => ({ r, bal: Math.max(0, expectedOf(r) - collectedOf(r).gross), od: overdueDays(r) }));
+    const yet = billed.filter(b => !(b.od > 0)), od = billed.filter(b => b.od > 0);
+    // Collected: Amount Received with a Received Date in the period (no Received Date → Invoice date)
+    const q = search.toLowerCase();
+    const inP = d => !!d && (fyF === 'all' || fyOf(d) === +fyF) && (monthF === 'all' || d.startsWith(monthF));
+    const paid = data.filter(e => {
+      if (q && ![e.company, e.topic, e.egId, e.sno, e.consultant1, e.invoiceNo].some(v => String(v ?? '').toLowerCase().includes(q))) return false;
+      if (!(collectedOf(e).gross > 0)) return false;
+      const d = toIso(e.receivedDate) || toIso(e.invoice);
+      return fyF === 'all' && monthF === 'all' ? true : inP(d);
+    });
+    const collected = paid.reduce((t, e) => t + collectedOf(e).gross, 0);
+    const billedTotal = kpiRows.filter(r => toIso(r.invoice) && r._stage !== 'Cancelled').reduce((t, r) => t + invoiceTotal(r), 0);
+    const sum = l => l.reduce((t, b) => t + b.bal, 0);
+    return {
+      revenue, gst, travel, n: live.length,
+      raise: raise.reduce((t, r) => t + invoiceTotal(r), 0), raiseN: raise.length, raiseLate: raise.filter(r => r._stage === 'Invoice Overdue').length,
+      yet: sum(yet), yetN: yet.length, od: sum(od), odN: od.length, oldest: od.reduce((m, b) => Math.max(m, b.od), 0),
+      collected, paidN: paid.length, collPct: billedTotal > 0 ? Math.round((collected / billedTotal) * 100) : null,
+      nb: kpiRows.filter(r => ['Pro Bono', 'Not Applicable'].includes(r._stage)).reduce((t, r) => t + num(r.price), 0),
+    };
+  }, [kpiRows, data, search, fyF, monthF]);
+  const L = v => { const n = Number(v) || 0; return n >= 1e7 ? `₹${(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `₹${(n / 1e5).toFixed(2)} L` : `₹${Math.round(n).toLocaleString('en-IN')}`; };
+  const share = v => (fin.revenue > 0 ? Math.max(0, (v / fin.revenue) * 100) : 0);
 
   // Pending-fields bar: engagements with finance details due but empty, in the list order
   const pendingBar = useMemo(() => pendingItems(filtered.filter(r => keyOf(r)), FIN_RULES, r => ({
@@ -692,24 +738,46 @@ export default function FinanceTracker({ onRefreshed }) {
         </div>
       )}
 
-      {/* KPIs — click to filter */}
-      <div className="kpi-compact">
-        <div className="kpi-card accent" style={{ cursor: 'pointer', ...activeCard('All') }} onClick={() => tapCard('All')}>
-          <div className="kpi-label">Engagements · {rangeLabel}</div><div className="kpi-value">{kpiRows.length}</div>{pendSub(odInvoice + odPayment)}{(kpiRows.length !== rows.length || filtered.length !== kpiRows.length) && <div className="kpi-sub">{filtered.length !== kpiRows.length ? `${filtered.length} in list · ` : ''}of {rows.length} in period</div>}
+      {/* KPIs — amounts first, counts as tag lines; click a card to filter the list */}
+      <div className="fin-kpis">
+        <div className={`fin-kpi hero${stageF === 'All' ? ' on' : ''}`} onClick={() => tapCard('All')} title="Price (INR) of the engagements in this period, cancelled excluded">
+          <div className="fk-lb">Total Revenue · {rangeLabel}</div>
+          <div className="fk-vl">{L(fin.revenue)}</div>
+          <div className="fk-sb">{fin.n} engagement{fin.n === 1 ? '' : 's'} · + GST {L(fin.gst)} · Travel {L(fin.travel)}</div>
+          {(kpiRows.length !== rows.length || filtered.length !== kpiRows.length) && <div className="fk-sb dim">{filtered.length !== kpiRows.length ? `${filtered.length} in list · ` : ''}of {rows.length} in period</div>}
         </div>
-        <div className="kpi-card" style={{ cursor: 'pointer', ...activeCard('All To Invoice', 'Invoice Overdue', 'To Invoice') }} onClick={() => tapCard(overdueF ? 'Invoice Overdue' : 'All To Invoice')} title="Engagement ended, invoice not raised yet">
-          <div className="kpi-label">To Invoice</div><div className="kpi-value">{count('Invoice Overdue', 'To Invoice')}{overdueTag(count('Invoice Overdue'))}</div>{pendSub(odInvoice)}
+        <div className={`fin-kpi gold${['All To Invoice', 'Invoice Overdue', 'To Invoice'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard(overdueF ? 'Invoice Overdue' : 'All To Invoice')} title="Price + GST + travel of sessions ended / delivered with no invoice raised">
+          <div className="fk-lb">To be Raised</div>
+          <div className="fk-vl">{L(fin.raise)}</div>
+          <div className="fk-sb">{fin.raiseN} session{fin.raiseN === 1 ? '' : 's'}{fin.raiseLate > 0 && <b className="fk-red"> · {fin.raiseLate} past invoice date</b>}</div>
         </div>
-        <div className="kpi-card blue" style={{ cursor: 'pointer', ...activeCard('All Awaiting Payment', 'Overdue (30+ days)', 'Payment Overdue', 'Awaiting Payment', 'Partly Received') }} onClick={() => tapCard(overdueF ? 'Overdue (30+ days)' : 'All Awaiting Payment')} title="Invoice raised, not fully paid">
-          <div className="kpi-label">Awaiting Payment</div><div className="kpi-value">{count('Awaiting Payment', 'Payment Overdue', 'Partly Received')}{overdueTag(kpiRows.filter(r => overdueDays(r) > 0).length)}</div>{pendSub(odPayment)}
+        <div className={`fin-kpi blue${['All Awaiting Payment', 'Awaiting Payment', 'Partly Received'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard('All Awaiting Payment')} title="Unpaid balance (Price + GST − TDS + travel − received) on invoices within the 30-day credit period">
+          <div className="fk-lb">Billed · Yet to Receive</div>
+          <div className="fk-vl">{L(fin.yet)}</div>
+          <div className="fk-sb">{fin.yetN} invoice{fin.yetN === 1 ? '' : 's'} within 30 days</div>
         </div>
-        <div className="kpi-card green" style={{ cursor: 'pointer', ...activeCard('Received') }} onClick={() => tapCard('Received')}>
-          <div className="kpi-label">Received</div><div className="kpi-value">{count('Received')}</div>
+        <div className={`fin-kpi coral${['Overdue (30+ days)', 'Payment Overdue'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard('Overdue (30+ days)')} title="Unpaid balance where invoice date + 30 days has passed">
+          <div className="fk-lb">Billed · Overdue</div>
+          <div className="fk-vl">{L(fin.od)}</div>
+          <div className="fk-sb">{fin.odN} invoice{fin.odN === 1 ? '' : 's'}{fin.oldest > 0 && <b className="fk-red"> · oldest {fin.oldest}d late</b>}</div>
         </div>
-        <div className="kpi-card" style={{ cursor: 'pointer', ...activeCard('Not Billed') }} onClick={() => tapCard('Not Billed')} title="Payment Status NA or Pro Bono — not billed">
-          <div className="kpi-label">Not Billed</div><div className="kpi-value">{notBilledN}</div><div className="kpi-sub">NA · Pro Bono</div>
+        <div className={`fin-kpi green${stageF === 'Received' ? ' on' : ''}`} onClick={() => tapCard('Received')} title="Amount Received with a Received Date in this period (Invoice date when no Received Date)">
+          <div className="fk-lb">Collected · {rangeLabel}</div>
+          <div className="fk-vl">{L(fin.collected)}</div>
+          <div className="fk-sb">{fin.paidN} payment{fin.paidN === 1 ? '' : 's'}{fin.collPct != null && ` · ${fin.collPct}% of billed`}</div>
+        </div>
+        <div className={`fin-kpi grey sm${stageF === 'Not Billed' ? ' on' : ''}`} onClick={() => tapCard('Not Billed')} title="Payment Status NA or Pro Bono — not billed">
+          <div className="fk-lb">Not Billed</div>
+          <div className="fk-vl">{notBilledN}</div>
+          <div className="fk-sb">NA · Pro Bono · {L(fin.nb)}</div>
         </div>
       </div>
+      {fin.revenue > 0 && (
+        <div className="fin-flow" title="Share of total revenue (price) in each state">
+          {[['gold', fin.raise, 'To be raised'], ['blue', fin.yet, 'Yet to receive'], ['coral', fin.od, 'Overdue'], ['green', fin.collected, 'Collected']].map(([c, v, l]) =>
+            v > 0 && <span key={c} className={c} style={{ flexGrow: share(v) }} title={`${l}: ${L(v)}`}>{share(v) >= 7 ? `${l} ${Math.round(share(v))}%` : ''}</span>)}
+        </div>
+      )}
 
       {!rangeLoading && (
         <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={canEditFin} storageKey="finance" noun="engagement" />

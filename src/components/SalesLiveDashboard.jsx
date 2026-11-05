@@ -21,6 +21,7 @@ import {
 import { buildProposalLines, monthSlot, uniqueProposals } from './proposalData.js';
 import { egItem, propItem, inrS } from './KpiListModal.jsx';
 import { getPOs, peekPOs, poConfigured, poUsage, poStatus } from '../services/poApi.js';
+import SalesClients from './SalesClients.jsx';
 
 import { LIVE_FROM_FY, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
 
@@ -46,8 +47,8 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   const curQ = Math.floor(monthIdx(todayISO) / 3);              // 0 = Q1 (Apr–Jun) — read each render
   // Proposal lines (each version counts, in its own month) — same logic as the BD Tracker page
   // Value = BD Proposal Value only (same as the BD Tracker — no fallback to Solution Values)
-  const proposals = useMemo(() => buildProposalLines(solutions).filter(p => p.fy >= LIVE_FROM_FY)
-    .map(p => ({ ...p, value: p.bdValue })), [solutions]);
+  const allLines = useMemo(() => buildProposalLines(solutions).map(p => ({ ...p, value: p.bdValue })), [solutions]);
+  const proposals = useMemo(() => allLines.filter(p => p.fy >= LIVE_FROM_FY), [allLines]);
   const curProps = useMemo(() => proposals.filter(p => p.fy === CURRENT_FY), [proposals]);
 
   // Engagement Calendar sessions that count as revenue
@@ -101,6 +102,8 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       .filter(r => r.target || r.achieved);
   }, [revenue]);   // eslint-disable-line react-hooks/exhaustive-deps
   const curTarget = targets.find(t => t.live);
+  const fyTarget = (SALES_TARGETS[CURRENT_FY] || []).reduce((t, v) => t + (v || 0), 0);
+  const fyAchieved = quarterOf(CURRENT_FY).reduce((t, v) => t + v, 0);
 
   /* ── Order book from the PO Tracker: PO value vs linked Engagement Calendar sessions (Index) ── */
   const [pos, setPos] = useState(() => peekPOs() || []);
@@ -136,9 +139,11 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   const ob = orderBook.reduce((t, r) => ({ booked: t.booked + r.booked, delivered: t.delivered + r.delivered, confirmed: t.confirmed + r.confirmed, balance: t.balance + r.balance }),
     { booked: 0, delivered: 0, confirmed: 0, balance: 0 });
 
-  /* ── Expected major pipeline: open (In Process) proposals by value ── */
-  const pipeline = useMemo(() => proposals.filter(p => p.isLatest && p.pipeline === 'process' && p.value > 0)
-    .sort((a, b) => b.value - a.value).slice(0, 8), [proposals]);
+  /* ── Expected major pipeline: every open (In Process) proposal in the BD Tracker, latest version, any date ── */
+  const pipelineAll = useMemo(() => allLines.filter(p => p.isLatest && p.pipeline === 'process')
+    .sort((a, b) => (b.value || 0) - (a.value || 0)), [allLines]);
+  const pipeline = useMemo(() => pipelineAll.filter(p => p.value > 0), [pipelineAll]);
+  const pipeNoValue = useMemo(() => pipelineAll.filter(p => !(p.value > 0)), [pipelineAll]);
 
   /* ── Client engagement by FY ── */
   const clientYears = useMemo(() => {
@@ -150,9 +155,10 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
     for (let y = LIVE_FROM_FY; y <= CURRENT_FY; y++) {
       const names = new Map();
       sessions.filter(e => e.fy === y).forEach(e => { const c = clean(e.company); const k = clientKey(c); if (k && !names.has(k)) names.set(k, c); });
-      const newC = [...names.keys()].filter(k => !seen.has(k)).length;
+      const newKeys = [...names.keys()].filter(k => !seen.has(k));
+      const newNames = new Set(newKeys.map(k => names.get(k)));
       names.forEach((_, k) => seen.add(k));
-      out.push({ fy: y, newC, total: names.size, names: [...names.values()].sort((a, b) => a.localeCompare(b)), live: true });
+      out.push({ fy: y, newC: newKeys.length, total: names.size, names: [...names.values()].sort((a, b) => a.localeCompare(b)), newNames, live: true });
     }
     return { rows: out, unique: seen.size };
   }, [sessions]);
@@ -208,10 +214,17 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtInr(ctx.raw)}`, footer: items => `Total: ${fmtInr(monthRows[items[0].dataIndex].total)}` } } } },
   }), [monthRows]);
 
-  const pipeCfg = useMemo(() => ({ type: 'bar', data: {
-    labels: pipeline.map(p => (p.topic ? [p.client || p.id, p.topic.length > 34 ? p.topic.substring(0, 32) + '..' : p.topic] : (p.client || p.id))),
-    datasets: [{ label: 'Approx. Value (Rs.)', data: pipeline.map(p => p.value), backgroundColor: [TL, NV, GD, GN, PU, RD], borderRadius: 4 }],
-  }, options: { ...inrAxis(bOpts(false, true), 'x'), indexAxis: 'y', layout: { padding: { right: 80 } }, plugins: { legend: { display: false }, datalabels: dlInrH() } } }), [pipeline]);
+  const pipeCfg = useMemo(() => {
+    const opts = { ...inrAxis(bOpts(false, true), 'x'), indexAxis: 'y', layout: { padding: { right: 80 } },
+      plugins: { legend: { display: false }, datalabels: dlInrH(), tooltip: { callbacks: {
+        title: items => { const p = pipeline[items[0].dataIndex]; return `${p.client || p.id} · ${p.id}`; },
+        label: ctx => `${pipeline[ctx.dataIndex].topic || '—'}: ${fmtInr(ctx.raw)}` } } } };
+    opts.scales.y = { ...opts.scales.y, ticks: { font: { size: 11 }, autoSkip: false } };
+    return { type: 'bar', data: {
+      labels: pipeline.map(p => (p.topic ? [p.client || p.id, p.topic.length > 34 ? p.topic.substring(0, 32) + '..' : p.topic] : (p.client || p.id))),
+      datasets: [{ label: 'Approx. Value (Rs.)', data: pipeline.map(p => p.value), backgroundColor: pipeline.map((p, i) => (i < 3 ? NV : TL)), borderRadius: 4, maxBarThickness: 26 }],
+    }, options: opts };
+  }, [pipeline]);
 
   const targetCfg = useMemo(() => ({ type: 'bar', data: {
     labels: targets.map(t => (t.pct > 0 ? `${t.q} (${t.pct.toFixed(1)}%)` : t.q)),
@@ -231,36 +244,75 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       <SourceNote live={`proposals from the BD Tracker · revenue and clients from the Engagement Calendar (${fyLong(LIVE_FROM_FY)} onward)`}
                   fixed="earlier quarterly revenue, targets and client history from Dashboard Report Data (12 Oct 2026)" />
 
+      {/* ═══════════ 1 · BD TRACKER ═══════════ */}
+      <div className="s-band"><span className="s-band-tag bd">BD Tracker</span><span className="s-band-txt">Proposals, funnel &amp; open pipeline</span></div>
       <div className="kg g5">
         <Kpi tone="tl" label="Total Proposals (YTD)" list={() => curProps.map(p => propItem(p))} value={tot.n} sub={`${uniqueProposals(curProps)} unique proposals${tot.n > uniqueProposals(curProps) ? ` · ${tot.n - uniqueProposals(curProps)} revisions` : ''}`} how="Proposal lines (Proposal ID + version) dated in this FY — month from Date of Discussion, else BD Month, else submission dates; each revision counts again." />
         <Kpi tone="gn" label="Won Value (YTD)" list={() => curProps.filter(p => /won/i.test(p.status)).map(p => propItem(p))} value={fmtInr(tot.wonV)} sub={`${tot.wonC} proposals won`} tag="Closed" tagTone="up" how="Sum of BD Proposal Value of this FY's lines with BD Status = Won (BD value only — Solution values not used)." />
         <Kpi tone="gd" label="In-Process Value" list={() => curProps.filter(p => /in.?process/i.test(p.status)).map(p => propItem(p))} value={fmtInr(tot.ipV)} sub={`${tot.ipC} proposals active`} tag="In negotiation" how="Sum of BD Proposal Value of this FY's lines still In Process in the BD Tracker." />
         <Kpi tone="nv" label={`${curTarget?.q || `Q${curQ + 1}`} Target Achieved`} list={() => sessions.filter(e => e.fy === CURRENT_FY && Math.floor(((+e.startDate.slice(5, 7) + 8) % 12) / 3) === curQ).map(e => egItem(e))} value={curTarget?.target ? `${curTarget.pct.toFixed(1)}%` : '--'}
              sub={curTarget?.target ? `of ${fmtInr(curTarget.target)} ${curTarget.q} target` : 'no target set for this quarter'} how="Engagement Calendar Price (INR) of sessions starting this quarter (cancelled / lost / on hold excluded) ÷ the quarter's revenue target." />
-        <Kpi tone="pu" label="Total Unique Clients" list={() => { const m = new Map(); (engagements || []).forEach(e => { const k = String(e.company || '').trim(); if (k) { const g = m.get(k.toLowerCase()) || { name: k, n: 0, last: '' }; g.n++; if ((e.startDate || '') > g.last) g.last = e.startDate || ''; m.set(k.toLowerCase(), g); } }); return [...m.values()].sort((a, b) => b.n - a.n).map(g => ({ name: g.name, sub: `Last session ${g.last || 'TBD'}`, right: `${g.n} session${g.n > 1 ? 's' : ''}` })); }} value={clientYears.unique} sub="Since inception, till date" tag="All-time" how="Distinct client names — earlier years from the baseline report plus every Engagement Calendar company from FY 2026-27 (name variants merged)." />
+        <Kpi tone="pu" label={`${fyTiny(CURRENT_FY)} Target Achieved`} list={() => sessions.filter(e => e.fy === CURRENT_FY).map(e => egItem(e))} value={fyTarget ? `${((fyAchieved / fyTarget) * 100).toFixed(1)}%` : '--'}
+             sub={fyTarget ? `${fmtInr(fyAchieved)} of ${fmtInr(fyTarget)} FY target` : 'no target set for this FY'} how="Engagement Calendar Price (INR) of this FY's sessions (cancelled / lost / on hold excluded) ÷ the FY revenue target (sum of the four quarterly targets)." />
       </div>
 
       <div className="cg c1">
         <div className="card"><h3>Monthly Proposal Status — {curName}</h3><div className="cs">Won vs Lost vs In-Process, stacked per month — Count and Value</div>
           <div className="cv-pair">
             {propCfgs.map(c => (
-              <div className="cv-col" key={c.m}><div className="cv-col-title">{c.m === 'count' ? '📊 Count' : '₹ Value'}</div><ChartBox config={c.cfg} /></div>
+              <div className="cv-col" key={c.m}><div className="cv-col-title">{c.m === 'count' ? '📊 Count' : '₹ Value'}</div><ChartBox config={c.cfg} className="ch-wrap tall" /></div>
             ))}
           </div>
         </div>
       </div>
 
-      <div className="cg c11">
-        <div className="card"><h3>Proposal Funnel (YTD)</h3><div className="cs">Won vs Lost vs In-Process by value</div>
-          {tot.wonV + tot.lostV + tot.ipV > 0 ? <ChartBox config={funnelCfg} /> : <div className="erd-empty">No proposal values in {curName} yet</div>}
+      <div className="cg c12">
+        <div className="card flex-card"><h3>Proposal Funnel (YTD)</h3><div className="cs">Won vs Lost vs In-Process by value</div>
+          {tot.wonV + tot.lostV + tot.ipV > 0 ? <ChartBox config={funnelCfg} className="ch-wrap s-fill" /> : <div className="erd-empty">No proposal values in {curName} yet</div>}
         </div>
-        <div className="card"><h3>Quarterly Revenue Comparison</h3><div className="cs">Q1–Q4 across financial years</div><ChartBox config={qrevCfg} /></div>
+        <div className="card flex-card"><h3>Expected Major Pipeline</h3>
+          <div className="cs">All {pipelineAll.length} proposals In Process in the BD Tracker (latest version) · {fmtInr(pipeline.reduce((s, p) => s + p.value, 0))} open value{pipeNoValue.length ? ` · ${pipeNoValue.length} without a value` : ''}</div>
+          {pipeline.length
+            ? <div className="s-scroll" style={{ maxHeight: 420 }}><ChartBox config={pipeCfg} height={heightFor(pipeline.length, 34, 240)} /></div>
+            : <div className="erd-empty">No open proposals with a value</div>}
+          {pipeNoValue.length > 0 && (
+            <div className="s-scroll" style={{ maxHeight: 150, marginTop: 10 }}>
+              <table className="mt compact">
+                <thead><tr><th>No BD value yet</th><th>Particulars</th><th className="nr">P.ID</th></tr></thead>
+                <tbody>{pipeNoValue.map(p => <tr key={p.key}><td style={{ fontWeight: 600 }}>{p.client || '—'}</td><td style={{ fontSize: 12 }}>{p.topic || '—'}</td><td className="nr">{p.id}</td></tr>)}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ═══════════ 2 · ENGAGEMENT CALENDAR ═══════════ */}
+      <div className="s-band"><span className="s-band-tag ec">Engagement Calendar</span><span className="s-band-txt">Revenue (Price INR, by session start month), targets &amp; order book</span></div>
+
+      <div className="cg c11">
+        <div className="card"><h3>Monthly Revenue — {curName}</h3><div className="cs">Delivered vs scheduled, Price (INR) by session start month</div><ChartBox config={monthlyCfg} className="ch-wrap tall" /></div>
+        <div className="card"><h3>Quarterly Revenue Comparison</h3><div className="cs">Q1–Q4 across financial years</div><ChartBox config={qrevCfg} className="ch-wrap tall" /></div>
       </div>
 
       <div className="cg c11">
-        <div className="card"><h3>Monthly Revenue — {curName}</h3><div className="cs">Revenue per month from the Engagement Calendar (Price INR, by session start date)</div><ChartBox config={monthlyCfg} /></div>
+        <div className="card"><h3>Quarterly Targets vs Achieved</h3><div className="cs">{curName} quarter-by-quarter tracking</div><ChartBox config={targetCfg} className="ch-wrap tall" /></div>
+        <div className="card flex-card"><h3>{curName} — Quarterly Targets</h3><div className="cs">Target vs achieved revenue by quarter (achieved = Engagement Calendar revenue)</div>
+          <div className="s-scroll" style={{ maxHeight: 340 }}><table className="mt">
+            <thead><tr><th>Quarter</th><th className="nr">Target (Rs.)</th><th className="nr">Achieved (Rs.)</th><th className="nr">% Achieved</th></tr></thead>
+            <tbody>
+              {targets.map(t => (
+                <tr key={t.q} className={t.live ? 'cur' : ''}><td style={{ fontWeight: 600 }}>{t.q}{t.live && <span style={{ fontSize: 11, color: TL, fontWeight: 700 }}> (current)</span>}</td>
+                  <td className="nr">{t.target ? fmtInr(t.target) : '—'}</td><td className="nr">{fmtInr(t.achieved)}</td><td className="nr">{t.target ? `${t.pct.toFixed(2)}%` : '—'}</td></tr>
+              ))}
+              <tr className="tot"><td>Total (YTD)</td><td className="nr">{fmtInr(sumT)}</td><td className="nr">{fmtInr(sumA)}</td><td className="nr">{sumT ? ((sumA / sumT) * 100).toFixed(2) : '0.00'}%</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div className="cg c1">
         <div className="card"><h3>Order Book — Active Programs</h3><div className="cs">PO Tracker: PO value vs linked Engagement Calendar sessions — delivered, confirmed by dates, balance</div>
-          <div className="mt-scroll" style={{ overflowX: 'auto' }}><table className="mt compact">
+          <div className="s-scroll" style={{ maxHeight: 360 }}><table className="mt compact">
             <thead><tr><th>Client</th><th>{usePo ? 'PO / Scope' : 'Program'}</th><th className="nr">{usePo ? 'PO Value' : 'Booked'}</th><th className="nr">Delivered</th><th className="nr">Confirmed by Dates</th><th className="nr">Balance</th></tr></thead>
             <tbody>
               {orderBook.length === 0 && <tr><td colSpan={6} className="erd-empty">{poConfigured() ? 'No POs recorded yet — add them in the PO Tracker' : 'PO Tracker not connected yet (PO_CRUD flow URL missing)'}</td></tr>}
@@ -278,66 +330,9 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
         </div>
       </div>
 
-      <div className="cg c21">
-        <div className="card"><h3>Expected Major Pipeline</h3><div className="cs">High-value deals expected to close (In Process in the BD Tracker)</div>
-          {pipeline.length ? <ChartBox config={pipeCfg} height={heightFor(pipeline.length, 40, 240)} /> : <div className="erd-empty">No open proposals with a value</div>}
-          <table className="mt" style={{ marginTop: 12 }}>
-            <thead><tr><th>Client</th><th>Particulars</th><th className="nr">Approx. Value</th></tr></thead>
-            <tbody>
-              {pipeline.map(p => <tr key={p.id}><td style={{ fontWeight: 600 }}>{p.client || p.id}</td><td style={{ fontSize: 12 }}>{p.topic}</td><td className="nr">{fmtInr(p.value)}</td></tr>)}
-              <tr className="tot"><td>Total</td><td /><td className="nr">{fmtInr(pipeline.reduce((s, p) => s + p.value, 0))}</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <div className="card"><h3>Quarterly Targets vs Achieved</h3><div className="cs">{curName} quarter-by-quarter tracking</div><ChartBox config={targetCfg} /></div>
-      </div>
-
-      <div className="cg c1">
-        <div className="card"><h3>{curName} — Quarterly Targets</h3><div className="cs">Target vs achieved revenue by quarter (achieved = Engagement Calendar revenue)</div>
-          <table className="mt">
-            <thead><tr><th>Quarter</th><th className="nr">Target (Rs.)</th><th className="nr">Achieved (Rs.)</th><th className="nr">% Achieved</th></tr></thead>
-            <tbody>
-              {targets.map(t => (
-                <tr key={t.q} className={t.live ? 'cur' : ''}><td style={{ fontWeight: 600 }}>{t.q}{t.live && <span style={{ fontSize: 11, color: TL, fontWeight: 700 }}> (current)</span>}</td>
-                  <td className="nr">{t.target ? fmtInr(t.target) : '—'}</td><td className="nr">{fmtInr(t.achieved)}</td><td className="nr">{t.target ? `${t.pct.toFixed(2)}%` : '—'}</td></tr>
-              ))}
-              <tr className="tot"><td>Total (YTD)</td><td className="nr">{fmtInr(sumT)}</td><td className="nr">{fmtInr(sumA)}</td><td className="nr">{sumT ? ((sumA / sumT) * 100).toFixed(2) : '0.00'}%</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="cg c1">
-        <div className="card"><h3>Monthly Revenue Key Clients</h3><div className="cs">Clients driving revenue each month</div>
-          <table className="mt">
-            <thead><tr><th>Month</th><th className="nr">Revenue</th><th>Key Clients</th></tr></thead>
-            <tbody>
-              {monthRows.map(r => (
-                <tr key={r.month}><td style={{ fontWeight: 600 }}>{r.month}</td><td className="nr">{fmtInr(r.total)}</td>
-                  <td style={{ fontSize: 12 }}>{[...r.clients.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c).join(', ')}</td></tr>
-              ))}
-              <tr className="tot"><td>Total</td><td className="nr">{fmtInr(monthTotal)}</td><td /></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="cg c1">
-        <div className="card"><h3>Client Engagement by Financial Year</h3><div className="cs">New vs total clients engaged each financial year, since inception</div>
-          <table className="mt">
-            <thead><tr><th>Financial Year</th><th className="nr">New Clients</th><th className="nr">Total Clients</th><th>Client Names</th></tr></thead>
-            <tbody>
-              {clientYears.rows.map(r => (
-                <tr key={r.fy}><td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{fyCell(r.fy)}{r.live && <span style={{ fontSize: 11, color: TL, fontWeight: 700 }}> (live)</span>}</td>
-                  <td className="nr">{r.newC}</td><td className="nr">{r.total}</td>
-                  <td style={{ fontSize: 12, color: 'var(--e-text2)', lineHeight: 1.5 }}>{r.names.join(', ')}</td></tr>
-              ))}
-              <tr className="tot"><td>Total</td><td className="nr">{ceTot.newC}</td><td className="nr">{ceTot.total}</td><td style={{ fontSize: 12 }}>Cumulative since inception</td></tr>
-            </tbody>
-          </table>
-          <div className="mt-note">Cumulative since inception: {ceTot.newC} new-client additions across {ceTot.total} total client engagements · {fyTiny(CURRENT_FY)} clients = companies with a session in the Engagement Calendar.</div>
-        </div>
-      </div>
+      {/* ═══════════ 3 · CLIENTS ═══════════ */}
+      <div className="s-band"><span className="s-band-tag cl">Clients</span><span className="s-band-txt">Who drives revenue and how the client base grows · Engagement Calendar (FY 2026-27 onward) + baseline report</span></div>
+      <SalesClients sessions={sessions} clientYears={clientYears} clientKey={clientKey} />
     </div>
   );
 }

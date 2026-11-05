@@ -31,8 +31,9 @@ import { PERIODS, periodRange, periodLabelOf, inRange } from '../services/action
 // Same stage / overdue rules as the Finance Tracker page, so the two always agree
 import { financeStage, overdueDays } from '../pages/FinanceTracker.jsx';
 import { egItem, inrS } from './KpiListModal.jsx';
+import { ReceivablesByClient, PendingBilling, CreditAndCancelled } from './FinanceReceivables.jsx';
 import {
-  LIVE_FROM_FY, FIN_REVENUE_L, FIN_INVOICES, FIN_BILLING_DAYS, FIN_AVG_PER_DAY, FIN_CREDIT_NOTES, FIN_TARGET_CR,
+  LIVE_FROM_FY, FIN_REVENUE_L, FIN_INVOICES, FIN_BILLING_DAYS, FIN_AVG_PER_DAY, FIN_TARGET_CR,
 } from '../config/dashboardBaseline.js';
 
 const MONTHS = ['April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February', 'March'];
@@ -217,9 +218,9 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     rows.filter(r => r.amount > 0 && !isRaised(r) && !CLOSED.includes(r.stage) && (['Invoice Overdue', 'To Invoice'].includes(r.stage) || /^delivered$/i.test(clean(r.status)) || (r.end && r.end < todayISO)))
       .forEach(r => {
         const k = `${keyOf(r.company)}|${keyOf(r.topic)}`;
-        if (!m.has(k)) m.set(k, { client: clean(r.company), topic: clean(r.topic), amount: 0, first: r.end, last: r.end, po: clean(r.poStatus), sessions: 0 });
+        if (!m.has(k)) m.set(k, { client: clean(r.company), topic: clean(r.topic), amount: 0, first: r.end, last: r.end, po: clean(r.poStatus), sessions: 0, keys: [] });
         const g = m.get(k);
-        g.amount += r.amount; g.sessions++;
+        g.amount += r.amount; g.sessions++; if (clean(r.engagementKey)) g.keys.push(clean(r.engagementKey));
         if (r.end && (!g.first || r.end < g.first)) g.first = r.end; if (r.end > g.last) g.last = r.end;
         if (!g.po && clean(r.poStatus)) g.po = clean(r.poStatus);
       });
@@ -239,9 +240,14 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     return { rows: out, grand: { fy: 'Grand Total', rev: tr, days: td, avg: td > 0 ? tr / td : 0, note: '' } };
   }, [live]);
 
-  // Live credit notes (EC "Credit Notes") for the current FY; the fixed Excel list only when none are recorded yet
+  // Credit notes — only from the Finance Tracker "Credit Notes" section (EC column), current FY
   const liveCn = rows.flatMap(r => creditNotesOf(r).map(c => ({ c, r }))).filter(({ c, r }) => { const d = toIso(c.date) || r.inv; return d && fyStartOf(d) === CURRENT_FY; });
-  const credit = liveCn.length ? liveCn.map(({ c, r }) => [`${c.no} — ${clean(r.company)}`, 1, money(c.amount), [c.date ? fmtDate(toIso(c.date)) : '', clean(c.reason), clean(r.topic)].filter(Boolean).join(' · ')]) : (FIN_CREDIT_NOTES[CURRENT_FY] || []);
+  const cnList = liveCn.map(({ c, r }) => ({ no: clean(c.no), amount: money(c.amount), date: toIso(c.date) || r.inv, reason: clean(c.reason), client: clean(r.company), topic: clean(r.topic), key: clean(r.engagementKey) }))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  // Cancelled invoices — "Cancelled Invoice No" (several numbers per cell allowed), dated by Invoice date, else start date
+  const cancelledList = rows.flatMap(r => String(r.cancelledInvoiceNo || '').split(/[,;&\n]+/).map(x => x.trim()).filter(Boolean)
+    .map(no => ({ no, client: clean(r.company) || '(no company)', topic: clean(r.topic), date: r.inv || r.start, key: clean(r.engagementKey) })))
+    .filter(c => c.date && fyStartOf(c.date) === CURRENT_FY);
   const target = FIN_TARGET_CR[CURRENT_FY];
   const yetL = Math.max(0, dueTotal - overdueTotal);
   const marketL = yetL + overdueTotal;   // Raised within Timeline: Yet to Receive + Overdue (To be Raised not counted)
@@ -269,7 +275,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     <div className="erd" style={{ opacity: refreshing ? 0.85 : 1, transition: 'opacity .2s' }}>
       <div className="pg-hdr"><h2>Finance</h2><p>Revenue, invoices &amp; outstanding collections</p></div>
       <SourceNote live={`${fyLong(LIVE_FROM_FY)} onward and all dues from the Engagement Calendar finance columns (same values as the Finance Tracker)`}
-                  fixed="earlier years (Apr–Oct) and credit notes from Dashboard Report Data (12 Oct 2026)" />
+                  fixed="earlier years (Apr–Oct) from Dashboard Report Data (12 Oct 2026)" />
 
       <div className="erd-period" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '4px 0 12px' }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--e-text2, #6B7280)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Period</span>
@@ -318,61 +324,8 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
         <div className="card"><h3>Invoices &amp; Vouchers Raised</h3><div className="cs">Count per month by financial year (FY total shown with label)</div><ChartBox config={invCfg} className="ch-wrap tall" /></div>
       </div>
 
-      <div className="cg c1">
-        <div className="card"><h3>Outstanding Payments Due</h3>
-          <div className="cs">Invoices with payment overdue: {fmtL(overdueTotal)} across {overdueList.length} invoice(s), {new Set(overdueList.map(d => keyOf(d.r.company))).size} client(s)</div>
-          <div className="mt-scroll"><table className="mt">
-            <thead><tr><th>Client</th><th>Program</th><th>Invoice No.</th><th>Invoice Date</th><th>Due Date</th><th className="nr">Amount Due (Rs. L)</th><th>Past Due</th></tr></thead>
-            <tbody>
-              {overdueList.length === 0 && <tr><td colSpan={7} className="erd-empty">No overdue payments</td></tr>}
-              {overdueList.map((d, i) => (
-                <tr key={i}><td style={{ fontWeight: 600 }}>{clean(d.r.company)}</td><td>{clean(d.r.topic)}</td><td style={{ whiteSpace: 'nowrap' }}>{d.r.invNo || '—'}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(d.r.inv)}</td><td style={{ whiteSpace: 'nowrap' }}>{fmtDate(d.dueDate)}</td>
-                  <td className="nr" style={{ whiteSpace: 'nowrap' }}>{L(d.open).toFixed(2)}</td>
-                  <td style={{ color: RD, fontWeight: 700 }}>{`${d.pastDays} days`}</td></tr>
-              ))}
-              {overdueList.length > 0 && <tr className="tot"><td>Total</td><td /><td /><td /><td /><td className="nr">{overdueTotal.toFixed(2)}</td><td /></tr>}
-            </tbody>
-          </table></div>
-        </div>
-      </div>
-
-      <div className="cg c1">
-        <div className="card"><h3>Outstanding Payments — Invoice-Level Breakdown</h3>
-          <div className="cs">Invoices awaiting payment (within credit period): {fmtL(yetL)} across {awaiting.length} invoice(s)</div>
-          <div className="mt-scroll"><table className="mt">
-            <thead><tr><th>Client</th><th>Program</th><th>Invoice No.</th><th>Invoice Date</th><th>Due Date</th><th className="nr">Amount Due (Rs. L)</th><th>Status</th></tr></thead>
-            <tbody>
-              {awaiting.length === 0 && <tr><td colSpan={7} className="erd-empty">No invoices awaiting payment</td></tr>}
-              {awaiting.map((d, i) => (
-                <tr key={i}><td style={{ fontWeight: 600 }}>{clean(d.r.company)}</td><td>{clean(d.r.topic)}</td><td style={{ whiteSpace: 'nowrap' }}>{d.r.invNo || '—'}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(d.r.inv)}</td><td style={{ whiteSpace: 'nowrap' }}>{fmtDate(d.dueDate)}</td>
-                  <td className="nr" style={{ whiteSpace: 'nowrap' }}>{L(d.open).toFixed(2)}</td>
-                  <td>{d.r.p === 'Partly Received' ? 'Partly received' : `${daysBetween(todayISO, d.dueDate)} days left`}</td></tr>
-              ))}
-              {awaiting.length > 0 && <tr className="tot"><td>Total</td><td /><td /><td /><td /><td className="nr">{yetL.toFixed(2)}</td><td /></tr>}
-            </tbody>
-          </table></div>
-        </div>
-      </div>
-
-      <div className="cg c1">
-        <div className="card"><h3>To be Invoiced — Pending Billing</h3>
-          <div className="cs">Pending billing: {fmtL(toInvoiceL)} across {toInvoice.length} program(s) — sessions ended with no Invoice date</div>
-          <div className="mt-scroll"><table className="mt">
-            <thead><tr><th>Client</th><th className="nr">Amount (Rs. L)</th><th>Program Details</th><th>Program Dates</th><th>Reason Pending</th></tr></thead>
-            <tbody>
-              {toInvoice.length === 0 && <tr><td colSpan={5} className="erd-empty">Nothing pending — every ended session has an Invoice date</td></tr>}
-              {toInvoice.map((t, i) => (
-                <tr key={i}><td style={{ fontWeight: 600 }}>{t.client}</td><td className="nr" style={{ whiteSpace: 'nowrap' }}>{L(t.amount).toFixed(2)}</td><td>{t.topic}{t.sessions > 1 ? ` (${t.sessions} sessions)` : ''}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{t.first === t.last ? fmtDate(t.first) : `${fmtDate(t.first)} – ${fmtDate(t.last)}`}</td>
-                  <td style={{ fontSize: 12, color: 'var(--e-text2)' }}>{t.po ? `PO: ${t.po} · ` : ''}Invoice not raised · {t.waiting != null ? `${t.waiting} days since last session` : 'no session date in the Engagement Calendar'}</td></tr>
-              ))}
-              {toInvoice.length > 0 && <tr className="tot"><td>Total</td><td className="nr">{toInvoiceL.toFixed(2)}</td><td /><td /><td /></tr>}
-            </tbody>
-          </table></div>
-        </div>
-      </div>
+      <div className="cg c1"><ReceivablesByClient dues={dues} daysLeft={d => daysBetween(todayISO, d)} /></div>
+      <div className="cg c1"><PendingBilling toInvoice={toInvoice} /></div>
 
       <div className="cg c11">
         <div className="card"><h3>No. of Billing Days per Month</h3><div className="cs">Monthly billing distribution by financial year (FY total shown with label)</div><ChartBox config={dayCfg} className="ch-wrap tall" /></div>
@@ -390,18 +343,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
         </div>
       </div>
 
-      <div className="cg c1">
-        <div className="card"><h3>Credit Notes — {curName}</h3><div className="cs">{liveCn.length ? 'From the Engagement Calendar "Credit Notes" column (Finance Tracker)' : 'No credit notes recorded in the Engagement Calendar yet — fixed values from the Excel'}</div>
-          <table className="mt">
-            <thead><tr><th>Credit Note</th><th className="nr">Count</th><th className="nr">Value</th><th>Date / Notes</th></tr></thead>
-            <tbody>
-              {credit.length === 0 && <tr><td colSpan={4} className="erd-empty">No credit notes recorded for {curName}</td></tr>}
-              {credit.map((c, i) => <tr key={i}><td>{c[0]}</td><td className="nr">{c[1]}</td><td className="nr">{fmtL(c[2])}</td><td>{c[3]}</td></tr>)}
-              {credit.length > 0 && <tr className="tot"><td>Total</td><td className="nr">{credit.reduce((s, c) => s + c[1], 0)}</td><td className="nr">{fmtL(credit.reduce((s, c) => s + c[2], 0))}</td><td /></tr>}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <CreditAndCancelled notes={cnList} cancelled={cancelledList} fyLabel={curName} />
     </div>
   );
 }
