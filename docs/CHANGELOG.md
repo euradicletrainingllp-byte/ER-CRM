@@ -92,3 +92,9 @@
 
 ## 2026-11-05 — Sales dashboard
 - Removed the "Proposal Status — FY" month-wise table; the Monthly Proposal Status charts show the same data. File: src/components/SalesLiveDashboard.jsx.
+
+## 2026-11-05 — Client Directory update/delete: send `keyColumn`
+- CLIENTS_CRUD flow's Update/Delete use Key Value `triggerBody()?['keyColumn']`; CRM now sends `keyColumn` (= record ID) alongside `sno` on update and delete.
+- `keyColumn` added to audit meta keys (not logged as a field change).
+- Files: src/services/clientsApi.js, src/services/api.js. Backup: Claude outputs/backup-2026-11-05-clients-keycolumn.tgz
+- Manual (flow): Update a row → item must remove 'keyColumn' and must NOT call removeProperty on '@odata.etag' (dotted names are rejected → InvalidTemplate).

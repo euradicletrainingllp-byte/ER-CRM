@@ -25,7 +25,7 @@ const AUDIT_MODULE = {
   CLIENTS_CRUD:       'clients',
 };
 const AUDIT_ACTION = { get: 'READ', create: 'CREATE', update: 'UPDATE', delete: 'DELETE' };
-const AUDIT_META_KEYS = new Set(['action', 'rowId', 'sno', 'SNo', 'newSno', 'table']);
+const AUDIT_META_KEYS = new Set(['action', 'rowId', 'sno', 'SNo', 'newSno', 'table', 'keyColumn']);
 const _auditRows = new Map();          // module → Map(sno → { vals:{norm→value}, names:{norm→column} })
 
 function auditRowsOf(module) {

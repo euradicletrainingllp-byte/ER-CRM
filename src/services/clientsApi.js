@@ -183,10 +183,10 @@ export async function addRecord(kind, rec) {
 export async function updateRecord(kind, rec) {
   const t = TABLES[kind];
   if (!txt(rec[t.idKey])) throw new Error(`This record has no ${t.cols[t.idKey]} in Excel, so it cannot be saved. Type an ID in its ${t.cols[t.idKey]} cell, then Refresh.`);
-  return callFlow('CLIENTS_CRUD', { action: 'update', table: t.table, sno: rec[t.idKey], ...toBody(kind, rec, { create: false }) });
+  return callFlow('CLIENTS_CRUD', { action: 'update', table: t.table, sno: rec[t.idKey], keyColumn: rec[t.idKey], ...toBody(kind, rec, { create: false }) });
 }
 export async function deleteRecord(kind, id) {
-  return callFlow('CLIENTS_CRUD', { action: 'delete', table: TABLES[kind].table, sno: id });
+  return callFlow('CLIENTS_CRUD', { action: 'delete', table: TABLES[kind].table, sno: id, keyColumn: id });
 }
 
 /* ─── Helpers shared by the page ─── */
