@@ -66,7 +66,13 @@ export const GST_RATE = 0.18;
 export const TDS_RATE = 0.10;
 const r2 = n => Math.round(n * 100) / 100;
 // Travel-only invoices (Price 0) keep the GST typed in Excel (GST charged on the travel)
-export const gstOf = e => (money(e?.price) > 0 ? r2(money(e?.price) * GST_RATE) : r2(money(e?.gst)));
+// GST typed as 0 = client billed without GST (e.g. Ford, DBS); blank = 18% of Price
+export const gstOf = e => {
+  const p = money(e?.price);
+  if (p <= 0) return r2(money(e?.gst));
+  const typed = String(e?.gst ?? '').trim();
+  return typed !== '' && money(e?.gst) === 0 ? 0 : r2(p * GST_RATE);
+};
 export const tdsOf = e => r2(money(e?.price) * TDS_RATE);
 /** Price + GST − TDS — what the client actually pays for the program (travel excluded). */
 export const receivableOf = e => r2(money(e?.price) + gstOf(e) - tdsOf(e));

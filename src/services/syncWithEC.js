@@ -270,6 +270,7 @@ export function normPayment(v) {
   if (/not\s*raised/.test(s)) return 'Invoice Not Raised';
   if (/part/.test(s)) return 'Partly Received';
   if (/^n\/?a$|not applicable/.test(s)) return 'NA';
+  if (/un\s*-?\s*paid|not\s*(paid|received)/.test(s)) return 'Invoice Raised';   // "Unpaid" contains "paid" — test it first
   if (/receiv|paid|yes/.test(s)) return 'Received';
   if (/raised|invoiced|pending/.test(s)) return 'Invoice Raised';
   return '';

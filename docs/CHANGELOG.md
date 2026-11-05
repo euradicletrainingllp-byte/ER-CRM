@@ -98,3 +98,11 @@
 - `keyColumn` added to audit meta keys (not logged as a field change).
 - Files: src/services/clientsApi.js, src/services/api.js. Backup: Claude outputs/backup-2026-11-05-clients-keycolumn.tgz
 - Manual (flow): Update a row → item must remove 'keyColumn' and must NOT call removeProperty on '@odata.etag' (dotted names are rejected → InvalidTemplate).
+
+## 2026-11-05 — Market due fix: "Unpaid" read as Received; GST 0 respected
+- `src/services/syncWithEC.js` normPayment: "Unpaid" / "Not paid" / "Not received" now = Invoice Raised (before, the "paid" match made them Received, dropping ~Rs.21.7L of open invoices from Finance dashboard dues and sending Received = Yes to Ops Checklist).
+- `src/services/money.js` gstOf: GST typed as 0 = no GST (Ford, DBS); blank still = 18% of Price.
+- Backup: `Claude outputs/backup-2026-11-05-unpaid-gst/`. Not pushed; vite build to run locally (Windows node_modules).
+- Manual: Engagement Calendar updates (DBS ER/069–070 re-invoice, Ford ER/066–067 invoice dates, GST 0 for Ford/DBS, travel invoice nos, Vertiv / Air India invoice dates).
+- `src/components/FinanceLiveDashboard.jsx`: Total Due in Market = Raised within Timeline – Yet to Receive + Overdue; To be Raised no longer added (value, list, sub-text, "How" note).
+- `FinanceLiveDashboard.jsx` card rules: Raised = Invoice date / Invoice No / Payment Invoice Raised or Partly Received. To be Raised = not raised (ended/delivered). Yet to Receive = raised, Invoice date + 30 days not crossed (no date = not crossed). Overdue = raised, due date crossed. Closed = Received / Cancelled / NA / Pro Bono. "How" notes updated.
