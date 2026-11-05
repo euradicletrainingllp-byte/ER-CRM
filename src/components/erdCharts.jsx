@@ -52,7 +52,7 @@ export function loadChartJs() {
 }
 
 /** One Chart.js chart. `config` must be memoised — a new object redraws the chart. */
-export function ChartBox({ config, className = 'ch-wrap', height, listFor, title }) {
+export function ChartBox({ config, className = 'ch-wrap', height, listFor, title, how }) {
   const canvas = useRef(null);
   const [err, setErr] = useState(null);
   const [pick, setPick] = useState(null);
@@ -84,7 +84,7 @@ export function ChartBox({ config, className = 'ch-wrap', height, listFor, title
     <div className={className} style={height ? { height } : undefined}>
       {err ? <div className="erd-err">Charts could not load ({err}). Check the internet connection and refresh.</div>
            : <canvas ref={canvas} />}
-      {pick && <KpiListModal title={title ? `${title} — ${pick.title}` : pick.title} items={pick.items} onClose={() => setPick(null)} />}
+      {pick && <KpiListModal title={title ? `${title} — ${pick.title}` : pick.title} items={pick.items} how={how} onClose={() => setPick(null)} />}
     </div>
   );
 }
@@ -167,7 +167,7 @@ export function Kpi({ tone, label, value, sub, tag, tagTone = 'info', how, list,
   const [open, setOpen] = useState(false);
   return (
     <div className={`kpi ${tone}`} onClick={list ? () => setOpen(true) : undefined} style={list ? { cursor: 'pointer' } : undefined} title={list ? 'Click to see the list' : undefined}>
-      {open && <div onClick={e => e.stopPropagation()}><KpiListModal title={label} sub={listSub} items={list} onClose={() => setOpen(false)} /></div>}
+      {open && <div onClick={e => e.stopPropagation()}><KpiListModal title={label} sub={listSub} items={list} how={how} onClose={() => setOpen(false)} /></div>}
       <div className="lb">{label}</div>
       <div className="vl">{value}</div>
       <div className="sb">{sub}</div>

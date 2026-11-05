@@ -252,12 +252,20 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   const yetL = Math.max(0, dueTotal - overdueTotal);
   const marketL = yetL + overdueTotal;   // Raised within Timeline: Yet to Receive + Overdue (To be Raised not counted)
   const awaiting = dues.filter(d => !d.overdue), overdueList = dues.filter(d => d.overdue);
-  const dueItem = d => ({ ...egItem(d.r, inrS(d.open)), badge: d.overdue ? `Overdue · ${d.pastDays}d` : 'Awaiting', sub: `${clean(d.r.company)} · Inv ${d.r.invNo || '—'} · ${fmtDate(d.r.inv)} · due ${fmtDate(d.dueDate)}` });
+  const dueItem = d => ({ ...egItem(d.r, inrS(d.open), 'finance'), badge: d.overdue ? `Overdue · ${d.pastDays}d` : 'Awaiting', sub: `${clean(d.r.company)} · Inv ${d.r.invNo || '—'} · ${fmtDate(d.r.inv)} · due ${fmtDate(d.dueDate)}` });
   const tiItem = t => ({ name: t.topic || '(No program)', sub: `${t.client} · ${t.first === t.last ? fmtDate(t.first) : `${fmtDate(t.first)} – ${fmtDate(t.last)}`}${t.sessions > 1 ? ` · ${t.sessions} sessions` : ''}`, right: inrS(t.amount), badge: 'To be raised' });
   const L_ = {
-    inv: () => pk.invRows.map(r => egItem(r, inrS(r.net))), rev: () => pk.revList.map(r => egItem(r, inrS(r.net))),
-    col: () => pk.paidRows.map(r => ({ ...egItem(r, inrS(r.got)), badge: r.rec ? `Received ${fmtDate(r.rec)}` : 'Received' })), tds: () => pk.revList.map(r => egItem(r, inrS(tdsOf(r)))),
+    inv: () => pk.invRows.map(r => egItem(r, inrS(r.net), 'finance')), rev: () => pk.revList.map(r => egItem(r, inrS(r.net), 'finance')),
+    col: () => pk.paidRows.map(r => ({ ...egItem(r, inrS(r.got), 'finance'), badge: r.rec ? `Received ${fmtDate(r.rec)}` : 'Received' })), tds: () => pk.revList.map(r => egItem(r, inrS(tdsOf(r)), 'finance')),
     raise: () => toInvoice.map(tiItem), yet: () => awaiting.map(dueItem), od: () => overdueList.map(dueItem), mkt: () => [...overdueList.map(dueItem), ...awaiting.map(dueItem)],
+  };
+  /* Chart taps → the sessions behind a bar (live years only) */
+  const finList = (kind, lb, ds) => {
+    const fy = +String(lb).slice(0, 4), m = MONTHS.indexOf(ds);
+    if (!(fy >= LIVE_FROM_FY) || m < 0) return [];
+    if (kind === 'rev') return rows.filter(r => { const d = revDate(r); return d && fyStartOf(d) === fy && slot(d) === m; }).map(r => egItem(r, inrS(r.price), 'finance'));
+    return rows.filter(r => r.inv && !r.cancelled && r.invFy === fy && slot(r.inv) === m)
+      .map(r => egItem(r, kind === 'days' ? `${Number(r.day) || 0} day(s)` : (r.invNo || inrS(r.net)), 'finance'));
   };
   const summary = [
     ['No. of Invoices Raised', fmtNum(curInvoices)],
@@ -320,15 +328,15 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="cg c11">
-        <div className="card"><h3>Revenue by FY (Rs. Lakhs)</h3><div className="cs">Monthly revenue per financial year (FY total shown with label) · April → {months[months.length - 1]} · live years by {basis === 'invoice' ? 'Invoice date' : 'session start date'}; earlier years fixed from the Excel report</div><ChartBox config={revCfg} className="ch-wrap tall" /></div>
-        <div className="card"><h3>Invoices &amp; Vouchers Raised</h3><div className="cs">Count per month by financial year (FY total shown with label)</div><ChartBox config={invCfg} className="ch-wrap tall" /></div>
+        <div className="card"><h3>Revenue by FY (Rs. Lakhs)</h3><div className="cs">Monthly revenue per financial year (FY total shown with label) · April → {months[months.length - 1]} · live years by {basis === 'invoice' ? 'Invoice date' : 'session start date'}; earlier years fixed from the Excel report</div><ChartBox config={revCfg} title="Revenue" how={`Price (INR) by ${basis === 'invoice' ? 'Invoice date' : 'session start'} month (cancelled / lost / on hold excluded). Earlier years are fixed report figures with no records to list.`} listFor={(lb, ds) => finList('rev', lb, ds)} className="ch-wrap tall" /></div>
+        <div className="card"><h3>Invoices &amp; Vouchers Raised</h3><div className="cs">Count per month by financial year (FY total shown with label)</div><ChartBox config={invCfg} title="Invoices" how="Sessions whose Invoice date falls in that month (one invoice can cover several sessions). Earlier years are fixed report figures." listFor={(lb, ds) => finList('inv', lb, ds)} className="ch-wrap tall" /></div>
       </div>
 
       <div className="cg c1"><ReceivablesByClient dues={dues} daysLeft={d => daysBetween(todayISO, d)} /></div>
       <div className="cg c1"><PendingBilling toInvoice={toInvoice} /></div>
 
       <div className="cg c11">
-        <div className="card"><h3>No. of Billing Days per Month</h3><div className="cs">Monthly billing distribution by financial year (FY total shown with label)</div><ChartBox config={dayCfg} className="ch-wrap tall" /></div>
+        <div className="card"><h3>No. of Billing Days per Month</h3><div className="cs">Monthly billing distribution by financial year (FY total shown with label)</div><ChartBox config={dayCfg} title="Billing days" how="The Day column of sessions invoiced in that month. Earlier years are fixed report figures." listFor={(lb, ds) => finList('days', lb, ds)} className="ch-wrap tall" /></div>
         <div className="card"><h3>Average Revenue per Engaged Day</h3><div className="cs">Revenue efficiency by financial year (Rs. Lakhs per engaged day)</div>
           <table className="mt">
             <thead><tr><th>Financial Year</th><th className="nr">Total Revenue (Rs. L)</th><th className="nr">Engaged Days</th><th className="nr">Avg / Day (Rs. L)</th><th>Notes</th></tr></thead>

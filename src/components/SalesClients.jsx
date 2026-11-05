@@ -9,6 +9,7 @@
  */
 import { useMemo, useState } from 'react';
 import { ChartBox, NV, TL, GD, GN, PU, RD, CURRENT_FY, fyTiny, clean } from './erdCharts.jsx';
+import KpiListModal, { egItem } from './KpiListModal.jsx';
 
 const MONTHS = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
 const slot = iso => (+iso.slice(5, 7) + 8) % 12;
@@ -20,6 +21,11 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
   const [openC, setOpenC] = useState(null);
   const years = clientYears.rows;
   const [tabFy, setTabFy] = useState(CURRENT_FY);
+  const [drill, setDrill] = useState(null);
+  const show = (title, items, how) => setDrill({ title, items, how });
+  const sess = (fy, test = () => true) => sessions.filter(e => e.fy === fy && test(e)).sort((a, b) => String(a.startDate).localeCompare(String(b.startDate))).map(e => egItem(e));
+  const isClient = k => e => clientKey(clean(e.company)) === k;
+  const REV_HOW = 'Engagement Calendar Price (INR) of sessions not Cancelled / Lost / Dropped / Postponed / On hold, by session start date.';
 
   /* Revenue per client per FY (EC) */
   const byFy = useMemo(() => {
@@ -95,12 +101,12 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
   return (
     <>
       <div className="sc-tiles">
-        <div className="sc-tile nv"><div className="sc-lb">Unique Clients</div><div className="sc-vl">{clientYears.unique}</div><div className="sc-sb">since inception · name variants merged</div></div>
-        <div className="sc-tile tl"><div className="sc-lb">Active · {fyTiny(CURRENT_FY)}</div><div className="sc-vl">{yCur.total}
+        <div className="sc-tile nv sl-click" onClick={() => show('Unique clients', () => { const m = new Map(); years.forEach(y => y.names.forEach(n => { const k = clientKey(n); if (!m.has(k)) m.set(k, { name: n, first: y.fy, last: y.fy }); else m.get(k).last = y.fy; })); return [...m.values()].sort((a, b) => a.name.localeCompare(b.name)).map(c => ({ name: c.name, sub: `First year ${fyTiny(c.first)} · last ${fyTiny(c.last)}` })); }, 'Every client name across all years (baseline lists + Engagement Calendar), with name variants merged. First year = the first FY the name appears.')}><div className="sc-lb">Unique Clients</div><div className="sc-vl">{clientYears.unique}</div><div className="sc-sb">since inception · name variants merged</div></div>
+        <div className="sc-tile tl sl-click" onClick={() => show(`Active clients · ${fyTiny(CURRENT_FY)}`, () => sess(CURRENT_FY), `Clients with at least one session this FY. ${REV_HOW}`)}><div className="sc-lb">Active · {fyTiny(CURRENT_FY)}</div><div className="sc-vl">{yCur.total}
           {delta != null && <span className={`sc-delta ${delta >= 0 ? 'up' : 'down'}`}>{delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}</span>}</div>
           <div className="sc-sb">{yPrev ? `vs ${yPrev.total} in ${fyTiny(yPrev.fy)}` : 'clients with a session this FY'}</div></div>
-        <div className="sc-tile gd"><div className="sc-lb">New · {fyTiny(CURRENT_FY)}</div><div className="sc-vl">{yCur.newC}</div><div className="sc-sb">{yCur.total ? `${Math.round((yCur.newC / yCur.total) * 100)}% of active clients` : 'first engagement this FY'}</div></div>
-        <div className={`sc-tile ${topShare > 0.35 ? 'rd' : 'pu'}`}><div className="sc-lb">Top Client Share</div><div className="sc-vl">{curTot ? `${Math.round(topShare * 100)}%` : '--'}</div>
+        <div className="sc-tile gd sl-click" onClick={() => show(`New clients · ${fyTiny(CURRENT_FY)}`, () => { const nk = new Set([...(yCur.newNames || [])].map(clientKey)); return sess(CURRENT_FY, e => nk.has(clientKey(clean(e.company)))); }, 'Sessions of clients whose name never appears in any earlier year.')}><div className="sc-lb">New · {fyTiny(CURRENT_FY)}</div><div className="sc-vl">{yCur.newC}</div><div className="sc-sb">{yCur.total ? `${Math.round((yCur.newC / yCur.total) * 100)}% of active clients` : 'first engagement this FY'}</div></div>
+        <div className={`sc-tile sl-click ${topShare > 0.35 ? 'rd' : 'pu'}`} onClick={() => cur[0] && show(`${cur[0].name} · ${fyTiny(CURRENT_FY)}`, () => sess(CURRENT_FY, isClient(cur[0].key)), `Top client's share = its revenue ÷ all revenue this FY. ${REV_HOW}`)}><div className="sc-lb">Top Client Share</div><div className="sc-vl">{curTot ? `${Math.round(topShare * 100)}%` : '--'}</div>
           <div className="sc-sb">{cur[0] ? `${cur[0].name} · ${L(cur[0].tot)}` : 'no revenue this FY yet'}{topShare > 0.35 ? ' · high concentration' : ''}</div></div>
       </div>
 
@@ -122,10 +128,11 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
                       </span></span>
                       <span className="sc-amt">{L(c.tot)}<em>{curTot ? Math.round((c.tot / curTot) * 100) : 0}%</em></span>
                     </button>
+                    {isOpen && <button type="button" className="sc-view" onClick={() => show(`${c.name} · ${fyTiny(CURRENT_FY)}`, () => sess(CURRENT_FY, isClient(c.key)), REV_HOW)}>View {c.n} session{c.n === 1 ? '' : 's'} →</button>}
                     {isOpen && (
                       <div className="sc-months">
                         {c.months.map((v, m) => (
-                          <div key={m} className="sc-m" title={`${MONTHS[m]}: ${L(v)}`}>
+                          <div key={m} className={`sc-m${v ? ' sl-click' : ''}`} title={`${MONTHS[m]}: ${L(v)}`} onClick={v ? () => show(`${c.name} · ${MONTHS[m]}`, () => sess(CURRENT_FY, e => isClient(c.key)(e) && slot(e.startDate) === m), REV_HOW) : undefined}>
                             <div className="sc-m-bar"><span style={{ height: `${(v / mMax) * 100}%` }} className={v ? '' : 'zero'} /></div>
                             <div className="sc-m-lb">{MONTHS[m]}</div><div className="sc-m-vl">{v ? L(v).replace('₹', '') : '—'}</div>
                           </div>
@@ -142,7 +149,7 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
 
         <div className="card flex-card"><h3>Client Mix — {fyTiny(CURRENT_FY)}</h3><div className="cs">Share of this FY's revenue · top 6 clients + others</div>
           {curTot ? <>
-            <ChartBox config={mixCfg.cfg} className="ch-wrap" height={240} />
+            <ChartBox config={mixCfg.cfg} className="ch-wrap" height={240} title="Client mix" how={`Share of this FY's revenue. ${REV_HOW}`} listFor={lb => { const top = new Set(cur.slice(0, 6).map(c => c.key)); const k = clientKey(lb); return lb === 'Others' ? sess(CURRENT_FY, e => !top.has(clientKey(clean(e.company)))) : sess(CURRENT_FY, isClient(k)); }} />
             <div className="sc-mix-legend">
               {mixCfg.legend.map(x => (
                 <div key={x.l}><i style={{ background: x.c }} /><span title={x.l}>{x.l}</span><b>{L(x.v)}</b><em>{Math.round((x.v / curTot) * 100)}%</em></div>
@@ -154,7 +161,7 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
 
       <div className="cg c1">
         <div className="card"><h3>Client Growth by Financial Year</h3><div className="cs">Returning vs new clients per FY, total on the line · ● = live from the Engagement Calendar · earlier years from the baseline report</div>
-          <ChartBox config={growthCfg} className="ch-wrap tall" />
+          <ChartBox config={growthCfg} className="ch-wrap tall" title="Client growth" how="Live years: companies with a session that FY; New = name never seen in an earlier year. Earlier years are the baseline report lists (no session records)." listFor={(lb, ds) => { const y = years.find(r => (fyTiny(r.fy) + (r.live ? ' ●' : '')) === lb); if (!y?.live) return y ? y.names.map(n => ({ name: n, sub: fyTiny(y.fy) })) : []; const nk = new Set([...(y.newNames || [])].map(clientKey)); return sess(y.fy, e => (/new/i.test(ds) ? nk.has(clientKey(clean(e.company))) : /return/i.test(ds) ? !nk.has(clientKey(clean(e.company))) : true)); }} />
         </div>
       </div>
 
@@ -169,7 +176,7 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
           <div className="s-scroll" style={{ maxHeight: 300 }}>
             <div className="sc-roster">
               {roster.map(c => (
-                <div key={c.name} className={`sc-client${c.isNew ? ' new' : ''}`}>
+                <div key={c.name} className={`sc-client${c.isNew ? ' new' : ''}${tabRow?.live ? ' sl-click' : ''}`} onClick={tabRow?.live ? () => show(`${c.name} · ${fyTiny(tabFy)}`, () => sess(tabFy, isClient(clientKey(c.name))), REV_HOW) : undefined}>
                   <div className="sc-client-top"><b title={c.name}>{c.name}</b>{c.isNew && <span className="sc-new">New</span>}</div>
                   {tabRow?.live && <div className="sc-client-sb">{c.n ? `${c.n} session${c.n === 1 ? '' : 's'} · ${L(c.tot)}` : 'no priced sessions'}</div>}
                 </div>
@@ -178,6 +185,7 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
           </div>
         </div>
       </div>
+      {drill && <KpiListModal title={drill.title} items={drill.items} how={drill.how} onClose={() => setDrill(null)} />}
     </>
   );
 }

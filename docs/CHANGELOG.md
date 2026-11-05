@@ -132,3 +132,20 @@
 - New src/components/SalesClients.jsx: 4 tiles (unique, active vs last FY, new, top-client share) · ranked Revenue by Client (delivered/scheduled, tap → month strip) · Client Mix doughnut (top 6 + Others) · Client Growth (returning/new + total line) · Client Roster tabs per FY.
 - Removed old key-clients stacked chart, FY chart + chip list and the single Total Unique Clients card.
 - Files: SalesClients.jsx (new), SalesLiveDashboard.jsx, erdDashboard.css. Backup: backups/sales-clients-*.tgz
+
+## 2026-11-06 — Solutioning dashboard rebuilt (L&D view)
+- Last FY (fixed report) now compared only by pace (running total, same months) and % share mix — no more full-year vs part-year bars. Tracker data replaces the fixed numbers automatically once FY 2025-26 rows are added.
+- New: 6 KPIs (proposals YTD vs same date last FY, win rate, avg value, turnaround, IP reuse, journey share) · scope switch (this FY / all) · What We Win by 6 dimensions · Portfolio Mix % (count/value) · Industry × Category heatmap · Turnaround & on-time · Process health (versions, V1→final value) · IP library · Open pipeline age · Data gaps.
+- Removed the old count/value pair charts and FY pipeline summary.
+- Files: src/components/SolLiveDashboard.jsx (rewritten), erdDashboard.css. Backup: backups/sol-dash-*.tgz
+
+## 2026-11-06 — Tap-to-list + double-tap-to-edit on Solutioning, Sales and Finance dashboards
+- KpiListModal: shows "How this is calculated" (from the card / chart), double-tap works on phones (two taps < 400 ms), rows highlight on tap.
+- Solutioning: every KPI, chart bar, win row, heatmap cell, process stat, IP topic, pipeline band/row and data-gap tile opens its proposal list → double-tap opens the BD edit form.
+- Sales: proposal / funnel / pipeline / revenue / quarterly / target charts, targets table and PO rows list their records; Clients section tiles, client rows, month bars, doughnut, growth chart and roster tiles list sessions → double-tap opens the Engagement Calendar edit.
+- Finance: KPI lists and Revenue / Invoices / Billing-days charts open the Finance Tracker edit (router state openFin).
+- Files: KpiListModal.jsx, erdCharts.jsx, SolLiveDashboard.jsx, SalesLiveDashboard.jsx, SalesClients.jsx, FinanceLiveDashboard.jsx, FinanceTracker.jsx, erdDashboard.css. Backup: backups/drill-*.tgz
+
+## 2026-11-06 — Solutioning: Portfolio Mix redesign
+- 100% stacked bars replaced by one row per category: paired bars (last FY grey · this FY teal) with % labels, change chip (▲/▼ pts, NEW), biggest gain / drop chips, top 8 + Others / not recorded. Tap a row → this FY's proposals.
+- Files: SolLiveDashboard.jsx, erdDashboard.css. Backup: backups/sol-mix-*.tgz

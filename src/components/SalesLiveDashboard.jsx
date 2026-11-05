@@ -19,7 +19,7 @@ import {
   CURRENT_FY, fyStartOf, fyLong, fyTiny, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
 import { buildProposalLines, monthSlot, uniqueProposals } from './proposalData.js';
-import { egItem, propItem, inrS } from './KpiListModal.jsx';
+import KpiListModal, { egItem, propItem, inrS } from './KpiListModal.jsx';
 import { getPOs, peekPOs, poConfigured, poUsage, poStatus } from '../services/poApi.js';
 import SalesClients from './SalesClients.jsx';
 
@@ -50,6 +50,10 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   const allLines = useMemo(() => buildProposalLines(solutions).map(p => ({ ...p, value: p.bdValue })), [solutions]);
   const proposals = useMemo(() => allLines.filter(p => p.fy >= LIVE_FROM_FY), [allLines]);
   const curProps = useMemo(() => proposals.filter(p => p.fy === CURRENT_FY), [proposals]);
+  const [drill, setDrill] = useState(null);
+  const show = (title, items, how) => setDrill({ title, items, how });
+  const stOf = ds => (/won/i.test(ds) ? 'closed' : /lost/i.test(ds) ? 'lost' : 'process');
+  const qOf = e => Math.floor(monthIdx(e.startDate) / 3);
 
   // Engagement Calendar sessions that count as revenue
   const sessions = useMemo(() => (engagements || [])
@@ -260,7 +264,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
         <div className="card"><h3>Monthly Proposal Status — {curName}</h3><div className="cs">Won vs Lost vs In-Process, stacked per month — Count and Value</div>
           <div className="cv-pair">
             {propCfgs.map(c => (
-              <div className="cv-col" key={c.m}><div className="cv-col-title">{c.m === 'count' ? '📊 Count' : '₹ Value'}</div><ChartBox config={c.cfg} className="ch-wrap tall" /></div>
+              <div className="cv-col" key={c.m}><div className="cv-col-title">{c.m === 'count' ? '📊 Count' : '₹ Value'}</div><ChartBox config={c.cfg} title="Proposal status" how="Proposal lines (ID + version) of this FY in that month, by BD Status: Won / Closed / Confirmed = Won; Lost / Dropped / Rejected (or replaced by a later version) = Lost; else In Process. Value = BD Proposal Value." listFor={(lb, ds) => curProps.filter(p => MONTHS[monthSlot(p)] === lb && p.pipeline === stOf(ds)).sort((a, b) => b.value - a.value).map(p => propItem(p))} className="ch-wrap tall" /></div>
             ))}
           </div>
         </div>
@@ -268,12 +272,12 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
 
       <div className="cg c12">
         <div className="card flex-card"><h3>Proposal Funnel (YTD)</h3><div className="cs">Won vs Lost vs In-Process by value</div>
-          {tot.wonV + tot.lostV + tot.ipV > 0 ? <ChartBox config={funnelCfg} className="ch-wrap s-fill" /> : <div className="erd-empty">No proposal values in {curName} yet</div>}
+          {tot.wonV + tot.lostV + tot.ipV > 0 ? <ChartBox config={funnelCfg} title="Proposal funnel" how="BD Proposal Value of this FY's proposal lines by status." listFor={lb => curProps.filter(p => p.pipeline === stOf(lb)).sort((a, b) => b.value - a.value).map(p => propItem(p))} className="ch-wrap s-fill" /> : <div className="erd-empty">No proposal values in {curName} yet</div>}
         </div>
         <div className="card flex-card"><h3>Expected Major Pipeline</h3>
           <div className="cs">All {pipelineAll.length} proposals In Process in the BD Tracker (latest version) · {fmtInr(pipeline.reduce((s, p) => s + p.value, 0))} open value{pipeNoValue.length ? ` · ${pipeNoValue.length} without a value` : ''}</div>
           {pipeline.length
-            ? <div className="s-scroll" style={{ maxHeight: 420 }}><ChartBox config={pipeCfg} height={heightFor(pipeline.length, 34, 240)} /></div>
+            ? <div className="s-scroll" style={{ maxHeight: 420 }}><ChartBox config={pipeCfg} title="Open pipeline" how="Latest version of every proposal still In Process in the BD Tracker, by BD Proposal Value." listFor={(lb, ds, v) => pipeline.filter(p => p.value === v).map(p => propItem(p))} height={heightFor(pipeline.length, 34, 240)} /></div>
             : <div className="erd-empty">No open proposals with a value</div>}
           {pipeNoValue.length > 0 && (
             <div className="s-scroll" style={{ maxHeight: 150, marginTop: 10 }}>
@@ -290,18 +294,18 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       <div className="s-band"><span className="s-band-tag ec">Engagement Calendar</span><span className="s-band-txt">Revenue (Price INR, by session start month), targets &amp; order book</span></div>
 
       <div className="cg c11">
-        <div className="card"><h3>Monthly Revenue — {curName}</h3><div className="cs">Delivered vs scheduled, Price (INR) by session start month</div><ChartBox config={monthlyCfg} className="ch-wrap tall" /></div>
-        <div className="card"><h3>Quarterly Revenue Comparison</h3><div className="cs">Q1–Q4 across financial years</div><ChartBox config={qrevCfg} className="ch-wrap tall" /></div>
+        <div className="card"><h3>Monthly Revenue — {curName}</h3><div className="cs">Delivered vs scheduled, Price (INR) by session start month</div><ChartBox config={monthlyCfg} title="Monthly revenue" how="Price (INR) of this FY's Engagement Calendar sessions by start month; Delivered = Status Delivered, Scheduled = every other status except Cancelled / Lost / Dropped / Postponed / On hold." listFor={(lb, ds) => sessions.filter(e => e.fy === CURRENT_FY && MONTHS[monthIdx(e.startDate)] === lb && (/deliver/i.test(ds) ? isDelivered(e) : !isDelivered(e))).map(e => egItem(e))} className="ch-wrap tall" /></div>
+        <div className="card"><h3>Quarterly Revenue Comparison</h3><div className="cs">Q1–Q4 across financial years</div><ChartBox config={qrevCfg} title="Quarterly revenue" how="Live years: Price (INR) of Engagement Calendar sessions starting in that quarter (cancelled / lost / on hold excluded). FY 2024-25 and 2025-26 are fixed report figures with no records to list." listFor={(lb, ds) => { const fy = +(String(ds).match(/(20\d{2})/) || [])[1]; const q = +String(lb).slice(1) - 1; return fy >= LIVE_FROM_FY ? sessions.filter(e => e.fy === fy && qOf(e) === q).map(e => egItem(e)) : []; }} className="ch-wrap tall" /></div>
       </div>
 
       <div className="cg c11">
-        <div className="card"><h3>Quarterly Targets vs Achieved</h3><div className="cs">{curName} quarter-by-quarter tracking</div><ChartBox config={targetCfg} className="ch-wrap tall" /></div>
+        <div className="card"><h3>Quarterly Targets vs Achieved</h3><div className="cs">{curName} quarter-by-quarter tracking</div><ChartBox config={targetCfg} title="Quarterly target" how="Achieved = Price (INR) of this FY's sessions starting in the quarter (cancelled / lost / on hold excluded) against the quarterly revenue target." listFor={lb => { const q = +String(lb).slice(1, 2) - 1; return sessions.filter(e => e.fy === CURRENT_FY && qOf(e) === q).map(e => egItem(e)); }} className="ch-wrap tall" /></div>
         <div className="card flex-card"><h3>{curName} — Quarterly Targets</h3><div className="cs">Target vs achieved revenue by quarter (achieved = Engagement Calendar revenue)</div>
           <div className="s-scroll" style={{ maxHeight: 340 }}><table className="mt">
             <thead><tr><th>Quarter</th><th className="nr">Target (Rs.)</th><th className="nr">Achieved (Rs.)</th><th className="nr">% Achieved</th></tr></thead>
             <tbody>
               {targets.map(t => (
-                <tr key={t.q} className={t.live ? 'cur' : ''}><td style={{ fontWeight: 600 }}>{t.q}{t.live && <span style={{ fontSize: 11, color: TL, fontWeight: 700 }}> (current)</span>}</td>
+                <tr key={t.q} className={`sl-click${t.live ? ' cur' : ''}`} onClick={() => show(`${t.q} sessions`, () => sessions.filter(e => e.fy === CURRENT_FY && qOf(e) === +t.q.slice(1) - 1).map(e => egItem(e)), 'Engagement Calendar sessions starting in this quarter that count as revenue.')}><td style={{ fontWeight: 600 }}>{t.q}{t.live && <span style={{ fontSize: 11, color: TL, fontWeight: 700 }}> (current)</span>}</td>
                   <td className="nr">{t.target ? fmtInr(t.target) : '—'}</td><td className="nr">{fmtInr(t.achieved)}</td><td className="nr">{t.target ? `${t.pct.toFixed(2)}%` : '—'}</td></tr>
               ))}
               <tr className="tot"><td>Total (YTD)</td><td className="nr">{fmtInr(sumT)}</td><td className="nr">{fmtInr(sumA)}</td><td className="nr">{sumT ? ((sumA / sumT) * 100).toFixed(2) : '0.00'}%</td></tr>
@@ -317,7 +321,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
             <tbody>
               {orderBook.length === 0 && <tr><td colSpan={6} className="erd-empty">{poConfigured() ? 'No POs recorded yet — add them in the PO Tracker' : 'PO Tracker not connected yet (PO_CRUD flow URL missing)'}</td></tr>}
               {orderBook.map(r => (
-                <tr key={usePo ? r.po.poId : r.p.id}>{usePo
+                <tr key={usePo ? r.po.poId : r.p.id} className="sl-click" onClick={() => usePo && show(`PO ${r.po.poNumber || r.po.poId} · ${r.po.client}`, () => r.u.rows.map(e => egItem(e)), 'Engagement Calendar sessions linked to this PO by Index. Confirmed = their Price (cancelled / lost excluded); Balance = PO value − confirmed.')}>{usePo
                   ? <><td>{r.po.client}</td><td style={{ fontSize: 12 }}><b>{r.po.poNumber || r.po.poId}</b> · {r.st}<div style={{ opacity: 0.75 }}>{r.po.scope || `${r.u.ids.length} engagement(s)`}</div></td></>
                   : <><td>{r.p.client || r.p.id}</td><td style={{ fontSize: 12, opacity: 0.75 }}>{r.p.topic}</td></>}
                   <td className="nr">{fmtInr(r.booked)}</td><td className="nr">{fmtInr(r.delivered)}</td><td className="nr">{fmtInr(r.confirmed)}</td>
@@ -333,6 +337,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       {/* ═══════════ 3 · CLIENTS ═══════════ */}
       <div className="s-band"><span className="s-band-tag cl">Clients</span><span className="s-band-txt">Who drives revenue and how the client base grows · Engagement Calendar (FY 2026-27 onward) + baseline report</span></div>
       <SalesClients sessions={sessions} clientYears={clientYears} clientKey={clientKey} />
+      {drill && <KpiListModal title={drill.title} items={drill.items} how={drill.how} onClose={() => setDrill(null)} />}
     </div>
   );
 }

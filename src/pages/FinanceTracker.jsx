@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { ErrorState } from '../components/LoadingState.jsx';
 import {
@@ -553,7 +553,8 @@ export default function FinanceTracker({ onRefreshed }) {
   }, [rangeLoading, syncing, nextUpKey, fyF, monthF, scrollNonce]);
 
   // Hand-off from Dashboard → Finance (double-tap an engagement): open it here for editing
-  const handoff = useRef((() => { try { const k = sessionStorage.getItem('ercrm.fin.open'); sessionStorage.removeItem('ercrm.fin.open'); return k; } catch { return null; } })());
+  const finLoc = useLocation();
+  const handoff = useRef((() => { if (finLoc.state?.openFin) return finLoc.state.openFin; try { const k = sessionStorage.getItem('ercrm.fin.open'); sessionStorage.removeItem('ercrm.fin.open'); return k; } catch { return null; } })());
   useEffect(() => {
     const k = handoff.current; if (!k || !data.length) return;
     const row = data.find(e => keyOf(e) === k);
