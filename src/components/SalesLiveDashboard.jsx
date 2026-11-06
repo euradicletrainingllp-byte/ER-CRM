@@ -23,7 +23,7 @@ import KpiListModal, { egItem, propItem, inrS } from './KpiListModal.jsx';
 import { getPOs, peekPOs, poConfigured, poUsage, poStatus } from '../services/poApi.js';
 import SalesClients from './SalesClients.jsx';
 
-import { LIVE_FROM_FY, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
+import { LIVE_FROM_FY, SOL_BASELINE, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
 
 const MONTHS = ['April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
 const monthIdx = iso => (+iso.slice(5, 7) + 8) % 12;          // Apr = 0 … Mar = 11
@@ -107,6 +107,13 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   }, [revenue]);   // eslint-disable-line react-hooks/exhaustive-deps
   const curTarget = targets.find(t => t.live);
   const fyTarget = (SALES_TARGETS[CURRENT_FY] || []).reduce((t, v) => t + (v || 0), 0);
+  /* EC revenue KPI cards (this FY) */
+  const ecKpi = useMemo(() => {
+    const cur = sessions.filter(e => e.fy === CURRENT_FY), m = monthIdx(todayISO), q = Math.floor(m / 3);
+    const sum = l => l.reduce((t, e) => t + e.price, 0);
+    const del = cur.filter(isDelivered), sch = cur.filter(e => !isDelivered(e)), mon = cur.filter(e => monthIdx(e.startDate) === m), qtr = cur.filter(e => qOf(e) === q);
+    return { cur, del, sch, mon, qtr, tot: sum(cur), delV: sum(del), schV: sum(sch), monV: sum(mon), qtrV: sum(qtr), q };
+  }, [sessions, todayISO]);   // eslint-disable-line react-hooks/exhaustive-deps
   const fyAchieved = quarterOf(CURRENT_FY).reduce((t, v) => t + v, 0);
 
   /* ── Order book from the PO Tracker: PO value vs linked Engagement Calendar sessions (Index) ── */
@@ -153,8 +160,9 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   const clientYears = useMemo(() => {
     const seen = new Set();
     const out = SALES_CLIENT_ENGAGEMENT.map(r => {
+      const newNames = new Set(r.clients.filter(c => !seen.has(clientKey(c))));   // first year the name appears
       r.clients.forEach(c => seen.add(clientKey(c)));
-      return { fy: r.fy, newC: SALES_NEW_CLIENTS[r.fy] ?? 0, total: r.clients.length, names: r.clients, live: false };
+      return { fy: r.fy, newC: SALES_NEW_CLIENTS[r.fy] ?? newNames.size, total: r.clients.length, names: r.clients, newNames, live: false };
     });
     for (let y = LIVE_FROM_FY; y <= CURRENT_FY; y++) {
       const names = new Map();
@@ -169,6 +177,17 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   const ceTot = clientYears.rows.reduce((t, r) => ({ newC: t.newC + r.newC, total: t.total + r.total }), { newC: 0, total: 0 });
 
   /* ── Chart configs ── */
+  /* Proposal pace (moved from Solutioning, 7 Nov 2026): running total this FY vs last FY — BD Tracker lines, else the fixed report */
+  const pace = useMemo(() => {
+    const prevFy = CURRENT_FY - 1, prevL = proposals.filter(p => p.fy === prevFy);
+    const prev = Array(12).fill(0); let fromReport = false;
+    if (prevL.length) prevL.forEach(p => { prev[monthSlot(p)] += 1; });
+    else if (SOL_BASELINE[prevFy]?.monthly) { SOL_BASELINE[prevFy].monthly.forEach((v, i) => { prev[i] = v; }); fromReport = true; }
+    const cur = Array(12).fill(0); curProps.forEach(p => { cur[monthSlot(p)] += 1; });
+    const cum = a => a.reduce((o, v, i) => { o.push((o[i - 1] || 0) + v); return o; }, []);
+    return { cur: cum(cur), prev: cum(prev), prevName: `${fyTiny(prevFy)}${fromReport ? ' (report)' : ''}`, any: prev.some(Boolean) };
+  }, [proposals, curProps]);
+
   const propCfgs = useMemo(() => ['count', 'value'].map(m => ({ m, cfg: { type: 'bar',
     data: { labels: propStatus.map(r => r.month), datasets: [
       { label: 'Won', data: propStatus.map(r => (m === 'count' ? r.wonC : r.wonV)), backgroundColor: GN, borderRadius: 3 },
@@ -177,7 +196,18 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
     ] },
     options: { ...(m === 'value' ? inrAxis(bOpts(true, false), 'y') : bOpts(true, false)), plugins: { legend: { position: 'top' }, datalabels: m === 'count' ? dlStack() : dlStackInr(),
       tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${m === 'count' ? ctx.raw : fmtInr(ctx.raw)}` } } } },
-  } })), [propStatus]);
+  } })).map(c => {
+    if (c.m !== 'count') return c;
+    const idx = propStatus.map(r => MONTHS.indexOf(r.month)), last = idx.length - 1;
+    const ln = (label, data, color, dash) => ({ type: 'line', label, data, yAxisID: 'y1', borderColor: color, backgroundColor: color, borderWidth: dash ? 2 : 2.5, borderDash: dash ? [6, 4] : undefined,
+      pointRadius: dash ? 0 : 3, tension: 0.25, cubicInterpolationMode: 'monotone', order: 0,
+      datalabels: { display: x => x.dataIndex === last, align: 'top', color, font: { size: 11, weight: '800' } } });
+    const ds = [...c.cfg.data.datasets, ln(`${fyTiny(CURRENT_FY)} running total`, idx.map(i => pace.cur[i]), TL)];
+    if (pace.any) ds.push(ln(`${pace.prevName} running total`, idx.map(i => pace.prev[i]), '#94A3B8', true));
+    const o = c.cfg.options;
+    return { m: c.m, cfg: { ...c.cfg, data: { ...c.cfg.data, datasets: ds }, options: { ...o, scales: { ...o.scales,
+      y1: { position: 'right', beginAtZero: true, stacked: false, grid: { display: false }, ticks: { precision: 0 }, title: { display: true, text: 'running total', font: { size: 11 } } } } } } };
+  }), [propStatus, pace]);
 
   const funnelCfg = useMemo(() => {
     const colors = [GN, RD, GD];
@@ -261,7 +291,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       </div>
 
       <div className="cg c1">
-        <div className="card"><h3>Monthly Proposal Status — {curName}</h3><div className="cs">Won vs Lost vs In-Process, stacked per month — Count and Value</div>
+        <div className="card"><h3>Monthly Proposal Status &amp; Pace — {curName}</h3><div className="cs">Won vs Lost vs In-Process, stacked per month — Count and Value · Count lines = running total of proposals, this FY vs last FY (same months)</div>
           <div className="cv-pair">
             {propCfgs.map(c => (
               <div className="cv-col" key={c.m}><div className="cv-col-title">{c.m === 'count' ? '📊 Count' : '₹ Value'}</div><ChartBox config={c.cfg} title="Proposal status" how="Proposal lines (ID + version) of this FY in that month, by BD Status: Won / Closed / Confirmed = Won; Lost / Dropped / Rejected (or replaced by a later version) = Lost; else In Process. Value = BD Proposal Value." listFor={(lb, ds) => curProps.filter(p => MONTHS[monthSlot(p)] === lb && p.pipeline === stOf(ds)).sort((a, b) => b.value - a.value).map(p => propItem(p))} className="ch-wrap tall" /></div>
@@ -292,6 +322,12 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
 
       {/* ═══════════ 2 · ENGAGEMENT CALENDAR ═══════════ */}
       <div className="s-band"><span className="s-band-tag ec">Engagement Calendar</span><span className="s-band-txt">Revenue (Price INR, by session start month), targets &amp; order book</span></div>
+      <div className="kg g4">
+        <Kpi tone="nv" label={`Revenue · ${fyTiny(CURRENT_FY)}`} list={() => ecKpi.cur.map(e => egItem(e))} value={fmtInr(ecKpi.tot)} sub={`${ecKpi.cur.length} sessions this FY`} how="Engagement Calendar Price (INR) of this FY's sessions by start date (cancelled / lost / dropped / postponed / on hold excluded)." />
+        <Kpi tone="gn" label="Delivered Revenue" list={() => ecKpi.del.map(e => egItem(e))} value={fmtInr(ecKpi.delV)} sub={`${ecKpi.del.length} sessions · ${ecKpi.tot ? Math.round((ecKpi.delV / ecKpi.tot) * 100) : 0}% of FY`} how="Price (INR) of this FY's sessions with Status = Delivered." />
+        <Kpi tone="gd" label="Scheduled Revenue" list={() => ecKpi.sch.map(e => egItem(e))} value={fmtInr(ecKpi.schV)} sub={`${ecKpi.sch.length} sessions not yet delivered`} how="Price (INR) of this FY's sessions with any other counted status (Scheduled, Tentative …)." />
+        <Kpi tone="tl" label={`This Month · Q${ecKpi.q + 1}`} list={() => ecKpi.mon.map(e => egItem(e))} value={fmtInr(ecKpi.monV)} sub={`${ecKpi.mon.length} sessions this month · Q${ecKpi.q + 1} ${fmtInr(ecKpi.qtrV)}`} how="Price (INR) of sessions starting this calendar month; sub-line = sessions starting this quarter." />
+      </div>
 
       <div className="cg c11">
         <div className="card"><h3>Monthly Revenue — {curName}</h3><div className="cs">Delivered vs scheduled, Price (INR) by session start month</div><ChartBox config={monthlyCfg} title="Monthly revenue" how="Price (INR) of this FY's Engagement Calendar sessions by start month; Delivered = Status Delivered, Scheduled = every other status except Cancelled / Lost / Dropped / Postponed / On hold." listFor={(lb, ds) => sessions.filter(e => e.fy === CURRENT_FY && MONTHS[monthIdx(e.startDate)] === lb && (/deliver/i.test(ds) ? isDelivered(e) : !isDelivered(e))).map(e => egItem(e))} className="ch-wrap tall" /></div>

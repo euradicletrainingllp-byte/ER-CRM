@@ -454,6 +454,7 @@ function mapEngagementRows(rows) {
       // Carried from the Solution / BD Tracker when the engagement is added
       proposalLink:   getField(r, 'Proposal Link', 'Proposal_Link', 'proposalLink') ?? '',
       opsChecklist:   getField(r, 'Ops Checklist', 'Ops_Checklist', 'opsChecklist') ?? '',
+      pax:            Number(getField(r, 'No of\nParticipants', 'No of Participants', 'No_of_Participants', 'Participants', 'Pax') ?? 0) || 0,
       ...readEcExtras(r),
     };
   }).filter(r => r.company); // only require company — egId always has a fallback

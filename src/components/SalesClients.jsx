@@ -4,10 +4,11 @@
  *   Revenue by client   EC Price this FY, Delivered vs Scheduled, ranked; tap → month strip
  *   Client mix     doughnut, top 6 + Others
  *   Client growth  Returning + New per FY (stacked) with total line
- *   Roster         clients per FY as tiles (tabs)
+ *   Roster         per FY: EC/baseline clients + Client Directory clients with that Client Since; "All" = whole directory (this FY sessions, 0 if none)
  * Revenue = Engagement Calendar Price (INR) of sessions not Cancelled / Lost / Dropped / Postponed / On hold.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+import { peekClientDirectory, readTableFresh, clientsConfigured } from '../services/clientsApi.js';
 import { ChartBox, NV, TL, GD, GN, PU, RD, CURRENT_FY, fyTiny, clean } from './erdCharts.jsx';
 import KpiListModal, { egItem } from './KpiListModal.jsx';
 
@@ -16,11 +17,15 @@ const slot = iso => (+iso.slice(5, 7) + 8) % 12;
 const L = v => { const n = Number(v) || 0; return n >= 1e7 ? `₹${(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `₹${(n / 1e5).toFixed(2)} L` : `₹${Math.round(n).toLocaleString('en-IN')}`; };
 const isDelivered = e => /^delivered$/i.test(clean(e.status));
 const MIX = [NV, TL, GD, PU, GN, RD];
+// "Client Since (Year)" → FY start year: 2022, "2022", "FY 22-23" all → 2022
+const sinceFy = v => { const t = String(v ?? '').trim(); const m = t.match(/^fy\s*'?(\d{2})\b/i); if (m) return 2000 + +m[1]; const y = parseInt(t, 10); return y >= 2000 && y < 2100 ? y : null; };
 
 export default function SalesClients({ sessions, clientYears, clientKey }) {
   const [openC, setOpenC] = useState(null);
   const years = clientYears.rows;
   const [tabFy, setTabFy] = useState(CURRENT_FY);
+  const [dir, setDir] = useState(() => peekClientDirectory()?.clients || null);   // Client Directory rows (cached first, then fresh)
+  useEffect(() => { if (clientsConfigured()) readTableFresh('clients').then(setDir).catch(() => {}); }, []);
   const [drill, setDrill] = useState(null);
   const show = (title, items, how) => setDrill({ title, items, how });
   const sess = (fy, test = () => true) => sessions.filter(e => e.fy === fy && test(e)).sort((a, b) => String(a.startDate).localeCompare(String(b.startDate))).map(e => egItem(e));
@@ -89,14 +94,22 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
       scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, beginAtZero: true, grid: { color: '#EDF0F5' }, ticks: { precision: 0 } } } },
   }), [years]);
 
-  /* Roster for the selected FY */
+  /* Roster — Engagement Calendar / baseline clients of the FY + Client Directory clients whose Client Since = that FY.
+     "All" tab = every Client Directory client, with this FY's sessions (0 if none). */
+  const ALL = 'all';
+  const dirNames = useMemo(() => (dir || []).map(c => ({ name: clean(c.name), fy: sinceFy(c.clientSince) })).filter(c => c.name), [dir]);
   const roster = useMemo(() => {
-    const r = years.find(y => y.fy === tabFy); if (!r) return [];
-    const rev = byFy.get(tabFy);
-    return r.names.map(n => { const c = rev?.get(clientKey(n)); return { name: n, isNew: !!r.newNames?.has(n), n: c?.n || 0, tot: c ? c.del + c.sch : 0 }; })
-      .sort((a, b) => b.tot - a.tot || a.name.localeCompare(b.name));
-  }, [years, tabFy, byFy, clientKey]);
-  const tabRow = years.find(y => y.fy === tabFy);
+    const fy = tabFy === ALL ? CURRENT_FY : tabFy, rev = byFy.get(fy), y = years.find(r => r.fy === fy);
+    const m = new Map();
+    const add = (n, isNew) => { const k = clientKey(n); if (!k) return; const o = m.get(k); if (o) { o.isNew = o.isNew || isNew; return; } const c = rev?.get(k); m.set(k, { name: n, isNew, n: c?.n || 0, tot: c ? c.del + c.sch : 0 }); };
+    if (tabFy === ALL) dirNames.forEach(c => add(c.name, c.fy === CURRENT_FY));
+    else { (y?.names || []).forEach(n => add(n, !!y.newNames?.has(n))); dirNames.filter(c => c.fy === fy).forEach(c => add(c.name, true)); }
+    return [...m.values()].sort((a, b) => b.tot - a.tot || a.name.localeCompare(b.name));
+  }, [tabFy, years, dirNames, byFy, clientKey]);
+  const tabRow = tabFy === ALL ? null : years.find(y => y.fy === tabFy);
+  const rosterFy = tabFy === ALL ? CURRENT_FY : tabFy;
+  const tabLive = tabFy === ALL || !!tabRow?.live;
+  const newCount = roster.filter(c => c.isNew).length;
 
   return (
     <>
@@ -168,17 +181,20 @@ export default function SalesClients({ sessions, clientYears, clientKey }) {
       <div className="cg c1">
         <div className="card"><h3>Client Roster</h3>
           <div className="sc-tabs">
+            <button type="button" className={tabFy === ALL ? 'on' : ''} onClick={() => setTabFy(ALL)}>All<span>{dirNames.length}</span></button>
             {years.slice().reverse().map(r => (
-              <button key={r.fy} type="button" className={tabFy === r.fy ? 'on' : ''} onClick={() => setTabFy(r.fy)}>{fyTiny(r.fy)}<span>{r.total}</span></button>
+              <button key={r.fy} type="button" className={tabFy === r.fy ? 'on' : ''} onClick={() => setTabFy(r.fy)}>{fyTiny(r.fy)}<span>{r.fy === tabFy ? roster.length : r.total}</span></button>
             ))}
           </div>
-          <div className="cs" style={{ marginTop: 8 }}>{tabRow ? `${tabRow.total} clients · ${tabRow.newC} new${tabRow.live ? ' · revenue and sessions from the Engagement Calendar' : ' · as recorded in the baseline report'}` : ''}</div>
+          <div className="cs" style={{ marginTop: 8 }}>{tabFy === ALL
+            ? (dir ? `${roster.length} clients in the Client Directory · sessions and revenue for ${fyTiny(CURRENT_FY)}` : 'Loading Client Directory…')
+            : `${roster.length} clients · ${newCount} new${tabRow?.live ? ' · Engagement Calendar sessions + Client Directory (Client Since)' : ' · baseline report + Client Directory (Client Since)'}`}</div>
           <div className="s-scroll" style={{ maxHeight: 300 }}>
             <div className="sc-roster">
               {roster.map(c => (
-                <div key={c.name} className={`sc-client${c.isNew ? ' new' : ''}${tabRow?.live ? ' sl-click' : ''}`} onClick={tabRow?.live ? () => show(`${c.name} · ${fyTiny(tabFy)}`, () => sess(tabFy, isClient(clientKey(c.name))), REV_HOW) : undefined}>
+                <div key={c.name} className={`sc-client${c.isNew ? ' new' : ''}${tabLive && c.n ? ' sl-click' : ''}`} onClick={tabLive && c.n ? () => show(`${c.name} · ${fyTiny(rosterFy)}`, () => sess(rosterFy, isClient(clientKey(c.name))), REV_HOW) : undefined}>
                   <div className="sc-client-top"><b title={c.name}>{c.name}</b>{c.isNew && <span className="sc-new">New</span>}</div>
-                  {tabRow?.live && <div className="sc-client-sb">{c.n ? `${c.n} session${c.n === 1 ? '' : 's'} · ${L(c.tot)}` : 'no priced sessions'}</div>}
+                  {tabLive && <div className="sc-client-sb">{`${c.n} session${c.n === 1 ? '' : 's'}${c.n ? ` · ${L(c.tot)}` : ''}`}</div>}
                 </div>
               ))}
             </div>

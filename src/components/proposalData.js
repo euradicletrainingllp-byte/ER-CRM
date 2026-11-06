@@ -154,6 +154,7 @@ export function buildProposalLines(solutions) {
         value: quotedValue,
         bdValue,     // BD Proposal Value only — used by the Sales tab (matches the BD Tracker)
         solTopics: [...new Set(vr.map(r => clean(r.solutionTopic).toLowerCase().replace(/\s+/g, ' ')).filter(Boolean))],
+        itemRows: vr.filter(r => clean(r.solutionTopic)),   // the solution-item rows of this version (Solutioning tab counts these)
         solCount,    // number of solution items (rows with a Solution Topic) in this version
         solValue,    // Solution Values only — used by the Solutioning tab (matches the Solution Tracker)
         pipeline: isLatest ? pipelineOf(clean(anchor.bdStatus) || f('bdStatus'), f('status')) : 'lost',

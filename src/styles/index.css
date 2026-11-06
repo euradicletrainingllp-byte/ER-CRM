@@ -145,6 +145,26 @@ body {
   color: rgba(255,255,255,0.3);
 }
 
+/* Collapse toggle (state saved per browser) */
+.sidebar-logo { position: relative; }
+.sb-toggle {
+  position: absolute; top: 10px; right: 8px;
+  width: 28px; height: 28px; display: grid; place-items: center;
+  background: transparent; border: 0; border-radius: 6px;
+  color: rgba(255,255,255,0.6); cursor: pointer; z-index: 1;
+}
+.sb-toggle:hover { background: rgba(170,120,166,0.15); color: #fff; }
+.sidebar, .main-area { transition: width .18s ease, margin-left .18s ease; }
+html.sb-collapsed { --sidebar-w: 56px; }
+html.sb-collapsed .sidebar-logo { padding: 12px 0; min-height: 52px; }
+html.sb-collapsed .sb-toggle { left: 50%; right: auto; transform: translateX(-50%); }
+html.sb-collapsed .sidebar-logo img,
+html.sb-collapsed .logo-sub,
+html.sb-collapsed .sidebar-section-label,
+html.sb-collapsed .sidebar-footer,
+html.sb-collapsed .nav-item span:not(.nav-icon) { display: none; }
+html.sb-collapsed .nav-item { justify-content: center; padding: 10px 0; }
+
 /* ─── Main area ─── */
 .main-area {
   margin-left: var(--sidebar-w);

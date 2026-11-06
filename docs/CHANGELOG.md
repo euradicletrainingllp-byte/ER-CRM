@@ -149,3 +149,39 @@
 ## 2026-11-06 — Solutioning: Portfolio Mix redesign
 - 100% stacked bars replaced by one row per category: paired bars (last FY grey · this FY teal) with % labels, change chip (▲/▼ pts, NEW), biggest gain / drop chips, top 8 + Others / not recorded. Tap a row → this FY's proposals.
 - Files: SolLiveDashboard.jsx, erdDashboard.css. Backup: backups/sol-mix-*.tgz
+
+## 2026-11-06 — Collapsible sidebar
+- Toggle (PanelLeftClose/Open) at top of sidebar collapses it to a 56px icon rail; labels show as tooltips. State saved per browser (ercrm.sidebar.collapsed.v1).
+- Files: src/components/Sidebar.jsx, src/styles/index.css. Backup: backups/backup-2026-11-06-sidebar-collapse.tgz
+
+## 2026-11-07 — Sales: EC revenue KPIs, roster New tags for past years
+- Sales tab: 4 KPI cards under the Engagement Calendar band — FY revenue, Delivered, Scheduled, This month (+ quarter). Tap = session list.
+- Client Roster: baseline years (FY20-25) now tag New clients (first year a name appears); note shown when tags differ from the report count.
+- Files: SalesLiveDashboard.jsx, SalesClients.jsx. Backup: backups/backup-2026-11-07-sales-ec-kpi.tgz
+
+## 2026-11-07 — Client Roster reads Client Directory only
+- Roster tabs = "Client Since (Year)" values (FY start year; "FY 22-23" also accepted); each tab lists clients acquired that year. Session/revenue sub-line still matched from EC for years with sessions.
+- Caption shows count of directory clients with no Client Since year.
+- File: SalesClients.jsx. Backup: backups/backup-2026-11-07-roster-directory.tgz
+- Revised: roster tab per FY = EC/baseline clients + directory clients with that Client Since (New); "All" tab = whole Client Directory with this FY sessions (0 if none).
+
+## 2026-11-07 — Solutioning on solution items; Proposal Pace moved to Sales
+- Solutioning tab: every KPI/chart counts solution items (rows with a Solution Topic, per version); item keeps its own Dev Category / Line / Type of Service / Engagement Type / Solution Value; date, FY, status from its proposal line. Pace renamed "Solution Item Pace". Fixed report (proposal counts) no longer used there; last FY = tracker rows only. Turnaround / Process Health / IP reuse stay per proposal.
+- Sales tab: Monthly Proposal Status (Count) now carries running-total lines this FY vs last FY (BD lines, else report monthly).
+- proposalData.js: lines expose itemRows.
+- Files: SolLiveDashboard.jsx, SalesLiveDashboard.jsx, proposalData.js. Backup: backups/backup-2026-11-07-sol-items.tgz
+- Revised: Solutioning counts UNIQUE solutions = Proposal ID + Solution Topic, once (highest version carrying it); repeats across versions/rows dropped.
+- Revised: Solutioning has a "Count: Solution items | Proposals" toggle; every KPI/chart (pace, win, mix, heatmap, pipeline age, gaps) switches. Proposal view uses latest versions/lines and the fixed report for last FY.
+- Solutioning drill lists: new solItem() (KpiListModal) — rows show solution items (or proposal lines in Proposals view); double-tap opens /solution (editSol state → expands line + opens that item's Edit form) instead of BD Tracker. Removed BD fallback DrillContext on the Solutioning tab. Files: KpiListModal.jsx, SolLiveDashboard.jsx, SolutionTracker.jsx, Dashboard.jsx.
+- Fix: unique-solution dedupe now only drops a topic repeated in a LATER version of the same Proposal ID (keeps highest version); rows within one version are never merged. YTD KPI sub shows tracker rows vs repeats removed.
+
+## 2026-11-07 — Operations dashboard rebuilt (intelligence view)
+- 6 KPIs (Delivered vs last FY same date, Training days, Participants/Clients served, Next 30 days + not-ready tag, Feedback avg + awaited, Consultant load).
+- Insight cards (stale status, not-ready sessions, overloaded consultant, quiet clients 90d, feedback awaited, feedback < 4, pace vs LY, busiest week) — tap = list.
+- Readiness table next 30 days (red/amber/green flags), Delivery rhythm (monthly delivered/booked vs LY), day heatmap, Consultant load (stacked, 1.5x avg flag), Client portfolio (sparklines), Mode donut, Service mix, Feedback by program; History section collapsed (old charts + feedback log).
+- api.js: EC rows read No of Participants as pax (0 if the column is absent).
+- Files: OpsLiveDashboard.jsx, erdDashboard.css, api.js. Backup: backups/backup-2026-11-07-ops-dashboard.tgz
+- Ops feedback redesigned: "Program Quality" card (score ring + trend vs LY + % 4.5+, score-spread bands, Needs attention < 4.0 + low-score chips, Top performers 4.5+, awaiting-feedback button). Removed Feedback-by-Program chart and History feedback log.
+- Ops 3-year + projections: projection strip (Projected FY = max(Delivered YTD ÷ YTD share, Delivered + Booked); YTD share = avg share of last 3 FYs done by today; CAGR; projected days). Rhythm: this FY delivered/booked/projected bars + last 3 FYs lines. Calendar: FY selector (3 FYs). Consultant load: FY-2, FY-1, this FY delivered/booked/projected. Client portfolio: FY-2, FY-1, projected + trend vs LY. Mode: % stacked by 4 FYs. Service mix: grouped by 3 FYs. Quality: FY averages. History trend: projected bar. Backup: backups/backup-2026-11-07-ops-3yr.tgz
+- Ops projections explained: every projection opens a worked calculation with real numbers (strip tiles "How?", projected month bars, consultant projected segment, client Projected cell, history projected bar).
+- Ops projections removed for now (strip, projected bars/segments, client Projected column, explanations); 3-year history kept. Client table Total = done + booked with ▲▼ vs last FY.

@@ -33,6 +33,21 @@ export const propItem = (p, val = 'bd') => ({
        'BD Value': p.bdValue || 0, 'Solution Value': p.solValue || 0, 'Solution Topics': (p.solTopics || []).join(', '), Industry: c(p.industry), 'Engagement Type': c(p.engagementType) },
 });
 
+// Solutioning dashboard rows — opens the Solution Tracker (never the BD Tracker).
+// item = true: a solution line item (topic = Solution Topic) · false: a proposal line (opens it expanded)
+export const solItem = (p, item = true) => ({
+  name: `${c(p.client) || '(No client)'} — ${c(item ? p.topic : p.programTopic || p.topic) || '(No topic)'}`,
+  sub: [`P.ID ${p.id} V${p.version}`, item && c(p.programTopic) ? c(p.programTopic) : '', p.date ? fmtD(p.date) : 'No date', p.replaced ? 'replaced version' : ''].filter(Boolean).join(' · '),
+  right: inrS(item ? p.value : p.solValue),
+  badge: c(p.status),
+  go: { path: '/solution', state: { editSol: { id: p.id, version: p.version, topic: item ? c(p.topic) : '' } } },
+  x: item
+    ? { 'Proposal ID': p.id, Version: `V${p.version}`, Client: c(p.client), 'Solution Topic': c(p.topic), 'Program Topic': c(p.programTopic), Date: c(p.date), Status: c(p.status),
+        'Solution Value': p.value || 0, 'Development Category': c(p.developmentCategory), 'Line of Service': c(p.lineOfService), 'Type of Service': c(p.typeOfService), 'Engagement Type': c(p.engagementType), Industry: c(p.industry) }
+    : { 'Proposal ID': p.id, Version: `V${p.version}`, Client: c(p.client), Topic: c(p.topic), Date: c(p.date), Status: c(p.status), 'Solution Value': p.solValue || 0,
+        'Solution Topics': (p.solTopics || []).join(', '), Industry: c(p.industry), 'Engagement Type': c(p.engagementType) },
+});
+
 const BADGE = s => /won|deliver|received|paid/i.test(s) ? ['#0AC44B', '#F0FFF4'] : /lost|cancel|overdue|reject/i.test(s) ? ['#E98272', '#FFF5F5']
   : /process|raised|partly|schedul/i.test(s) ? ['#AA78A6', '#f6eff6'] : /tentative|pending|await|re-?sched/i.test(s) ? ['#D0A616', '#FFFBEA'] : ['#6B7280', '#F2F2F2'];
 

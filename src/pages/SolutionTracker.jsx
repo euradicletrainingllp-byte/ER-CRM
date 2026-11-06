@@ -1079,6 +1079,19 @@ export default function SolutionTracker({ onRefreshed, view }) {
              || allBdRows.find(r => String(r.proposalId) === String(t.id));
     if (row && canUpdate('bd')) setBdModal(row);
   }, [location.state, view, allBdRows.length]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Arrived from the Solutioning dashboard (double-tap): expand that proposal line and open the solution item's Edit form
+  useEffect(() => {
+    const t = location.state?.editSol;
+    if (!t || view !== 'sol' || !allBdRows.length) return;
+    navigate(location.pathname, { replace: true, state: null });
+    const line = allBdRows.find(r => String(r.proposalId) === String(t.id) && versionNo(r.proposalVersion) === t.version)
+              || allBdRows.find(r => String(r.proposalId) === String(t.id));
+    if (!line) return;
+    setExpanded(prev => new Set(prev).add(line._key));
+    const k = v => String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const sol = t.topic ? (line._sols || []).find(s => k(s.solutionTopic) === k(t.topic)) : null;
+    if (sol && canEdit('solution')) setSolModal({ mode: 'edit', row: sol, programTopic: line.programTopic, bdStatus: line.bdStatus });
+  }, [location.state, view, allBdRows.length]);   // eslint-disable-line react-hooks/exhaustive-deps
   const kpi = {
     total:    kpiRows.length,
     all:      new Set(allBdRows.map(r => r.proposalId)).size,

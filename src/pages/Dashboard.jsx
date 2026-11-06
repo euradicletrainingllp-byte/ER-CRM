@@ -235,7 +235,7 @@ export default function Dashboard({ onRefreshed }) {
         !solData ? (
           <LoadingState message="Loading Solution Tracker and BD Tracker…" />
         ) : (
-          <DrillContext.Provider value={{ proposals: bdLines, val: 'sol', prefer: 'prop' }}><SolLiveDashboard solutions={solData} refreshing={refreshing} /></DrillContext.Provider>
+          <DrillContext.Provider value={null}><SolLiveDashboard solutions={solData} refreshing={refreshing} /></DrillContext.Provider>
         )
       ) : loading ? (
         <LoadingState message="Loading CRM data from OneDrive Excel…" />

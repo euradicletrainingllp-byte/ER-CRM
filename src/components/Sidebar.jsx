@@ -1,4 +1,8 @@
+import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+
+const SB_KEY = 'ercrm.sidebar.collapsed.v1';
 import { usePermissions } from '../hooks/usePermissions.js';
 
 const NAV = [
@@ -23,6 +27,12 @@ export default function Sidebar() {
   const location  = useLocation();
   const navigate  = useNavigate();
   const { isAdmin, canAccess } = usePermissions();
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SB_KEY) === '1'; } catch { return false; } });
+  useEffect(() => {
+    document.documentElement.classList.toggle('sb-collapsed', collapsed);
+    try { localStorage.setItem(SB_KEY, collapsed ? '1' : '0'); } catch {}
+  }, [collapsed]);
+  const Toggle = collapsed ? PanelLeftOpen : PanelLeftClose;
 
   // Only show pages the current user has access to
   const visibleNav = NAV.filter(n => isAdmin || (canAccess(n.page) && (n.also || []).every(p => canAccess(p))));
@@ -30,6 +40,10 @@ export default function Sidebar() {
   return (
     <aside className="sidebar" style={{ display: 'flex', flexDirection: 'column' }}>
       <div className="sidebar-logo">
+        <button type="button" className="sb-toggle" onClick={() => setCollapsed(c => !c)}
+          title={collapsed ? 'Expand menu' : 'Collapse menu'} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'}>
+          <Toggle size={18} strokeWidth={1.75} />
+        </button>
         <img
           src="/ER_Logo.png"
           alt="EuRadicle"
@@ -65,6 +79,7 @@ export default function Sidebar() {
               data-tour-nav={n.page}
               className={`nav-item ${location.pathname === n.path ? 'active' : ''}`}
               onClick={() => navigate(n.path)}
+              title={collapsed ? n.label : undefined}
             >
               <span className="nav-icon">{n.icon}</span>
               <span>{n.label}</span>
@@ -85,6 +100,7 @@ export default function Sidebar() {
               data-tour-nav="admin"
               className={`nav-item ${location.pathname === '/admin' ? 'active' : ''}`}
               onClick={() => navigate('/admin')}
+              title={collapsed ? 'User Access Control' : undefined}
             >
               <span className="nav-icon">⚙️</span>
               <span>User Access Control</span>
