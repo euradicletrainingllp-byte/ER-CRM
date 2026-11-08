@@ -38,6 +38,8 @@ const modeOf = e => {
   return /vilt|virtual|online|zoom|teams|webinar/i.test(raw) ? 'virtual' : 'inPerson';
 };
 const feedbackOf = e => { const n = Number(clean(e.feedback)); return n > 0 && n <= 5 ? n : null; };
+// Feedback = N/A → feedback not required: left out of averages and of awaited / missing counts
+const fbNA = e => /^(n\s*\/?\s*a|not\s*(required|applicable))$/i.test(clean(e.feedback));
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const fmtDate = iso => (iso ? `${+iso.slice(8, 10)} ${MON[+iso.slice(5, 7) - 1]} ${iso.slice(0, 4)}` : '—');
 
@@ -173,7 +175,7 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
   /* Feedback — fixed list from Excel + live scores per program */
   const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
   const fbRows = useMemo(() => {
-    const rows = all.filter(e => hasDate(e) && (feedbackOf(e) != null || (isDelivered(e) && e.startDate >= weekAgo && e.startDate <= todayISO)))
+    const rows = all.filter(e => hasDate(e) && (feedbackOf(e) != null || (isDelivered(e) && !fbNA(e) && e.startDate >= weekAgo && e.startDate <= todayISO)))
       .map(e => ({ key: `${e.engagementKey || e.sno}`, label: clean(e.topic) || '(No topic)', client: clean(e.company), date: e.endDate && hasDate({ startDate: e.endDate }) ? e.endDate : e.startDate, score: feedbackOf(e) }))
       .sort((a, b) => b.date.localeCompare(a.date));
     const scored = rows.filter(r => r.score != null);
@@ -264,7 +266,7 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
     const days = l => l.reduce((t, e) => t + daysOf(e), 0);
     const pax = curDel.reduce((t, e) => t + (Number(e.pax) || 0), 0);
     const scoredCur = curDel.filter(e => feedbackOf(e) != null);
-    const awaited = curDel.filter(e => feedbackOf(e) == null && hasDate(e) && endOf(e) <= todayISO);
+    const awaited = curDel.filter(e => feedbackOf(e) == null && !fbNA(e) && hasDate(e) && endOf(e) <= todayISO);
     const cons = new Map(); [...curDel, ...curUp].forEach(e => consultantsOf(e).forEach(n => { const k = keyOf(n); if (!cons.has(k)) cons.set(k, { label: n, d: 0, list: [] }); const c = cons.get(k); c.d += daysOf(e); c.list.push(e); }));
     return { curDel, curUp, prevDated, prevSame, next30, days, pax, scoredCur, awaited, cons: [...cons.values()].sort((a, b) => b.d - a.d) };
   }, [cur, all, live, countBy]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -284,6 +286,10 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
     if (!clean(e.egId)) f.push(['No EG ID', 'a']);
     return { e, f, lvl: f.some(x => x[1] === 'r') ? 'r' : f.length ? 'a' : 'g', soon };
   }), [ops.next30]);   // eslint-disable-line react-hooks/exhaustive-deps
+  /* Week view: scheduled today → 7 days, delivered in the last 7 days */
+  const wkUp = ready.filter(x => x.e.startDate <= in7);
+  const wkDone = useMemo(() => live.filter(e => hasDate(e) && isDelivered(e) && e.startDate >= weekAgo && e.startDate <= todayISO)
+    .sort((a, b) => b.startDate.localeCompare(a.startDate)), [live]);   // eslint-disable-line react-hooks/exhaustive-deps
   const readyCount = { r: ready.filter(x => x.lvl === 'r').length, a: ready.filter(x => x.lvl === 'a').length, g: ready.filter(x => x.lvl === 'g').length };
 
   /* Insights — plain-language alerts worked out from the calendar */
@@ -461,7 +467,7 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
         <Kpi tone="tl" label="Training Days" list={() => egList(ops.curDel)} value={r2(ops.days(ops.curDel))} sub={`${r2(ops.days(ops.curUp))} days booked ahead`} how="Sum of the Day column of this FY's delivered sessions (once per session, not per consultant)." />
         <Kpi tone="gn" label={ops.pax ? 'Participants Trained' : 'Clients Served'} list={() => egList(ops.curDel)} value={ops.pax ? fmtNum(ops.pax) : clientsServed} sub={ops.pax ? `${clientsServed} clients served` : 'with a delivered session this FY'} how={ops.pax ? 'Sum of No of Participants on delivered sessions this FY.' : 'Distinct companies with a delivered session this FY (No of Participants is not filled in the calendar).'} />
         <Kpi tone="gd" label="Next 30 Days" list={() => egList(ops.next30)} value={ops.next30.length} sub={`${ops.next30.filter(e => e.startDate <= in7).length} this week · ${r2(ops.days(ops.next30))} days`} tag={readyCount.r ? `${readyCount.r} not ready` : undefined} tagTone="bad" how="Sessions starting today → 30 days ahead that are not cancelled / delivered." />
-        <Kpi tone="pu" label="Feedback Avg" list={() => egList(ops.scoredCur)} value={ops.scoredCur.length ? (ops.scoredCur.reduce((t, e) => t + feedbackOf(e), 0) / ops.scoredCur.length).toFixed(2) : '--'} sub={`${ops.scoredCur.length} scored · ${ops.awaited.length} awaited`} how="Average Feedback (0–5) of this FY's delivered sessions; awaited = delivered with no score yet." />
+        <Kpi tone="pu" label="Feedback Avg" list={() => egList(ops.scoredCur)} value={ops.scoredCur.length ? (ops.scoredCur.reduce((t, e) => t + feedbackOf(e), 0) / ops.scoredCur.length).toFixed(2) : '--'} sub={`${ops.scoredCur.length} scored · ${ops.awaited.length} awaited`} how="Average Feedback (0–5) of this FY's delivered sessions; awaited = delivered with no score yet. Feedback = N/A means not required — excluded from both." />
         <Kpi tone="rd" label="Consultant Load" list={() => ops.cons.map(c => ({ name: c.label, sub: `${c.list.length} sessions`, right: `${r2(c.d)} days` }))} value={ops.cons.length} sub={ops.cons.length ? `avg ${r2(avgLoad)} days · top ${ops.cons[0].label} ${r2(ops.cons[0].d)}` : 'no consultants this FY'} how="Consultants with delivered or booked days this FY; days credited to every consultant on the session." />
       </div>
 
@@ -475,22 +481,40 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
         </div>
       )}
 
-      <div className="cg c1">
-        <div className="card"><div className="sl-head"><div><h3>Delivery Readiness — Next 30 Days</h3><div className="cs">{ready.length} sessions · tap a row for details, double-tap in the list to edit in the Engagement Calendar</div></div>
-          <div className="op-rc"><span className="r">{readyCount.r} not ready</span><span className="a">{readyCount.a} check</span><span className="g">{readyCount.g} ready</span></div></div>
-          {ready.length === 0 ? <div className="erd-empty">Nothing booked in the next 30 days</div> : (
+      <div className="cg c11">
+        <div className="card"><div className="sl-head"><div><h3>Scheduled — Upcoming Week</h3><div className="cs">{wkUp.length} sessions · today → {fmtDate(in7)} · tap a row for details</div></div>
+          <div className="op-rc"><span className="r">{wkUp.filter(x => x.lvl === 'r').length} not ready</span><span className="a">{wkUp.filter(x => x.lvl === 'a').length} check</span><span className="g">{wkUp.filter(x => x.lvl === 'g').length} ready</span></div></div>
+          {wkUp.length === 0 ? <div className="erd-empty">Nothing scheduled in the next 7 days</div> : (
             <div className="tbl-x" style={{ maxHeight: 360, overflowY: 'auto', marginTop: 10 }}>
               <table className="mt op-rt">
                 <thead><tr><th></th><th>Date</th><th>Client</th><th>Program</th><th>Consultants</th><th>Mode</th><th className="nr">Days</th><th>Flags</th></tr></thead>
-                <tbody>{ready.map(({ e, f, lvl, soon }, i) => (
+                <tbody>{wkUp.map(({ e, f, lvl }, i) => (
                   <tr key={(e.engagementKey || e.sno || '') + '-' + i} className="sl-click" onClick={() => show(`${clean(e.company)} · ${fmtDate(e.startDate)}`, [egItem(e)], f.length ? `Flags: ${f.map(x => x[0]).join(', ')}` : 'Ready — consultant, location and status in place.')}>
                     <td><span className={`op-lv ${lvl}`} /></td>
-                    <td style={{ whiteSpace: 'nowrap', fontWeight: soon ? 700 : 500 }}>{fmtDate(e.startDate)}{endOf(e) !== e.startDate ? ` – ${+endOf(e).slice(8)}` : ''}</td>
+                    <td style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{fmtDate(e.startDate)}{endOf(e) !== e.startDate ? ` – ${+endOf(e).slice(8)}` : ''}</td>
                     <td style={{ fontWeight: 600 }}>{clean(e.company) || '—'}</td><td>{clean(e.topic) || '—'}</td>
                     <td>{consultantsOf(e).join(', ') || <span className="op-miss">—</span>}</td>
                     <td>{{ inPerson: 'In-Person', virtual: 'Virtual', unknown: '—' }[modeOf(e)]}</td>
                     <td className="nr">{r2(daysOf(e))}</td>
                     <td>{f.length ? f.map(x => <span key={x[0]} className={`op-fl ${x[1]}`}>{x[0]}</span>) : <span className="op-fl g">Ready</span>}</td>
+                  </tr>))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        <div className="card"><div className="sl-head"><div><h3>Delivered — Last Week</h3><div className="cs">{wkDone.length} sessions · {fmtDate(weekAgo)} → today · {r2(ops.days(wkDone))} days · tap a row for details</div></div></div>
+          {wkDone.length === 0 ? <div className="erd-empty">No sessions delivered in the last 7 days</div> : (
+            <div className="tbl-x" style={{ maxHeight: 360, overflowY: 'auto', marginTop: 10 }}>
+              <table className="mt op-rt">
+                <thead><tr><th>Date</th><th>Client</th><th>Program</th><th>Consultants</th><th>Mode</th><th className="nr">Days</th><th className="nr">Feedback</th></tr></thead>
+                <tbody>{wkDone.map((e, i) => (
+                  <tr key={(e.engagementKey || e.sno || '') + '-' + i} className="sl-click" onClick={() => show(`${clean(e.company)} · ${fmtDate(e.startDate)}`, [egItem(e)], 'Delivered in the last 7 days.')}>
+                    <td style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{fmtDate(e.startDate)}{endOf(e) !== e.startDate ? ` – ${+endOf(e).slice(8)}` : ''}</td>
+                    <td style={{ fontWeight: 600 }}>{clean(e.company) || '—'}</td><td>{clean(e.topic) || '—'}</td>
+                    <td>{consultantsOf(e).join(', ') || '—'}</td>
+                    <td>{{ inPerson: 'In-Person', virtual: 'Virtual', unknown: '—' }[modeOf(e)]}</td>
+                    <td className="nr">{r2(daysOf(e))}</td>
+                    <td className="nr">{feedbackOf(e) != null ? feedbackOf(e) : fbNA(e) ? 'N/A' : <span className="op-miss">awaited</span>}</td>
                   </tr>))}</tbody>
               </table>
             </div>

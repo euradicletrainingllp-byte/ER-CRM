@@ -172,19 +172,6 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
       vDist: [1, 2, 3].map(n => versions.filter(v => (n === 3 ? v >= 3 : v === n)).length) };
   }, [solutions, latest, lines, scope]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const teamCfg = useMemo(() => ({ type: 'bar',
-    data: { labels: MONTHS, datasets: [
-      { type: 'line', label: 'On time %', data: team.mOn, borderColor: GN, backgroundColor: GN, borderWidth: 2.5, pointRadius: 3, yAxisID: 'y1', spanGaps: true, tension: 0.25, order: 0,
-        datalabels: { display: c => c.dataset.data[c.dataIndex] != null, align: 'top', color: '#14804A', font: { size: 10.5, weight: '700' }, formatter: v => `${v}%` } },
-      { label: 'Avg turnaround (days)', data: team.mAvg, backgroundColor: PU, borderRadius: 4, yAxisID: 'y', order: 1, maxBarThickness: 30,
-        datalabels: { display: c => c.dataset.data[c.dataIndex] != null, anchor: 'end', align: 'end', color: '#5B3FA0', font: { size: 11, weight: '700' } } },
-    ] },
-    options: { responsive: true, maintainAspectRatio: false, layout: { padding: { top: 20 } },
-      plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } },
-      scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: '#EDF0F5' }, title: { display: true, text: 'days', font: { size: 11 } } },
-        y1: { position: 'right', min: 0, max: 110, grid: { display: false }, ticks: { callback: v => (v <= 100 ? `${v}%` : '') } } } },
-  }), [team]);
-
   /* ── IP library: solution topics ── */
   const ip = useMemo(() => {
     const latestById = new Map(latest.map(l => [l.id, l]));
@@ -307,7 +294,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
         <span className="sl-note">Pace and mix always compare {fyTiny(prevFy)} with {fyTiny(CURRENT_FY)}</span>
       </div>
 
-      <div className="kg g6">
+      <div className="kg g5">
         <Kpi tone="tl" label={`${isItem ? 'Solution Items' : 'Proposals'} YTD`} list={() => base.filter(l => l.fy === CURRENT_FY).map(p => pi(p))} value={pace.curYtd}
           sub={isItem ? `${rawItems.filter(l => l.fy === CURRENT_FY).length} rows in tracker · ${rawItems.filter(l => l.fy === CURRENT_FY).length - items.filter(l => l.fy === CURRENT_FY).length} repeated in later versions${paceDelta != null ? ` · ${paceDelta >= 0 ? '▲' : '▼'} ${Math.abs(paceDelta)}% vs ${fyTiny(prevFy)}` : ''}` : paceDelta != null ? `${paceDelta >= 0 ? '▲' : '▼'} ${Math.abs(paceDelta)}% vs ${pace.prevSame} by this date in ${fyTiny(prevFy)}` : 'no last-year pace yet'} tag={paceDelta != null ? (paceDelta >= 0 ? 'Ahead' : 'Behind') : undefined} tagTone={paceDelta >= 0 ? 'up' : 'bad'}
           how={`${isItem ? 'Unique solutions (Proposal ID + Solution Topic, counted once across versions)' : 'Proposal lines (ID + version)'} dated April → today, against last FY up to the same day.`} />
@@ -315,8 +302,6 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
           sub={`${all.won} won · ${all.lost} lost · ${all.open} open${baseRate != null && scope === 'fy' ? ` · ${fyTiny(prevFy)}: ${baseRate}%` : ''}`} how={`Won ÷ (won + lost) ${Us}, latest proposal version only — open and replaced versions excluded.`} />
         <Kpi tone="nv" label={isItem ? 'Avg Item Value' : 'Avg Proposal Value'} list={() => scoped.filter(p => p.value > 0).sort((a, b) => b.value - a.value).map(p => pi(p))} value={all.avg ? L(all.avg) : '--'}
           sub={all.wonAvg ? `won deals avg ${L(all.wonAvg)}` : `${scoped.filter(p => p.value > 0).length} valued ${Us}`} how={`Average Solution Value per ${Us.slice(0, -1)} (latest version) that has a value.`} />
-        <Kpi tone="pu" label="Avg Turnaround" list={() => team.list.filter(x => x.tat != null).sort((a, b) => b.tat - a.tat).map(x => ({ ...pi(x.line), right: `${x.tat} days`, badge: x.onTime == null ? '' : x.onTime ? 'On time' : 'Late (overdue)' }))} value={team.avgTat != null ? `${Math.round(team.avgTat)} days` : '--'}
-          sub={team.onTimePct != null ? `${team.onTimePct}% on time (${team.timedN} with a client date)` : `${team.tatN} proposals timed`} how="Date of Discussion → first submission to the client (else by the Sol team). On time = on or before Client Expected date." />
         <Kpi tone="gd" label="IP Reuse" list={() => [...ip.reusedBy.entries()].map(([id, tps]) => latestById.get(id) && ({ ...pi(latestById.get(id)), sub: `Reused topics: ${tps.join(', ')}` })).filter(Boolean)} value={ip.reusePct != null ? `${ip.reusePct}%` : '--'}
           sub={`${ip.reused} of ${ip.distinct} solution topics used in 2+ proposals`} how="Share of solution items whose Solution Topic appears in more than one proposal (any date) — higher = more reuse of existing IP." />
         <Kpi tone="rd" label="Journey Share" list={() => scoped.filter(p => /journey/i.test(p.engagementType)).map(p => pi(p))} value={journey.pct != null ? `${journey.pct}%` : '--'}
@@ -407,16 +392,10 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
         </div>
       </div>
 
-      <div className="s-band"><span className="s-band-tag ec">Solutioning Team</span><span className="s-band-txt">Turnaround, revisions and IP reuse · {scopeName}</span></div>
-      <div className="cg c32">
-        <div className="card"><h3>Turnaround &amp; On-time Submission</h3><div className="cs">Average days from discussion to submission, by discussion month · line = % submitted by the client's expected date</div>
-          {team.tatN || team.timedN ? <ChartBox config={teamCfg} className="ch-wrap tall" title="Turnaround" how="Days from Date of Discussion to the first submission to the client (else by the Sol team), by discussion month. On time = submitted on or before the Client Expected date."
-            listFor={lb => { const mi = MONTHS.indexOf(lb); return team.list.filter(x => x.disc && slot(x.disc) === mi && (scope === 'all' || x.line.fy === CURRENT_FY)).map(x => ({ ...pi(x.line), right: x.tat != null ? `${x.tat} days` : '—', badge: x.onTime == null ? '' : x.onTime ? 'On time' : 'Late (overdue)' })); }} /> : <div className="erd-empty">No proposals with both a discussion and a submission date yet</div>}
-        </div>
+      <div className="s-band"><span className="s-band-tag ec">Solutioning Team</span><span className="s-band-txt">Revisions and IP reuse · {scopeName}</span></div>
+      <div className="cg c1">
         <div className="card flex-card"><h3>Process Health</h3><div className="cs">Where the time goes and how often proposals are revised</div>
           <div className="sl-stats">
-            <div className="sl-click" onClick={() => show('Discussion → Sol team', () => team.list.filter(x => x.solTat != null).sort((a, b) => b.solTat - a.solTat).map(x => ({ ...pi(x.line), right: `${x.solTat} days` })), 'Days from Date of Discussion to Date of Submission by Sol team (first version).')}><span>Discussion → Sol team</span><b>{team.avgSol != null ? `${Math.round(team.avgSol)} d` : '—'}</b></div>
-            <div className="sl-click" onClick={() => show('Sol team → Client', () => team.list.filter(x => x.clTat != null).sort((a, b) => b.clTat - a.clTat).map(x => ({ ...pi(x.line), right: `${x.clTat} days` })), 'Days from Date of Submission by Sol team to Date of Submission to Client (first version).')}><span>Sol team → Client</span><b>{team.avgCl != null ? `${Math.round(team.avgCl)} d` : '—'}</b></div>
             <div className="sl-click" onClick={() => show('Revised proposals', () => team.revisedIds.map(id => latestById.get(id)).filter(Boolean).map(p => ({ ...pi(p), right: `${team.versionsById.get(p.id)} versions` })), 'Number of versions (V1, V2 …) per proposal ID; listed: proposals with more than one version.')}><span>Avg versions</span><b>{team.avgVersions ? team.avgVersions.toFixed(1) : '—'}</b></div>
             <div className="sl-click" onClick={() => show('Revised proposals', () => team.revisedIds.map(id => latestById.get(id)).filter(Boolean).map(p => ({ ...pi(p), right: `${team.versionsById.get(p.id)} versions` })), 'Proposals with a V2 or later ÷ all proposals in scope.')}><span>Proposals revised</span><b>{team.revisedPct != null ? `${team.revisedPct}%` : '—'}</b></div>
           </div>

@@ -185,3 +185,13 @@
 - Ops 3-year + projections: projection strip (Projected FY = max(Delivered YTD ÷ YTD share, Delivered + Booked); YTD share = avg share of last 3 FYs done by today; CAGR; projected days). Rhythm: this FY delivered/booked/projected bars + last 3 FYs lines. Calendar: FY selector (3 FYs). Consultant load: FY-2, FY-1, this FY delivered/booked/projected. Client portfolio: FY-2, FY-1, projected + trend vs LY. Mode: % stacked by 4 FYs. Service mix: grouped by 3 FYs. Quality: FY averages. History trend: projected bar. Backup: backups/backup-2026-11-07-ops-3yr.tgz
 - Ops projections explained: every projection opens a worked calculation with real numbers (strip tiles "How?", projected month bars, consultant projected segment, client Projected cell, history projected bar).
 - Ops projections removed for now (strip, projected bars/segments, client Projected column, explanations); 3-year history kept. Client table Total = done + booked with ▲▼ vs last FY.
+
+## 2026-11-08 — Solutioning & Ops dashboard tweaks
+- Solutioning dashboard: removed Avg Turnaround KPI (row now 5 KPIs), Turnaround & On-time chart, and Process Health "Discussion → Sol team" / "Sol team → Client" boxes. Process Health now full width.
+- Ops dashboard: "Delivery Readiness — Next 30 Days" replaced by two side-by-side lists — Scheduled (today → 7 days, with readiness flags) and Delivered (last 7 days, with feedback).
+- Files: src/components/SolLiveDashboard.jsx, src/components/OpsLiveDashboard.jsx
+- Manual setup: none.
+
+## 2026-11-08 — Ops dashboard: Feedback N/A = not required
+- Sessions with Feedback "N/A" (also NA / Not required / Not applicable) are now excluded from feedback averages and from awaited / missing-feedback counts (KPI, Program Quality, 60-day insight, feedback log, Delivered — Last Week shows "N/A").
+- Files: src/components/OpsLiveDashboard.jsx
