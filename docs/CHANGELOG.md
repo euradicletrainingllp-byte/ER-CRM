@@ -210,3 +210,10 @@
 - Parse-checked; full build not run. Backup: backups/backup-2026-11-09-credit-share/.
 - 2026-11-09 (later): Finance dashboard dues (Yet to Receive / Overdue / Total Due in Market) no longer deduct credit notes — balance = Price + GST − TDS + Travel − Amount Received. Finance Tracker unchanged.
 - 2026-11-09 (later): Finance dashboard Yet to Receive / Overdue now include TDS — balance = Price + GST + Travel − Amount Received; Total Due in Market = sum of both.
+
+## 2026-11-09 — GST auto-calculated and written to the Engagement Calendar
+- Rule (src/services/gstRule.js): Price > 0 → GST = 18% of Price, recalculated on every save; GST typed as 0 = billed without GST, never overwritten; Price 0 (travel-only) → GST as typed.
+- api.js: blank GST cell now read as '' (to be calculated), not 0. Engagement Calendar form save and Ops→EC sync write gstForExcel(); Finance Tracker save already wrote 18% when different.
+- Writing a value replaces the Excel formula in that GST cell.
+- Pending (Finance): type 0 in GST on DBS / Ford rows that are blank (88 rows) — until then they count 18% GST (≈ ₹14.07L across all years); open dues unaffected.
+- Backup: backups/backup-2026-11-09-gst-auto/. Parse-checked; full build not run.

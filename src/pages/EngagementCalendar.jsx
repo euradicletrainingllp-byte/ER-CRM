@@ -10,6 +10,7 @@ import { usePermissions } from '../hooks/usePermissions.js';
 import { withEcLock, freshEcFinance } from '../services/syncWithEC.js';
 import ExportButton from '../components/ExportButton.jsx';
 import { autoColumns } from '../utils/exportExcel.js';
+import { gstForExcel } from '../services/gstRule.js';
 import { EditButton, DeleteButton } from '../components/ActionButtons.jsx';
 import { useExcelFilters, CollapsibleFilterBar } from '../components/ExcelFilter.jsx';
 import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
@@ -862,7 +863,7 @@ const rowFromForm = form => ({
   day:            Number(form.day)            || 1,
   price:          Number(form.price)          || 0,
   travelExpenses: Number(form.travelExpenses) || 0,
-  gst:            Number(form.gst)            || 0,
+  gst:            gstForExcel(form),   // 18% of Price unless GST was typed as 0
 });
 
 // Form values → Excel column names expected by the Power Automate flow
@@ -885,7 +886,7 @@ const formToExcel = form => ({
   invoice:                           form.invoice        || '',
   'Price (INR)':                     Number(form.price)  || 0,
   'Travel, Stay and Misc Expenses':  Number(form.travelExpenses) || 0,
-  gst:                               Number(form.gst)    || 0,
+  gst:                               gstForExcel(form),
   payment:                           form.payment        || '',
   'Amount Received':                 form.amountReceived || '',
   'Received Date':                   form.receivedDate   || '',

@@ -8,6 +8,7 @@
  */
 
 import { getEngagements, updateEngagementRow, patchEngagementCaches, isoToExcelSerial, ecContractFields, updateOpsRow, readTrackerFresh, EC_EXTRA_COLS, ecExtraFields } from './api.js';
+import { gstForExcel } from './gstRule.js';
 
 // ─── Ops Checklist Finance → Engagement Calendar (live, per edit) ────────────
 
@@ -63,7 +64,7 @@ function ecUpdateBody(e) {
     invoice:                           e.invoice        || '',
     'Price (INR)':                     Number(e.price)  || 0,
     'Travel, Stay and Misc Expenses':  Number(e.travelExpenses) || 0,
-    gst:                               Number(e.gst)    || 0,
+    gst:                               gstForExcel(e),   // 18% of Price unless GST was typed as 0
     payment:                           e.payment        || '',
     'Amount Received':                 e.amountReceived || '',
     'Received Date':                   e.receivedDate   || '',

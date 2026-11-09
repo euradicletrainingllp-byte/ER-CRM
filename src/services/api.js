@@ -444,7 +444,8 @@ function mapEngagementRows(rows) {
       // toAmount: also reads text cells such as "1,50,000" or "₹ 50,000" (plain Number() made them 0)
       price:          toAmount(getField(r, 'Price (INR)', 'Price__INR_', 'Price_INR_', 'price')),
       travelExpenses: toAmount(getField(r, 'Travel, Stay and Misc Expenses', 'Travel, Stay and Misc. Expenses', 'travelExpenses')),
-      gst:            toAmount(getField(r, 'GST', 'gst')),
+      // blank kept as '' (= GST to be calculated: 18% of Price); a typed 0 = billed without GST
+      gst:            (v => (v == null || String(v).trim() === '' ? '' : toAmount(v)))(getField(r, 'GST', 'gst')),
       payment:        getField(r, 'Payment', 'payment') ?? '',
       amountReceived: getField(r, 'Amount Received', 'Amount_Received', 'amountReceived') ?? '',
       receivedDate:   formatDate(getField(r, 'Received Date', 'ReceivedDate', 'Received_Date', 'receivedDate')),
