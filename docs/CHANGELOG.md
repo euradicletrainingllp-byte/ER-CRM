@@ -219,3 +219,9 @@
 - Backup: backups/backup-2026-11-09-gst-auto/. Parse-checked; full build not run.
 - 2026-11-09 (later): Finance Tracker GST is editable — dropdown Auto (18% of Price) / No GST (0, locked); saved to the EC GST column. File: FinanceTracker.jsx.
   syncWithEC.js: GST blank and 0 no longer treated as equal when comparing/saving (blank = auto, 0 = locked).
+
+## 2026-11-09 — Finance Tracker: travel payments highlighted
+- Travel, Stay & Misc counts as pending when travel is billed (Travel Invoice Raised = Yes / Travel Invoice Date / Travel Invoice No), Travel Amount Received is not Yes / NA, and Travel Received Amount < travel. Overdue = Travel Invoice Date (else Invoice date) + 30 days crossed.
+- List rows: amber highlight + "✈ TRAVEL PENDING · ₹x"; red highlight + "✈ TRAVEL OVERDUE · Nd · ₹x" — also on rows whose program payment is Received. Same tag in the detail header.
+- Filters Needs Action / Overdue (30+ days) / All Awaiting Payment include travel pending / overdue. Amount cards unchanged.
+- File: src/pages/FinanceTracker.jsx. Parse-checked.

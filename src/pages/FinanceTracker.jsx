@@ -121,6 +121,33 @@ export function overdueDays(e) {
   const days = Math.floor((new Date(todayIso()) - new Date(due)) / 86400000);
   return days > 0 ? days : 0;
 }
+/** Travel, Stay & Misc still to collect: travel billed (Travel Invoice raised / dated / numbered), not marked Yes / NA. */
+export function travelDue(e) {
+  const t = money(e?.travelExpenses);
+  if (!(t > 0) || /cancel/i.test(String(e?.status ?? '')) || isProBono(e)) return 0;
+  if (/^(yes|na|n\/a)$/i.test(String(e?.travelReceived ?? '').trim())) return 0;
+  const billed = /^yes$/i.test(String(e?.travelInvoiceRaised ?? '').trim()) || toIso(e?.travelInvoiceDate) || String(e?.travelInvoiceNo ?? '').trim();
+  return billed ? Math.max(0, t - money(e?.travelReceivedAmount)) : 0;
+}
+/** Days past the travel payment term (Travel Invoice Date, else Invoice date, + 30 days); 0 when not overdue. */
+export function travelOverdueDays(e) {
+  if (!travelDue(e)) return 0;
+  const d = toIso(e.travelInvoiceDate) || toIso(e.invoice);
+  if (!d) return 0;
+  const days = Math.floor((new Date(todayIso()) - new Date(addDays(d, 30))) / 86400000);
+  return days > 0 ? days : 0;
+}
+function TravelTag({ e, big }) {
+  const bal = travelDue(e);
+  if (!bal) return null;
+  const late = travelOverdueDays(e);
+  return (
+    <span title={`Travel, Stay & Misc not received: ${inr(bal)}${late ? ` · travel invoice + 30 days crossed ${late} day${late > 1 ? 's' : ''} ago` : ''}`} style={{
+      fontSize: big ? 11 : 10, fontWeight: 800, color: late ? '#fff' : '#b45309', background: late ? '#dc2626' : '#fef3c7', borderRadius: 10,
+      padding: big ? '3px 10px' : '2px 8px', whiteSpace: 'nowrap', letterSpacing: 0.3,
+    }}>✈ TRAVEL {late ? `OVERDUE · ${late}d` : 'PENDING'} · {inr(bal)}</span>
+  );
+}
 function OverdueTag({ days, big }) {
   if (!days) return null;
   return (
@@ -251,6 +278,7 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
           <StageBadge stage={stage} />
           <OverdueTag days={overdueDays(live)} big />
+          <TravelTag e={live} big />
           {saving && <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>⏳ Saving…</span>}
           {total > 0 && <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--primary)' }} title="Price + GST (18%) − TDS (10%) + Travel, Stay & Misc">{inr(total)}</div>}
           {total > 0 && <div style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 600 }}>to receive · after TDS</div>}
@@ -527,10 +555,10 @@ export default function FinanceTracker({ onRefreshed }) {
     const q = search.toLowerCase();
     const mQ = !q || [r.company, r.topic, r.egId, r.sno, r.consultant1, r.invoiceNo].some(v => String(v ?? '').toLowerCase().includes(q));
     const mS = stageF === 'All'
-      || (stageF === 'Needs Action' ? (['Invoice Overdue', 'To Invoice', 'Payment Overdue'].includes(r._stage) || overdueDays(r) > 0)
+      || (stageF === 'Needs Action' ? (['Invoice Overdue', 'To Invoice', 'Payment Overdue'].includes(r._stage) || overdueDays(r) > 0 || travelOverdueDays(r) > 0)
       : stageF === 'All To Invoice' ? ['Invoice Overdue', 'To Invoice'].includes(r._stage)
-      : stageF === 'All Awaiting Payment' ? ['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r._stage)
-      : stageF === 'Overdue (30+ days)' ? overdueDays(r) > 0
+      : stageF === 'All Awaiting Payment' ? ['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r._stage) || travelDue(r) > 0
+      : stageF === 'Overdue (30+ days)' ? overdueDays(r) > 0 || travelOverdueDays(r) > 0
       : stageF === 'Not Billed' ? ['Pro Bono', 'Not Applicable'].includes(r._stage)
       : r._stage === stageF);
     return mQ && mS;
@@ -840,13 +868,14 @@ export default function FinanceTracker({ onRefreshed }) {
                       const total = totalOf(r);
                       const l = linkOf(r);
                       const late = overdueDays(r);
+                      const tLate = travelOverdueDays(r), tDue = travelDue(r);
                       const isNext = key && key === nextUpKey;
                       return (
                         <div key={key || `${r.egId}|${r.sno}`} ref={el => { if (key) rowRefs.current[key] = el; }} onClick={() => key && setSelected(isSel ? null : key)} style={{
                           boxShadow: isNext ? 'inset 0 0 0 2px #e8760a' : undefined,
                           padding: '10px 14px', borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                          background: isSel ? '#f0f7ff' : late ? '#fef2f2' : 'transparent',
-                          borderLeft: isSel ? '3px solid var(--accent)' : late ? '3px solid #dc2626' : '3px solid transparent',
+                          background: isSel ? '#f0f7ff' : late || tLate ? '#fef2f2' : tDue ? '#fffbeb' : 'transparent',
+                          borderLeft: isSel ? '3px solid var(--accent)' : late || tLate ? '3px solid #dc2626' : tDue ? '3px solid #f59e0b' : '3px solid transparent',
                         }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
@@ -862,6 +891,7 @@ export default function FinanceTracker({ onRefreshed }) {
                               {l.state === 'wrong' && <span title="Linked Ops Checklist row is a different engagement" style={{ fontSize: 10, fontWeight: 800, color: '#b91c1c', marginRight: 4 }}>⚠ Ops link</span>}
                               <StageBadge stage={r._stage} />
                               {late > 0 && <div style={{ marginTop: 4 }}><OverdueTag days={late} /></div>}
+                              {tDue > 0 && <div style={{ marginTop: 4 }}><TravelTag e={r} /></div>}
                               {total > 0 && <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4 }}>{inr(total)}</div>}
                             </div>
                           </div>
