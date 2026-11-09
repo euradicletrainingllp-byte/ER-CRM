@@ -225,3 +225,13 @@
 - List rows: amber highlight + "✈ TRAVEL PENDING · ₹x"; red highlight + "✈ TRAVEL OVERDUE · Nd · ₹x" — also on rows whose program payment is Received. Same tag in the detail header.
 - Filters Needs Action / Overdue (30+ days) / All Awaiting Payment include travel pending / overdue. Amount cards unchanged.
 - File: src/pages/FinanceTracker.jsx. Parse-checked.
+
+## 2026-11-09 — Content Development Tracker: one click selected every row
+- Cause: selection, row keys and the local save patch used S No; blank / repeated S No cells in Excel made every such row match.
+- Fix: rows keyed by Index + sheet position (rowKeyOf) for selection, list keys, pending / reminder bars, local save patch and delete; detail panel remounts per row. Excel writes still use S No + Index as before.
+- File: src/pages/ContentDevelopmentTracker.jsx. Parse-checked.
+
+## 2026-11-09 — Finance dashboard: travel billed separately is its own due
+- Rows with Travel Invoice No / Date / Raised = Yes: program due = Price + GST − Amount Received (closed by Payment Received); travel due = Travel − Travel Received Amount, closed by Travel Amount Received = Yes / NA, due Travel Invoice Date (else Invoice date) + 30 days — counted even when the program is Received.
+- Rows without a separate travel invoice: unchanged (Price + GST + Travel − Amount Received).
+- Lists show "✈ Travel" parts. Files: FinanceLiveDashboard.jsx, FinanceTracker.jsx (travelBilled export). Backup: backups/backup-2026-11-09-travel-dues/.

@@ -126,9 +126,10 @@ export function travelDue(e) {
   const t = money(e?.travelExpenses);
   if (!(t > 0) || /cancel/i.test(String(e?.status ?? '')) || isProBono(e)) return 0;
   if (/^(yes|na|n\/a)$/i.test(String(e?.travelReceived ?? '').trim())) return 0;
-  const billed = /^yes$/i.test(String(e?.travelInvoiceRaised ?? '').trim()) || toIso(e?.travelInvoiceDate) || String(e?.travelInvoiceNo ?? '').trim();
-  return billed ? Math.max(0, t - money(e?.travelReceivedAmount)) : 0;
+  return travelBilled(e) ? Math.max(0, t - money(e?.travelReceivedAmount)) : 0;
 }
+/** Travel billed on its own invoice: Travel Invoice Raised = Yes, a Travel Invoice Date or a Travel Invoice No. */
+export const travelBilled = e => !!(/^yes$/i.test(String(e?.travelInvoiceRaised ?? '').trim()) || toIso(e?.travelInvoiceDate) || String(e?.travelInvoiceNo ?? '').trim());
 /** Days past the travel payment term (Travel Invoice Date, else Invoice date, + 30 days); 0 when not overdue. */
 export function travelOverdueDays(e) {
   if (!travelDue(e)) return 0;

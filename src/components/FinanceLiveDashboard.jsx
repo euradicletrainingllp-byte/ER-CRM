@@ -29,7 +29,7 @@ import { creditNotesOf } from '../services/money.js';
 import { money, collectedOf, expectedOf, invoiceExTravel, suspectReceipts, invoiceNoOf, tdsOf, applyCreditShares } from '../services/money.js';
 import { PERIODS, periodRange, periodLabelOf, inRange } from '../services/actionItems.js';
 // Same stage / overdue rules as the Finance Tracker page, so the two always agree
-import { financeStage, overdueDays } from '../pages/FinanceTracker.jsx';
+import { financeStage, overdueDays, travelBilled, travelDue, travelOverdueDays } from '../pages/FinanceTracker.jsx';
 import { egItem, inrS } from './KpiListModal.jsx';
 import { ReceivablesByClient, PendingBilling, CreditAndCancelled } from './FinanceReceivables.jsx';
 import {
@@ -203,12 +203,24 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   // Raised = Invoice date, Invoice No, or Payment "Invoice Raised" / "Partly Received"
   // Yet to Receive = raised, not received, due date (Invoice date + 30 days) not crossed (no Invoice date = not crossed)
   // Overdue        = raised, not received, due date crossed
+  // Travel on its own invoice (Travel Invoice No / Date / Raised = Yes) is a separate due: travel − Travel Received Amount,
+  // closed by Travel Amount Received = Yes / NA, due Travel Invoice Date (else Invoice date) + 30 days — even when the
+  // program payment is Received. Otherwise travel stays part of the program invoice.
   const dues = useMemo(() => rows
-    .filter(r => isRaised(r) && !CLOSED.includes(r.stage) && r.due - r.got > 0)
-    .map(r => {
-      const due = r.inv ? addDays(r.inv, CREDIT_DAYS) : '';
-      const past = r.inv ? overdueDays(r) : 0;   // Finance Tracker rule: invoice date + 30 days
-      return { r, dueDate: due, pastDays: past, open: r.due - r.got, overdue: past > 0 };
+    .flatMap(r => {
+      const out = [];
+      const sep = travelBilled(r);
+      const prog = sep ? r.net : r.due;   // Price + GST (+ travel when billed on the same invoice)
+      if (isRaised(r) && !CLOSED.includes(r.stage) && prog - r.got > 0) {
+        const past = r.inv ? overdueDays(r) : 0;   // Finance Tracker rule: invoice date + 30 days
+        out.push({ r, part: 'program', dueDate: r.inv ? addDays(r.inv, CREDIT_DAYS) : '', pastDays: past, open: prog - r.got, overdue: past > 0 });
+      }
+      const t = sep ? travelDue(r) : 0;
+      if (t > 0) {
+        const d = toIso(r.travelInvoiceDate) || r.inv, past = travelOverdueDays(r);
+        out.push({ r, part: 'travel', dueDate: d ? addDays(d, CREDIT_DAYS) : '', pastDays: past, open: t, overdue: past > 0 });
+      }
+      return out;
     })
     .sort((a, b) => b.pastDays - a.pastDays || b.open - a.open), [rows]);
   const dueTotal = L(dues.reduce((s, d) => s + d.open, 0));
@@ -284,7 +296,9 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   const yetL = Math.max(0, dueTotal - overdueTotal);
   const marketL = yetL + overdueTotal;   // Raised within Timeline: Yet to Receive + Overdue (To be Raised not counted)
   const awaiting = dues.filter(d => !d.overdue), overdueList = dues.filter(d => d.overdue);
-  const dueItem = d => ({ ...egItem(d.r, inrS(d.open), 'finance'), badge: d.overdue ? `Overdue · ${d.pastDays}d` : 'Awaiting', sub: `${clean(d.r.company)} · Inv ${d.r.invNo || '—'} · ${fmtDate(d.r.inv)} · due ${fmtDate(d.dueDate)}` });
+  const dueItem = d => ({ ...egItem(d.r, inrS(d.open), 'finance'), badge: `${d.part === 'travel' ? '✈ Travel · ' : ''}${d.overdue ? `Overdue · ${d.pastDays}d` : 'Awaiting'}`, sub: d.part === 'travel'
+    ? `${clean(d.r.company)} · Travel Inv ${clean(d.r.travelInvoiceNo) || '—'} · ${fmtDate(toIso(d.r.travelInvoiceDate) || d.r.inv)} · due ${fmtDate(d.dueDate)}`
+    : `${clean(d.r.company)} · Inv ${d.r.invNo || '—'} · ${fmtDate(d.r.inv)} · due ${fmtDate(d.dueDate)}` });
   const tiItem = t => ({ name: t.topic || '(No program)', sub: `${t.client} · ${t.first === t.last ? fmtDate(t.first) : `${fmtDate(t.first)} – ${fmtDate(t.last)}`}${t.sessions > 1 ? ` · ${t.sessions} sessions` : ''}`, right: inrS(t.amount), badge: 'To be raised' });
   const L_ = {
     inv: () => pk.invRows.map(r => egItem(r, inrS(r.net), 'finance')), rev: () => pk.revList.map(r => egItem(r, inrS(r.net), 'finance')),
@@ -354,8 +368,8 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       )}
       <div className="kg g4">
         <Kpi tone="pu" label="To be Raised" list={L_.raise} value={fmtL(toInvoiceL)} sub={`${toInvoice.length} program(s) delivered, not yet invoiced`} tag="Pending" tagTone="warn" how="Invoice not raised: sessions ended / delivered with no Invoice date, no Invoice No and Payment not Invoice Raised. Price + GST − TDS + travel; not cancelled / NA / pro bono; all dates." />
-        <Kpi tone="nv" label="Raised within Timeline – Yet to Receive" list={L_.yet} value={fmtL(yetL)} sub={`${awaiting.length} invoice(s) awaiting payment, within ${CREDIT_DAYS} days`} tag="Within credit period" how="Raised, awaiting payment, due date (Invoice date + 30 days) not crossed. Unpaid balance = (Price + GST + travel) − amount received; TDS and credit notes not deducted; all years." />
-        <Kpi tone="rd" label="Raised within Timeline – Overdue" list={L_.od} value={fmtL(overdueTotal)} sub={`${overdueList.length} invoice(s) with payment overdue`} tag="Overdue" tagTone="bad" how="Raised and due date (Invoice date + 30 days) crossed, not marked Received / NA. Unpaid balance = (Price + GST + travel) − amount received; TDS and credit notes not deducted; all years." />
+        <Kpi tone="nv" label="Raised within Timeline – Yet to Receive" list={L_.yet} value={fmtL(yetL)} sub={`${awaiting.length} invoice(s) awaiting payment, within ${CREDIT_DAYS} days`} tag="Within credit period" how="Raised, awaiting payment, due date (Invoice date + 30 days) not crossed. Unpaid balance = (Price + GST + travel) − amount received; TDS and credit notes not deducted; travel on its own invoice is a separate due (Travel Invoice Date + 30 days, closed by Travel Amount Received = Yes / NA); all years." />
+        <Kpi tone="rd" label="Raised within Timeline – Overdue" list={L_.od} value={fmtL(overdueTotal)} sub={`${overdueList.length} invoice(s) with payment overdue`} tag="Overdue" tagTone="bad" how="Raised and due date (Invoice date + 30 days) crossed, not marked Received / NA. Unpaid balance = (Price + GST + travel) − amount received; TDS and credit notes not deducted; travel on its own invoice is a separate due (Travel Invoice Date + 30 days, closed by Travel Amount Received = Yes / NA); all years." />
         <Kpi tone="rd" label="Total Due in Market" list={L_.mkt} value={fmtL(marketL)} sub={`Yet to receive + overdue · ${byClient.length} clients invoiced`} tag="Watch" tagTone="bad" how="Raised within Timeline – Yet to Receive + Raised within Timeline – Overdue (both including TDS). To be Raised is not included." />
       </div>
 
