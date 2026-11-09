@@ -18,6 +18,7 @@ import {
   ShieldAlert, Target, Banknote, PieChart,
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge.jsx';
+import { applyCreditShares } from '../services/money.js';
 import { peekList, peekAllEngagements, getSolutionTracker, getAllEngagementsCached, getOpsChecklist, getContentDevTracker } from '../services/api.js';
 import { getLeads, getVendorServices } from '../services/leadsVendorsApi.js';
 import { getTasks, tasksConfigured } from '../services/tasksApi.js';
@@ -228,7 +229,8 @@ export default function FounderDashboard({ onRefreshed }) {
   const tasks = useMemo(() => openTasks(data), [data]);
   const done = useMemo(() => completedWork(data), [data]);
   const missing = useMemo(() => missingByTracker(data), [data]);
-  const cash = useMemo(() => cashSummary(eng, range), [eng, range]);
+  const engCn = useMemo(() => applyCreditShares(eng), [eng]);   // one credit note on several rows → counted once
+  const cash = useMemo(() => cashSummary(engCn, range), [engCn, range]);
   const pipe = useMemo(() => pipelineSummary(sol, range), [sol, range]);
   const upcoming30 = useMemo(() => upcomingDeliveries(eng, ops, 30), [eng, ops]);
   const clientSum = useMemo(() => clientSummary(clients, eng), [clients, eng]);
@@ -237,7 +239,7 @@ export default function FounderDashboard({ onRefreshed }) {
 
   // Forward view + risks (founderInsights.js)
   const outlook = useMemo(() => revenueOutlook(eng, sol, { basis }), [eng, sol, basis]);
-  const forecast = useMemo(() => cashForecast(eng), [eng]);
+  const forecast = useMemo(() => cashForecast(engCn), [engCn]);
   const mix = useMemo(() => clientMix(eng, sol), [eng, sol]);
   const delivery = useMemo(() => deliveryRisks(eng, ops, consultants), [eng, ops, consultants]);
   const pipeH = useMemo(() => pipelineHealth(sol), [sol]);

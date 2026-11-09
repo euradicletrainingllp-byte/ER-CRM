@@ -13,7 +13,7 @@ import { usePermissions } from '../hooks/usePermissions.js';
 import ExportButton from '../components/ExportButton.jsx';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, FIN_RULES } from '../config/pendingFields.js';
-import { money, gstOf, tdsOf, receivableOf, expectedOf, GST_RATE, TDS_RATE, creditNotesOf, creditTotalOf, collectedOf, invoiceTotal } from '../services/money.js';
+import { money, gstOf, tdsOf, receivableOf, expectedOf, applyCreditShares, GST_RATE, TDS_RATE, creditNotesOf, creditTotalOf, collectedOf, invoiceTotal } from '../services/money.js';
 import { getPOs, peekPOs, poConfigured, poUsage, poStatus, splitIdx } from '../services/poApi.js';
 
 /**
@@ -504,12 +504,13 @@ export default function FinanceTracker({ onRefreshed }) {
   const goThisMonth = () => { const t = todayIso(); setFyF(String(fyOf(t))); setMonthF(t.slice(0, 7)); };
 
   // Undated rows show only under "All years"
-  const rows = useMemo(() => data.filter(e => {
+  const shared = useMemo(() => applyCreditShares(data), [data]);   // one credit note on several rows → counted once
+  const rows = useMemo(() => shared.filter(e => {
     const d = isoStart(e);
     if (!d) return fyF === 'all' && monthF === 'all';
     return (fyF === 'all' || fyOf(d) === +fyF) && (monthF === 'all' || d.startsWith(monthF));
   }).map(e => ({ ...e, _stage: financeStage(e) })),
-  [data, fyF, monthF]);
+  [shared, fyF, monthF]);
 
   const filtered = useMemo(() => rows.filter(r => {
     const q = search.toLowerCase();

@@ -80,8 +80,41 @@ export const receivableOf = e => r2(money(e?.price) + gstOf(e) - tdsOf(e));
 /** Credit notes on an engagement: JSON list [{no, date, amount, reason}] in "Credit Notes"; total in "Credit Note Total (INR)". */
 export const creditNotesOf = e => { try { const v = JSON.parse(String(e?.creditNotes || '[]')); return Array.isArray(v) ? v.filter(c => c && (c.no || c.amount)) : []; } catch { return []; } };
 export const creditTotalOf = e => { const l = creditNotesOf(e); return r2(l.length ? l.reduce((s, c) => s + money(c.amount), 0) : money(e?.creditNoteTotal)); };
+/** Credit taken off this row: its share of each credit note (see applyCreditShares), else the row's own total. */
+export const creditAppliedOf = e => (e && e.creditShare !== undefined && e.creditBasis === creditTotalOf(e) ? e.creditShare : creditTotalOf(e));
 /** What the client still has to pay: Price + GST − TDS + Travel − credit notes. */
-export const expectedOf = e => r2(Math.max(0, receivableOf(e) + money(e?.travelExpenses) - creditTotalOf(e)));
+export const expectedOf = e => r2(Math.max(0, receivableOf(e) + money(e?.travelExpenses) - creditAppliedOf(e)));
+
+/**
+ * One credit note often covers several line items, and is typed on every one of those rows.
+ * Count each credit note once: same Credit Note No (Credit Notes list) — or, with only
+ * "Credit Note Total", same Company + Invoice No + amount — is one note, spread over its rows
+ * in proportion to each row's amount (Price + GST − TDS + Travel). Sets creditShare / creditBasis.
+ */
+export function applyCreditShares(list) {
+  if (!Array.isArray(list)) return list;
+  const cnKey = x => String(x ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  const groups = new Map();   // key → { amount, idx: Set }
+  const add = (key, amount, i) => {
+    if (!(amount > 0)) return;
+    const g = groups.get(key) || { amount: 0, idx: new Set() };
+    g.amount = Math.max(g.amount, amount); g.idx.add(i); groups.set(key, g);
+  };
+  list.forEach((e, i) => {
+    const notes = creditNotesOf(e);
+    if (notes.length) notes.forEach((c, j) => add(cnKey(c.no) ? `no:${cnKey(c.no)}` : `row:${i}:${j}`, money(c.amount), i));
+    else add(`tot:${cnKey(e?.company)}|${cnKey(e?.invoiceNo) || String(e?.invoice ?? '')}|${money(e?.creditNoteTotal)}`, money(e?.creditNoteTotal), i);
+  });
+  if (!groups.size) return list;
+  const share = new Map();
+  groups.forEach(g => {
+    const idx = [...g.idx];
+    const base = idx.map(i => Math.max(0, receivableOf(list[i]) + money(list[i]?.travelExpenses)));
+    const sum = base.reduce((a, b) => a + b, 0);
+    idx.forEach((i, k) => share.set(i, (share.get(i) || 0) + g.amount * (sum > 0 ? base[k] / sum : 1 / idx.length)));
+  });
+  return list.map((e, i) => (share.has(i) ? { ...e, creditShare: r2(share.get(i)), creditBasis: creditTotalOf(e) } : e));
+}
 
 /** Billed amount: Price + GST (18%) + Travel, Stay & Misc. */
 export const invoiceTotal = e => r2(money(e?.price) + gstOf(e) + money(e?.travelExpenses));

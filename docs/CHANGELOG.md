@@ -202,3 +202,11 @@
 - FY summary row uses the same rule. Cancelled invoices list shows one entry per number (programs merged).
 - File: src/components/FinanceLiveDashboard.jsx. Parse-checked; full build not run. Backup: backups/backup-2026-11-09-invoice-count/.
 - 2026-11-09 (later): invoice total reverted to program + cancelled (not already a program number). Credit notes deduplicated like cancelled invoices: same number on several programs counts once (KPI count + value, Credit Notes list merged, amount taken once).
+
+## 2026-11-09 — Credit note counted once across its line items
+- One credit note typed on several rows (same Credit Note No, or same Company + Invoice No + Credit Note Total) is now deducted once, spread over those rows by amount (Price + GST − TDS + Travel). Before, the full amount came off every row.
+- money.js: applyCreditShares(list), creditAppliedOf(e); expectedOf uses the row's share (falls back to its own total if the row's credit notes were edited since).
+- Applied in: FinanceLiveDashboard (Yet to Receive / Overdue / Total Due in Market), FinanceTracker (rows + amount cards), FounderDashboard (cashSummary, cashForecast).
+- Parse-checked; full build not run. Backup: backups/backup-2026-11-09-credit-share/.
+- 2026-11-09 (later): Finance dashboard dues (Yet to Receive / Overdue / Total Due in Market) no longer deduct credit notes — balance = Price + GST − TDS + Travel − Amount Received. Finance Tracker unchanged.
+- 2026-11-09 (later): Finance dashboard Yet to Receive / Overdue now include TDS — balance = Price + GST + Travel − Amount Received; Total Due in Market = sum of both.
