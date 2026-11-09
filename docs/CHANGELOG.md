@@ -235,3 +235,6 @@
 - Rows with Travel Invoice No / Date / Raised = Yes: program due = Price + GST − Amount Received (closed by Payment Received); travel due = Travel − Travel Received Amount, closed by Travel Amount Received = Yes / NA, due Travel Invoice Date (else Invoice date) + 30 days — counted even when the program is Received.
 - Rows without a separate travel invoice: unchanged (Price + GST + Travel − Amount Received).
 - Lists show "✈ Travel" parts. Files: FinanceLiveDashboard.jsx, FinanceTracker.jsx (travelBilled export). Backup: backups/backup-2026-11-09-travel-dues/.
+
+## 2026-11-09 — Finance dashboard: Total Revenue = Price only
+- Total Revenue KPI and its list now sum Price (INR) — GST and travel excluded (same basis as the Revenue by FY chart). TDS card identity now reads Collection + TDS + still to collect = Price + GST. File: FinanceLiveDashboard.jsx.
