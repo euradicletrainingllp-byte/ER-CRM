@@ -13,6 +13,7 @@ import { usePermissions } from '../hooks/usePermissions.js';
 import ExportButton from '../components/ExportButton.jsx';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, FIN_RULES } from '../config/pendingFields.js';
+import { GST_LOCKED_ZERO, gstForExcel } from '../services/gstRule.js';
 import { money, gstOf, tdsOf, receivableOf, expectedOf, applyCreditShares, GST_RATE, TDS_RATE, creditNotesOf, creditTotalOf, collectedOf, invoiceTotal } from '../services/money.js';
 import { getPOs, peekPOs, poConfigured, poUsage, poStatus, splitIdx } from '../services/poApi.js';
 
@@ -214,6 +215,8 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
   };
   // Several fields at once (credit notes list + its total)
   const setMany = obj => { setForm(f => ({ ...f, ...obj })); onEdit(ec, obj); };
+  // GST: Auto = 18% of Price (recalculated on every save) · No GST = 0, never overwritten
+  const setGstMode = mode => onEdit(ec, { gst: mode === 'zero' ? '0' : String(gstForExcel({ ...ec, gst: '' })) });
   const cnList = creditNotesOf(form);
   const [cnDraft, setCnDraft] = useState({ no: '', date: '', amount: '', reason: '' });
   const saveCn = list => setMany({ creditNotes: list.length ? JSON.stringify(list) : '', creditNoteTotal: list.length ? String(list.reduce((t, c) => t + money(c.amount), 0)) : '' });
@@ -318,7 +321,15 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
                 ? <input name="travelExpenses" type="number" min="0" step="0.01" className="form-input" style={{ fontSize: 12 }} value={form.travelExpenses} onChange={edit('travelExpenses')} placeholder="0" />
                 : <Val>{ec.travelExpenses ? inr(ec.travelExpenses) : ''}</Val>}
             </Field>
-            <Field label={`GST (${GST_RATE * 100}% of Price) · auto`}><Val>{num(ec.price) ? inr(gstOf(ec)) : ''}</Val></Field>
+            <Field label={`GST (${GST_RATE * 100}% of Price)`}>
+              {canEdit && num(ec.price) > 0
+                ? <select name="gstMode" className="form-input" style={{ fontSize: 12 }} value={GST_LOCKED_ZERO(ec) ? 'zero' : 'auto'} onChange={e => setGstMode(e.target.value)}
+                    title="Auto: 18% of Price, recalculated whenever this engagement is saved. No GST: 0, never overwritten.">
+                    <option value="auto">Auto · {inr(gstForExcel({ ...ec, gst: '' }))}</option>
+                    <option value="zero">No GST · ₹0 (locked)</option>
+                  </select>
+                : <Val>{num(ec.price) ? inr(gstOf(ec)) : ''}</Val>}
+            </Field>
             <Field label={`TDS (${TDS_RATE * 100}% of Price) · auto`}><Val style={{ color: '#b45309' }}>{num(ec.price) ? `− ${inr(tdsOf(ec))}` : ''}</Val></Field>
             <Field label="Amount to be Received (Price + GST − TDS)">
               <Val style={{ fontWeight: 800, color: 'var(--primary)' }}>{num(ec.price) ? inr(receivableOf(ec)) : ''}</Val>

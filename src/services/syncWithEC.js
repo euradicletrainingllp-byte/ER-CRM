@@ -104,8 +104,10 @@ const isoDate = v => {
   if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   return s.slice(0, 10);
 };
+const blank = v => String(v ?? '').trim() === '';
 const sameVal = (k, a, b) =>
   ['invoice', 'receivedDate'].includes(k) ? isoDate(a) === isoDate(b)
+  : k === 'gst' ? blank(a) === blank(b) && (Number(a) || 0) === (Number(b) || 0)   // blank GST (auto) ≠ 0 (no GST, locked)
   : ['travelExpenses', 'gst', 'price', 'creditNoteTotal'].includes(k) ? (Number(a) || 0) === (Number(b) || 0)
   : String(a ?? '').trim() === String(b ?? '').trim();
 
@@ -300,7 +302,7 @@ const sameFin = (k, a, b) => {
   if (['travelExpenses', 'gst', 'amountReceived', 'pmCost', 'materialCost', 'otherCost', 'travelReceivedAmount', 'creditNoteTotal'].includes(k)) {
     const na = Number(String(a ?? '').replace(/[^0-9.-]/g, '')), nb = Number(String(b ?? '').replace(/[^0-9.-]/g, ''));
     const ea = String(a ?? '').trim() === '', eb = String(b ?? '').trim() === '';
-    if (ea || eb) return ea && eb || (ea ? nb === 0 : na === 0);
+    if (ea || eb) return ea && eb || (k !== 'gst' && (ea ? nb === 0 : na === 0));   // GST: blank (auto) ≠ 0 (no GST, locked)
     return !isNaN(na) && !isNaN(nb) ? na === nb : String(a).trim() === String(b).trim();
   }
   return String(a ?? '').trim() === String(b ?? '').trim();

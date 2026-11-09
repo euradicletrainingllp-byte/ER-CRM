@@ -217,3 +217,5 @@
 - Writing a value replaces the Excel formula in that GST cell.
 - Pending (Finance): type 0 in GST on DBS / Ford rows that are blank (88 rows) — until then they count 18% GST (≈ ₹14.07L across all years); open dues unaffected.
 - Backup: backups/backup-2026-11-09-gst-auto/. Parse-checked; full build not run.
+- 2026-11-09 (later): Finance Tracker GST is editable — dropdown Auto (18% of Price) / No GST (0, locked); saved to the EC GST column. File: FinanceTracker.jsx.
+  syncWithEC.js: GST blank and 0 no longer treated as equal when comparing/saving (blank = auto, 0 = locked).
