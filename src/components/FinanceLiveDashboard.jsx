@@ -153,6 +153,23 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   const invCfg = useMemo(() => fyMonthConfig(invRows, months, t => fmtNum(t)), [invRows]);                                 // eslint-disable-line react-hooks/exhaustive-deps
   const dayCfg = useMemo(() => fyMonthConfig(dayRows, months, t => `${fmtNum(Math.round(t * 100) / 100)} days`), [dayRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* ── Invoice count: program invoices + cancelled numbers not already a program invoice.
+     A cancelled / credit-note number typed on several program rows counts once. */
+  const noKey = x => String(x || '').trim().toUpperCase().replace(/\s+/g, '');
+  const toks = v => String(v || '').split(/[,;&\n]+/).map(noKey).filter(Boolean);
+  const invoiceCount = inP => {
+    const prog = new Set(rows.filter(r => r.inv && !r.cancelled && inP(r.inv)).flatMap(invKeys).map(k => (k[0] === '#' ? `#${noKey(k.slice(1))}` : k)));
+    const cancelled = new Set(rows.filter(r => inP(r.inv || r.start || '')).flatMap(r => toks(r.cancelledInvoiceNo)));
+    const cnSeen = new Set(), cns = [];
+    rows.forEach(r => creditNotesOf(r).forEach((c, i) => {
+      if (!inP(toIso(c.date) || r.inv || '')) return;
+      const k = noKey(c.no) || `${r.engagementKey || r.company}|${i}|${c.amount}`;
+      if (!cnSeen.has(k)) { cnSeen.add(k); cns.push({ ...c, r }); }
+    }));
+    const cancelledN = [...cancelled].filter(x => !prog.has(`#${x}`)).length;
+    return { progN: prog.size, cancelledN, cns, net: prog.size + cancelledN };
+  };
+
   /* ── Current FY totals ── */
   const cur = live[CURRENT_FY];
   const curRevL = cur.rev.reduce((s, v) => s + v, 0);
@@ -164,14 +181,11 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
   /* ── Selected period (KPI cards) ── */
   const pk = useMemo(() => {
     const inv = rows.filter(r => r.inv && !r.cancelled && inRange(r.inv, range));
-    const progKeys = new Set(inv.flatMap(invKeys));
-    const toks = v => String(v || '').split(/[,;&\n]+/).map(x => x.trim()).filter(Boolean);
-    // Cancelled invoice numbers (row's invoice date, else start date, in the period) — counted with program invoices
-    const cancelled = new Set(rows.filter(r => inRange(r.inv || r.start || '', range)).flatMap(r => toks(r.cancelledInvoiceNo)).filter(x => !progKeys.has(`#${x}`)));
+    const ic = invoiceCount(d => inRange(d, range));
     // Travel & stay invoices: separate numbers, by Travel Invoice Date (else Invoice date)
     const travel = new Set(rows.filter(r => r.travelInvoiceNo && inRange(toIso(r.travelInvoiceDate) || r.inv || '', range)).flatMap(r => toks(r.travelInvoiceNo)));
-    const cns = rows.flatMap(r => creditNotesOf(r).map(c => ({ ...c, r }))).filter(c => inRange(toIso(c.date) || c.r.inv || '', range));
-    const invoices = progKeys.size + cancelled.size;
+    const cns = ic.cns;
+    const invoices = ic.net;
     const revRows = rows.filter(r => { const d = revDate(r); return d && inRange(d, range); });
     const revenue = revRows.reduce((s, r) => s + r.net, 0);         // Price + GST, travel excluded
     const tds = revRows.reduce((s, r) => s + tdsOf(r), 0);           // 10% of Price — deducted by the client, never credited
@@ -179,7 +193,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     const paid = rows.filter(r => !r.cancelled && r.got > 0 && (r.rec ? inRange(r.rec, range) : (r.inv && inRange(r.inv, range))));
     const collected = paid.reduce((s, r) => s + r.got, 0);   // sum of Amount Received
     const months = [...new Set(revRows.map(r => MONTHS[slot(revDate(r))]))];
-    return { progN: progKeys.size, cancelledN: cancelled.size, travelN: travel.size, cns, cnValue: cns.reduce((t, c) => t + money(c.amount), 0), invRows: inv, revList: revRows, paidRows: paid, invoices, revenueL: L(revenue), tdsL: L(tds), pendingL: L(revenue - collected - tds), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
+    return { progN: ic.progN, cancelledN: ic.cancelledN, travelN: travel.size, cns, cnValue: cns.reduce((t, c) => t + money(c.amount), 0), invRows: inv, revList: revRows, paidRows: paid, invoices, revenueL: L(revenue), tdsL: L(tds), pendingL: L(revenue - collected - tds), invoicedL: L(invoiced), collectedL: L(collected), payments: paid.length, months,
       suspects: suspectReceipts(engagements) };
   }, [rows, range, basis, engagements]);   // eslint-disable-line react-hooks/exhaustive-deps
   const collectPct = pk.invoicedL > 0 ? Math.round((pk.collectedL / pk.invoicedL) * 100) : null;
@@ -242,12 +256,29 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
 
   // Credit notes — only from the Finance Tracker "Credit Notes" section (EC column), current FY
   const liveCn = rows.flatMap(r => creditNotesOf(r).map(c => ({ c, r }))).filter(({ c, r }) => { const d = toIso(c.date) || r.inv; return d && fyStartOf(d) === CURRENT_FY; });
-  const cnList = liveCn.map(({ c, r }) => ({ no: clean(c.no), amount: money(c.amount), date: toIso(c.date) || r.inv, reason: clean(c.reason), client: clean(r.company), topic: clean(r.topic), key: clean(r.engagementKey) }))
+  const cnList = [...liveCn.map(({ c, r }, i) => ({ no: clean(c.no), amount: money(c.amount), date: toIso(c.date) || r.inv, reason: clean(c.reason), client: clean(r.company), topic: clean(r.topic), key: clean(r.engagementKey), k: noKey(c.no) || `~${i}` }))
+    .reduce((m, n) => {   // same credit-note number on several programs → one entry, amount counted once
+      const o = m.get(n.k);
+      if (!o) m.set(n.k, { ...n });
+      else {
+        if (n.topic && !o.topic.split(' / ').includes(n.topic)) o.topic = o.topic ? `${o.topic} / ${n.topic}` : n.topic;
+        if (!o.amount && n.amount) o.amount = n.amount;
+        if (!o.reason && n.reason) o.reason = n.reason;
+        if (n.date > o.date) o.date = n.date;
+      }
+      return m;
+    }, new Map()).values()]
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
   // Cancelled invoices — "Cancelled Invoice No" (several numbers per cell allowed), dated by Invoice date, else start date
-  const cancelledList = rows.flatMap(r => String(r.cancelledInvoiceNo || '').split(/[,;&\n]+/).map(x => x.trim()).filter(Boolean)
+  const cancelledList = [...rows.flatMap(r => toks(r.cancelledInvoiceNo)
     .map(no => ({ no, client: clean(r.company) || '(no company)', topic: clean(r.topic), date: r.inv || r.start, key: clean(r.engagementKey) })))
-    .filter(c => c.date && fyStartOf(c.date) === CURRENT_FY);
+    .filter(c => c.date && fyStartOf(c.date) === CURRENT_FY)
+    .reduce((m, c) => {   // same cancelled number on several programs → one entry
+      const o = m.get(c.no);
+      if (!o) m.set(c.no, { ...c });
+      else { if (c.topic && !o.topic.split(' / ').includes(c.topic)) o.topic = o.topic ? `${o.topic} / ${c.topic}` : c.topic; if (c.date > o.date) o.date = c.date; }
+      return m;
+    }, new Map()).values()];
   const target = FIN_TARGET_CR[CURRENT_FY];
   const yetL = Math.max(0, dueTotal - overdueTotal);
   const marketL = yetL + overdueTotal;   // Raised within Timeline: Yet to Receive + Overdue (To be Raised not counted)
@@ -306,7 +337,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="kg g4">
-        <Kpi tone="gd" label="No. of Invoices Raised" list={L_.inv} value={fmtNum(pk.invoices)} sub={`${pk.progN} program + ${pk.cancelledN} cancelled · ${pk.travelN} travel & stay (separate) · ${pk.cns.length} credit note(s) ${fmtL(L(pk.cnValue))} · ${periodName}`} how="Program invoices = distinct Invoice No with an Invoice date in the period (rows with no number count by Company + Invoice date), plus Cancelled Invoice No. Travel & stay invoices (Travel Invoice No) and credit notes are shown separately, not in the total." />
+        <Kpi tone="gd" label="No. of Invoices Raised" list={L_.inv} value={fmtNum(pk.invoices)} sub={`${pk.progN} program + ${pk.cancelledN} cancelled · ${pk.travelN} travel & stay (separate) · ${pk.cns.length} credit note(s) ${fmtL(L(pk.cnValue))} · ${periodName}`} how="Program invoices = distinct Invoice No with an Invoice date in the period (rows with no number count by Company + Invoice date), plus Cancelled Invoice No. Travel & stay invoices (Travel Invoice No) and credit notes are shown separately, not in the total. A cancelled or credit-note number on several programs counts once." />
         <Kpi tone="tl" label="Total Revenue" list={L_.rev} value={fmtL(pk.revenueL)} sub={pk.months.length && pk.months.length <= 4 ? `${pk.months.join(' + ')} · price + GST` : `${basis === 'invoice' ? 'Invoiced' : 'Delivered / scheduled'} price + GST · ${periodName}`}
              how={basis === 'invoice' ? 'Price (INR) + GST (18%) of rows whose Invoice date falls in the period; travel excluded, cancelled rows excluded. Revenue = Collection + TDS + still to collect.' : 'Price (INR) + GST (18%) of sessions whose start date falls in the period (cancelled / lost / postponed / on hold excluded); travel excluded. Revenue = Collection + TDS + still to collect.'} />
         <Kpi tone="gn" label="Collection" list={L_.col} value={fmtL(pk.collectedL)} sub={`${pk.payments} payment(s) · ${periodName}${collectPct != null ? ` · ${collectPct}% of ${fmtL(pk.invoicedL)} invoiced` : ''} · sum of Amount Received`} tag="Collected" tagTone="up"

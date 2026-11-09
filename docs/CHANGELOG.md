@@ -195,3 +195,10 @@
 ## 2026-11-08 — Ops dashboard: Feedback N/A = not required
 - Sessions with Feedback "N/A" (also NA / Not required / Not applicable) are now excluded from feedback averages and from awaited / missing-feedback counts (KPI, Program Quality, 60-day insight, feedback log, Delivered — Last Week shows "N/A").
 - Files: src/components/OpsLiveDashboard.jsx
+
+## 2026-11-09 — Finance dashboard: invoice count
+- No. of Invoices Raised = invoices raised − credit notes − cancelled invoices.
+- Raised = distinct program Invoice No (no number → Company + Invoice date) ∪ Cancelled Invoice No. Each cancelled / credit-note number counts once even when typed on several program rows (numbers matched ignoring case and spaces).
+- FY summary row uses the same rule. Cancelled invoices list shows one entry per number (programs merged).
+- File: src/components/FinanceLiveDashboard.jsx. Parse-checked; full build not run. Backup: backups/backup-2026-11-09-invoice-count/.
+- 2026-11-09 (later): invoice total reverted to program + cancelled (not already a program number). Credit notes deduplicated like cancelled invoices: same number on several programs counts once (KPI count + value, Credit Notes list merged, amount taken once).
