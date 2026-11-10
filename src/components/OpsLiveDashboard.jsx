@@ -92,16 +92,25 @@ const PREV_CLIENT_PALETTE = [NV, TL, GD, PU, GN, RD];
 const titleDays = (b, tot) => `${b.label} · ${fmtNum(Math.round(tot * 100) / 100)} days`;
 const titleClients = (b, tot, n) => `${b.label} · ${tot} projects, ${n} clients`;
 
-export default function OpsLiveDashboard({ engagements, refreshing }) {
+/* FY picker: the whole tab follows the selected FY (default = the current FY). The inner component is
+   remounted per FY so every memo is rebuilt. A closed FY is shown as at its last day (31 Mar). */
+export default function OpsLiveDashboard(props) {
+  const [viewFy, setViewFy] = useState(CURRENT_FY);
   const [countBy, setCountBy] = useState('projects');
+  const fy = Math.min(viewFy, CURRENT_FY);
+  return <OpsLiveInner key={`${fy}|${todayISO}`} {...props} viewFy={fy} setViewFy={setViewFy} realFy={CURRENT_FY} realToday={todayISO} countBy={countBy} setCountBy={setCountBy} />;
+}
+
+function OpsLiveInner({ engagements, refreshing, viewFy, setViewFy, realFy, realToday, countBy, setCountBy }) {
+  const CURRENT_FY = viewFy, pastFy = viewFy < realFy, todayISO = pastFy ? `${viewFy + 1}-03-31` : realToday;
   const unit = countBy === 'projects' ? 'Projects' : 'Sessions';
 
   // Live rows: usable start date and FY from LIVE_FROM_FY onward
   // Every EC row with a date, or with an Index / S No and dates TBD (counted in the current FY)
   const all = useMemo(() => (engagements || [])
     .filter(e => hasDate(e) || ((clean(e.engagementKey) || clean(e.sno)) && (clean(e.company) || clean(e.topic))))
-    .map(e => ({ ...e, fy: hasDate(e) ? fyStartOf(e.startDate) : CURRENT_FY })), [engagements]);
-  const live = useMemo(() => all.filter(e => e.fy >= LIVE_FROM_FY), [all]);
+    .map(e => ({ ...e, fy: hasDate(e) ? fyStartOf(e.startDate) : realFy })), [engagements]);
+  const live = useMemo(() => (pastFy ? all : all.filter(e => e.fy >= LIVE_FROM_FY)), [all]);   // eslint-disable-line react-hooks/exhaustive-deps
   const cur = useMemo(() => live.filter(e => e.fy === CURRENT_FY), [live]);
 
   /* Financial Year table: fixed years + live years */
@@ -173,7 +182,7 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
   }, [cur]);
 
   /* Feedback — fixed list from Excel + live scores per program */
-  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const weekAgo = new Date((pastFy ? Date.parse(`${todayISO}T00:00:00Z`) : Date.now()) - 7 * 864e5).toISOString().slice(0, 10);
   const fbRows = useMemo(() => {
     const rows = all.filter(e => hasDate(e) && (feedbackOf(e) != null || (isDelivered(e) && !fbNA(e) && e.startDate >= weekAgo && e.startDate <= todayISO)))
       .map(e => ({ key: `${e.engagementKey || e.sno}`, label: clean(e.topic) || '(No topic)', client: clean(e.company), date: e.endDate && hasDate({ startDate: e.endDate }) ? e.endDate : e.startDate, score: feedbackOf(e) }))
@@ -353,39 +362,36 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
       { label: 'Delivered', data: proj.dM, backgroundColor: NV, borderRadius: 3, stack: 's', order: 2 },
       { label: 'Booked', data: proj.uM, backgroundColor: GD, borderRadius: 3, stack: 's', order: 2 },
       ...proj.hist.filter(h => h.tot > 0).map(h => ({ type: 'line', label: fyShort(h.fy), data: h.m, borderColor: HIST_C[Y3.indexOf(h.fy)], backgroundColor: HIST_C[Y3.indexOf(h.fy)],
-        borderDash: h.fy === CURRENT_FY - 1 ? undefined : [5, 4], borderWidth: h.fy === CURRENT_FY - 1 ? 2.5 : 1.75, pointRadius: 2, tension: 0.3, order: 1, datalabels: { display: false } })),
+        borderDash: h.fy === CURRENT_FY - 1 ? undefined : [5, 4], borderWidth: h.fy === CURRENT_FY - 1 ? 2.5 : 1.75, pointRadius: 2, tension: 0.3, order: 1, stack: `fy${h.fy}`, datalabels: { display: false } })),
     ];
     return { type: 'bar', data: { labels: MONTHS_FY, datasets: sets },
       options: { ...bOpts(true, false), layout: { padding: { top: 18 } }, plugins: { legend: { position: 'top', labels: { boxWidth: 12 } }, datalabels: { display: c => c.dataset.type !== 'line' && c.dataset.data[c.dataIndex] > 0, color: '#fff', font: { size: 10, weight: '700' } } } } };
   }, [proj]);
 
-  /* Calendar heatmap: one FY (selectable, last 3 FYs + current) */
-  const [heatFy, setHeatFy] = useState(CURRENT_FY);
-  const heat = useMemo(() => {
-    const fyS = `${heatFy}-04-01`, fyE = `${heatFy + 1}-03-31`;
+  /* Calendar heatmap: this FY + previous 2 FYs, one below the other */
+  const heats = useMemo(() => [CURRENT_FY, CURRENT_FY - 1, CURRENT_FY - 2].map(fy => {
+    const fyS = `${fy}-04-01`, fyE = `${fy + 1}-03-31`;
     const d0 = new Date(`${fyS}T00:00:00Z`), start = addD(fyS, -((d0.getUTCDay() + 6) % 7));
     const m = new Map();
-    all.forEach(e => { if (e.fy !== heatFy || !hasDate(e) || isCancelled(e)) return; let d = e.startDate; const end = endOf(e); for (let i = 0; i < 14 && d <= end; i++, d = addD(d, 1)) { if (!m.has(d)) m.set(d, []); m.get(d).push(e); } });
+    all.forEach(e => { if (e.fy !== fy || !hasDate(e) || isCancelled(e)) return; let d = e.startDate; const end = endOf(e); for (let i = 0; i < 14 && d <= end; i++, d = addD(d, 1)) { if (!m.has(d)) m.set(d, []); m.get(d).push(e); } });
     const cells = []; let d = start;
     while (d <= fyE) { cells.push({ d, l: m.get(d) || [], out: d < fyS }); d = addD(d, 1); }
-    const weeks = Math.ceil(cells.length / 7), labels = [];
+    const labels = [];
     cells.forEach((c, i) => { if (c.d.slice(8) === '01' && !c.out) labels.push({ w: Math.floor(i / 7), t: MON[+c.d.slice(5, 7) - 1] }); });
-    return { cells, weeks, labels, busy: cells.filter(c => c.l.length).length };
-  }, [all, heatFy]);   // eslint-disable-line react-hooks/exhaustive-deps
+    return { fy, cells, weeks: Math.ceil(cells.length / 7), labels, busy: cells.filter(c => c.l.length).length };
+  }), [all]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const heatWeeks = Math.max(...heats.map(h => h.weeks));
   const heatLvl = n => (n === 0 ? 0 : n === 1 ? 1 : n === 2 ? 2 : n <= 4 ? 3 : 4);
 
-  /* Consultant load: last 2 FYs + this FY delivered / booked / projected */
-  const loadCfg = useMemo(() => {
+  /* Consultant load: ranked list — previous 2 FYs as numbers, this FY as one bar (delivered + booked) */
+  const load = useMemo(() => {
     const prevDays = y => { const m = new Map(); delOf(y).forEach(e => consultantsOf(e).forEach(n => m.set(keyOf(n), (m.get(keyOf(n)) || 0) + daysOf(e)))); return m; };
     const p1 = prevDays(CURRENT_FY - 1), p2 = prevDays(CURRENT_FY - 2);
-    const top = trainers.slice(0, 12), avg = trainers.length ? trainers.reduce((t, x) => t + x.dd + x.du, 0) / trainers.length : 0;
-    return { avg, n: top.length, cfg: { type: 'bar', data: { labels: top.map(t => (t.dd + t.du >= avg * 1.5 && t.dd + t.du >= 5 ? `⚠ ${t.label}` : t.label)), datasets: [
-      { label: fyShort(CURRENT_FY - 2), data: top.map(t => r2n(p2.get(keyOf(t.label)) || 0)), backgroundColor: HIST_C[1], borderRadius: 3, stack: 'a' },
-      { label: fyShort(CURRENT_FY - 1), data: top.map(t => r2n(p1.get(keyOf(t.label)) || 0)), backgroundColor: HIST_C[2], borderRadius: 3, stack: 'b' },
-      { label: 'Delivered', data: top.map(t => r2n(t.dd)), backgroundColor: NV, borderRadius: 3, stack: 'c' },
-      { label: 'Booked', data: top.map(t => r2n(t.du)), backgroundColor: GD, borderRadius: 3, stack: 'c' },
-    ] }, options: { ...bOpts(true, true), indexAxis: 'y', plugins: { legend: { position: 'top', labels: { boxWidth: 12 } }, datalabels: { display: c => c.dataset.stack === 'c' && c.datasetIndex === 2 && c.dataset.data[c.dataIndex] > 0, color: '#fff', font: { size: 10, weight: '700' } } } } } };
-  }, [trainers, proj, all]);   // eslint-disable-line react-hooks/exhaustive-deps
+    const avg = trainers.length ? trainers.reduce((t, x) => t + x.dd + x.du, 0) / trainers.length : 0;
+    const rows = trainers.slice(0, 12).map(t => { const k = keyOf(t.label), tot = t.dd + t.du, ly = p1.get(k) || 0;
+      return { k, label: t.label, dd: t.dd, du: t.du, tot, ly, ly2: p2.get(k) || 0, warn: tot >= avg * 1.5 && tot >= 5, trend: ly ? Math.round(((tot - ly) / ly) * 100) : null }; });
+    return { avg, rows, max: Math.max(1, avg, ...rows.map(r => r.tot)) };
+  }, [trainers, all]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Client portfolio — this FY + last 2 FYs + projection */
   const portfolio = useMemo(() => {
@@ -403,6 +409,33 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
       .sort((a, b) => b.tot - a.tot || b.days - a.days);
   }, [cur, all]);   // eslint-disable-line react-hooks/exhaustive-deps
   const showPax = portfolio.some(c => c.pax > 0);
+  const [pfSort, setPfSort] = useState('tot');
+  const [pfPick, setPfPick] = useState('');
+  const pf = useMemo(() => {
+    const day = d => new Date(`${d}T00:00:00Z`);
+    const rows = portfolio.map(c => {
+      const st = !c.ly && !c.ly2 ? 'new' : !c.ly ? 'back' : c.tot > c.ly ? 'grow' : c.tot === c.ly ? 'flat' : c.up ? 'decl' : 'risk';
+      const x = c.ly ? c.tot / c.ly : null;
+      return { ...c, st, growth: x == null ? null : x >= 2 ? `${Math.round(x * 10) / 10}×` : `${x >= 1 ? '+' : '−'}${Math.abs(Math.round((x - 1) * 100))}%`,
+        inDays: c.next ? Math.round((day(c.next) - day(todayISO)) / 864e5) : null };
+    });
+    const totAll = rows.reduce((t, c) => t + c.tot, 0), top3 = rows.slice(0, 3);
+    const is = { grow: c => c.st === 'grow', decl: c => c.st === 'decl' || c.st === 'risk', nobook: c => !c.up, new: c => c.st === 'new' };
+    const n = k => rows.filter(is[k]).length;
+    return { rows, is, max: Math.max(1, ...rows.map(c => c.tot)), top3, top3Pct: totAll ? Math.round((top3.reduce((t, c) => t + c.tot, 0) / totAll) * 100) : 0,
+      n: { grow: n('grow'), decl: n('decl'), nobook: n('nobook'), new: n('new'), risk: rows.filter(c => c.st === 'risk').length, nobookLy: rows.filter(c => !c.up && c.ly).length } };
+  }, [portfolio]);
+  const pfRows = useMemo(() => {
+    const l = pfPick ? pf.rows.filter(pf.is[pfPick]) : pf.rows.slice(), nul = v => (v == null ? 1 : 0);
+    if (pfSort === 'drop') l.sort((a, b) => nul(a.trend) - nul(b.trend) || a.trend - b.trend);
+    else if (pfSort === 'nobook') l.sort((a, b) => (a.up ? 1 : 0) - (b.up ? 1 : 0) || b.ly - a.ly);
+    else if (pfSort === 'fb') l.sort((a, b) => nul(a.fbAvg) - nul(b.fbAvg) || b.fbAvg - a.fbAvg);
+    return l;
+  }, [pf, pfSort, pfPick]);
+  const PF_TAG = { new: ['nw', 'New'], back: ['nw', 'Returning'], grow: ['up', 'Growing'], flat: ['st', 'Steady'], decl: ['dn', 'Declining'], risk: ['rk', 'At risk'] };
+  const Yr3 = ({ c }) => { const v = [c.ly2, c.ly, c.tot], mx = Math.max(1, ...v), col = [HIST_C[1], HIST_C[2], NV]; return (
+    <svg width="72" height="34" viewBox="0 0 72 34" role="img" aria-label={v.join(' / ')}><title>{`${fyShort(CURRENT_FY - 2)}: ${v[0]} · ${fyShort(CURRENT_FY - 1)}: ${v[1]} · ${fyShort(CURRENT_FY)}: ${v[2]}`}</title>
+      {v.map((x, i) => { const h = x ? Math.max(2, (x / mx) * 20) : 1; return <g key={i}><rect x={i * 25} y={33 - h} width="20" height={h} rx="2" fill={col[i]} opacity={x ? 1 : 0.25} /><text x={i * 25 + 10} y={33 - h - 3} textAnchor="middle" fontSize="9" fontWeight="700" fill={x ? '#374151' : '#9CA3AF'}>{x || '–'}</text></g>; })}</svg>); };
 
   /* Mix by FY — last 3 FYs + this FY (delivered + booked) */
   const mixYears = [...Y3, CURRENT_FY];
@@ -415,15 +448,6 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
       options: { ...bOpts(true, false), scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, max: 100, ticks: { callback: v => `${v}%` }, grid: { color: '#EDF0F5' } } },
         plugins: { legend: { position: 'top', labels: { boxWidth: 12 } }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.raw}% (${c.dataset.raw[c.dataIndex]})` } },
           datalabels: { display: c => c.dataset.data[c.dataIndex] >= 8, color: '#fff', font: { size: 10, weight: '700' }, formatter: v => `${Math.round(v)}%` } } } } };
-  }, [ops, all]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const svcCfg = useMemo(() => {
-    const lb = e => clean(e.serviceType) || clean(e.offering) || 'Not recorded';
-    const yrs = [CURRENT_FY - 2, CURRENT_FY - 1, CURRENT_FY], cnt = yrs.map(y => { const m = new Map(); mixRows(y).forEach(e => m.set(lb(e), (m.get(lb(e)) || 0) + 1)); return m; });
-    const tot = new Map(); cnt.forEach(m => m.forEach((v, k) => tot.set(k, (tot.get(k) || 0) + v)));
-    const labels = [...tot.entries()].sort((a, b) => (a[0] === 'Not recorded') - (b[0] === 'Not recorded') || b[1] - a[1]).slice(0, 8).map(x => x[0]);
-    const col = [HIST_C[1], HIST_C[2], PU];
-    return { n: labels.length, lb, cfg: { type: 'bar', data: { labels, datasets: yrs.map((y, i) => ({ label: fyShort(y) + (y === CURRENT_FY ? ' YTD' : ''), data: labels.map(l => cnt[i].get(l) || 0), backgroundColor: col[i], borderRadius: 3 })) },
-      options: { ...bOpts(false, true), indexAxis: 'y', plugins: { legend: { position: 'top', labels: { boxWidth: 12 } }, datalabels: { display: c => c.datasetIndex === 2 && c.dataset.data[c.dataIndex] > 0, anchor: 'end', align: 'right', color: '#374151', font: { size: 10, weight: '700' } } } } } };
   }, [ops, all]);   // eslint-disable-line react-hooks/exhaustive-deps
   const fyAvg = y => { const l = (y === CURRENT_FY ? cur : all.filter(e => e.fy === y)).filter(e => feedbackOf(e) != null); return l.length ? l.reduce((t, e) => t + feedbackOf(e), 0) / l.length : null; };
 
@@ -443,7 +467,7 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
   const qTone = v => (v == null ? '' : v >= 4.5 ? 'g' : v >= 4 ? 't' : v >= 3 ? 'a' : 'r');
 
   const Spark = ({ v }) => { const mx = Math.max(1, ...v); return (
-    <svg width="72" height="18" viewBox="0 0 72 18" aria-hidden="true">{v.map((x, i) => <rect key={i} x={i * 6} y={18 - (x / mx) * 16 - 1} width="4" height={(x / mx) * 16 + 1} rx="1" fill={i <= slotOf(todayISO) ? NV : GD} opacity={x ? 1 : 0.18} />)}</svg>); };
+    <svg width="96" height="18" viewBox="0 0 96 18" aria-hidden="true">{v.map((x, i) => <rect key={i} x={i * 8} y={18 - (x / mx) * 16 - 1} width="6" height={(x / mx) * 16 + 1} rx="1" fill={i <= slotOf(todayISO) ? NV : GD} opacity={x ? 1 : 0.18} />)}</svg>); };
 
   return (
     <div className="erd ops" style={{ opacity: refreshing ? 0.85 : 1, transition: 'opacity .2s' }}>
@@ -457,8 +481,15 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
             <button key={k} type="button" className={countBy === k ? 'on' : ''} aria-pressed={countBy === k} onClick={() => setCountBy(k)}>{l}</button>
           ))}
         </div>
+        <label>Financial year</label>
+        <div className="erd-seg">
+          {[realFy - 2, realFy - 1, realFy].map(y => (
+            <button key={y} type="button" className={viewFy === y ? 'on' : ''} aria-pressed={viewFy === y} onClick={() => setViewFy(y)}>{fyShort(y)}{y === realFy ? ' · current' : ''}</button>
+          ))}
+        </div>
         {refreshing && <span style={{ fontSize: 13, color: '#00808C', fontWeight: 700 }}>⟳ Updating…</span>}
       </div>
+      {pastFy && <div className="op-fy-note">Viewing <b>{fyLong(viewFy)}</b> as a closed year (as at 31 Mar {viewFy + 1}). "This FY" on every card means {fyShort(viewFy)}; comparisons use the FYs before it. <button type="button" onClick={() => setViewFy(realFy)}>Back to {fyShort(realFy)}</button></div>}
 
       <div className="kg g6">
         <Kpi tone="nv" label={`Delivered · ${fyShort(CURRENT_FY)}`} list={() => egList(ops.curDel)} value={delYtd}
@@ -527,57 +558,10 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
           <ChartBox config={rhythm} className="ch-wrap tall" title="Delivery rhythm" how="Delivered = Status Delivered, Booked = Scheduled / Tentative / Re-schedule from today. Lines = previous FYs' delivered sessions by start month."
             listFor={(lb, ds) => { const i = MONTHS_FY.indexOf(lb); const y = /^\d{4}/.test(ds) ? Y3.find(v => fyShort(v) === ds) : null;
               const pool = y ? delOf(y) : /^deliv/i.test(ds) ? ops.curDel : /^book/i.test(ds) ? ops.curUp : []; return egList(pool.filter(e => hasDate(e) && slotOf(e.startDate) === i)); }} /></div>
-        <div className="card"><div className="sl-head"><div><h3>Session Calendar</h3><div className="cs">Each square = a day · shade = sessions running · {heat.busy} active days · tap a day</div></div>
-          <div className="erd-seg">{[CURRENT_FY - 2, CURRENT_FY - 1, CURRENT_FY].map(y => <button key={y} type="button" className={heatFy === y ? 'on' : ''} onClick={() => setHeatFy(y)}>{fyShort(y)}</button>)}</div></div>
-          <div className="op-hm-wrap">
-            <div className="op-hm-m" style={{ gridTemplateColumns: `repeat(${heat.weeks}, 1fr)` }}>{heat.labels.map(x => <span key={x.t + x.w} style={{ gridColumn: x.w + 1 }}>{x.t}</span>)}</div>
-            <div className="op-hm" style={{ gridTemplateColumns: `repeat(${heat.weeks}, 1fr)` }}>
-              {heat.cells.map(c => <i key={c.d} className={`l${c.out ? 'x' : heatLvl(c.l.length)}${c.d === todayISO ? ' now' : ''}${c.l.length ? ' sl-click' : ''}`} title={c.out ? '' : `${fmtDate(c.d)} · ${c.l.length} session${c.l.length === 1 ? '' : 's'}`}
-                onClick={c.l.length ? () => show(`Sessions on ${fmtDate(c.d)}`, egList(c.l), 'Sessions running on this day (start → end date).') : undefined} />)}
-            </div>
-            <div className="op-hm-lg">Less {[0, 1, 2, 3, 4].map(n => <i key={n} className={`l${n}`} />)} More <span>· outlined = today</span></div>
-          </div>
-        </div>
-      </div>
-
-      <div className="cg c11">
-        <div className="card"><h3>Consultant Load — {fyShort(CURRENT_FY - 2)} → {fyShort(CURRENT_FY)}</h3><div className="cs">Days per consultant · grey = previous FYs · this FY delivered + booked · avg {r2(loadCfg.avg)} days · ⚠ = 1.5× average</div>
-          {loadCfg.n ? <ChartBox config={loadCfg.cfg} height={heightFor(loadCfg.n, 40, 300)} title="Consultant load" how="Day column credited to every consultant on the session; grey bars = previous FYs delivered."
-            listFor={(lb, ds) => { const n = keyOf(String(lb).replace(/^⚠\s*/, '')); const y = Y3.find(v => fyShort(v) === ds); const pool = y ? delOf(y) : [...ops.curDel, ...ops.curUp]; return egList(pool.filter(e => consultantsOf(e).some(c => keyOf(c) === n))); }} /> : <div className="erd-empty">No consultant days yet</div>}
-        </div>
-        <div className="card flex-card"><h3>Client Portfolio — 3-year view</h3><div className="cs">{portfolio.length} active clients · sessions per FY · total = done + booked, ▲▼ vs last FY · bars = this FY by month</div>
-          <div className="tbl-x" style={{ maxHeight: 440, overflowY: 'auto', marginTop: 10 }}>
-            <table className="mt op-pt">
-              <thead><tr><th>Client</th><th className="nr">{fyShort(CURRENT_FY - 2)}</th><th className="nr">{fyShort(CURRENT_FY - 1)}</th><th className="nr">Done</th><th className="nr">Booked</th><th className="nr">Total</th><th className="nr">Days</th>{showPax && <th className="nr">Pax</th>}<th className="nr">Feedback</th><th>Next</th><th>This FY</th></tr></thead>
-              <tbody>{portfolio.length === 0 ? <tr><td colSpan={11} className="erd-empty">No clients yet</td></tr> : portfolio.map(c => (
-                <tr key={c.name} className="sl-click" onClick={() => show(`${c.name} · ${fyShort(CURRENT_FY)}`, egList(c.list), 'This FY\'s sessions for the client (cancelled / on hold excluded).')}>
-                  <td style={{ fontWeight: 600 }}>{c.name}</td><td className="nr op-dim">{c.ly2 || '—'}</td><td className="nr op-dim">{c.ly || '—'}</td><td className="nr">{c.del}</td><td className="nr">{c.up || '—'}</td>
-                  <td className="nr" style={{ fontWeight: 700 }}>{c.tot}{c.trend != null && <span className={`op-tr ${c.trend >= 0 ? 'up' : 'dn'}`}>{c.trend >= 0 ? '▲' : '▼'}{Math.abs(c.trend)}%</span>}{c.trend == null && !c.ly && <span className="op-tr nw">new</span>}</td>
-                  <td className="nr">{r2(c.days)}</td>{showPax && <td className="nr">{c.pax || '—'}</td>}
-                  <td className="nr" style={{ fontWeight: 700, color: c.fbAvg == null ? '#9CA3AF' : c.fbAvg >= 4.5 ? '#0AC44B' : c.fbAvg >= 4 ? '#2D3047' : '#E98272' }}>{c.fbAvg == null ? '—' : c.fbAvg.toFixed(2)}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{c.next ? fmtDate(c.next) : <span className="op-miss">none booked</span>}</td><td><Spark v={c.months} /></td>
-                </tr>))}</tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="cg c11">
-        <div className="card"><h3>Delivery Mode — by FY</h3><div className="cs">% In-Person vs Virtual · last 3 FYs delivered · this FY delivered + booked</div>
-          {mixCfg.rows.length ? <ChartBox config={mixCfg.cfg} height={240} title="Delivery mode" how="Location VILT / Virtual / Online → Virtual, any other place → In-Person. Bars show % of the year's sessions; tooltip shows the count."
-            listFor={(lb, ds) => { const y = mixYears.find(v => String(lb).startsWith(fyShort(v))); const k = { 'In-Person': 'inPerson', Virtual: 'virtual', 'Not recorded': 'unknown' }[ds]; return y ? egList(mixRows(y).filter(e => modeOf(e) === k)) : []; }} /> : <div className="erd-empty">No sessions yet</div>}
-        </div>
-        <div className="card"><h3>Service Mix — by FY</h3><div className="cs">Sessions by Service Type (else Offering) · {fyShort(CURRENT_FY - 2)}, {fyShort(CURRENT_FY - 1)} and this FY</div>
-          {svcCfg.n ? <ChartBox config={svcCfg.cfg} height={heightFor(svcCfg.n, 40, 240)} title="Service mix" how="Service Type of each session (Offering when Service Type is blank); previous FYs delivered, this FY delivered + booked."
-            listFor={(lb, ds) => { const y = [CURRENT_FY - 2, CURRENT_FY - 1, CURRENT_FY].find(v => String(ds).startsWith(fyShort(v))); return y ? egList(mixRows(y).filter(e => svcCfg.lb(e) === lb)) : []; }} /> : <div className="erd-empty">No sessions yet</div>}
-        </div>
-      </div>
-
-      <div className="cg c1">
         <div className="card"><div className="sl-head"><div><h3>Program Quality — {curName}</h3><div className="cs">{quality.sc.length} scored sessions · {ops.awaited.length} awaiting a score · only what needs attention is flagged</div></div>
           {ops.awaited.length > 0 && <button type="button" className="op-fl a sl-click" style={{ border: 0, font: 'inherit', fontSize: 12 }} onClick={() => show('Awaiting feedback', egList(ops.awaited), 'Delivered this FY with no score in the Feedback column.')}>{ops.awaited.length} awaiting feedback</button>}</div>
           {quality.avg == null ? <div className="erd-empty">No feedback scores this FY yet</div> : (
-            <div className="op-q">
+            <div className="op-q h2">
               <div className="op-q-score">
                 <svg viewBox="0 0 120 120" width="132" height="132" aria-hidden="true"><circle cx="60" cy="60" r="50" fill="none" stroke="#EEF1F5" strokeWidth="12" />
                   <circle cx="60" cy="60" r="50" fill="none" className={`op-q-ring ${qTone(quality.avg)}`} strokeWidth="12" strokeLinecap="round" strokeDasharray={`${(quality.avg / 5) * 314} 314`} transform="rotate(-90 60 60)" /></svg>
@@ -605,6 +589,79 @@ export default function OpsLiveDashboard({ engagements, refreshing }) {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="cg c1">
+        <div className="card"><h3>Session Calendar — {fyShort(CURRENT_FY - 2)} → {fyShort(CURRENT_FY)}</h3><div className="cs">Each square = a day · shade = sessions running · this FY on top, previous two FYs below · tap a day</div>
+          <div className="op-hm-wrap">
+            {heats.map(h => (
+              <div className="op-hm-yr" key={h.fy}>
+                <div className="op-hm-fy"><b>{fyShort(h.fy)}</b><span>{h.busy} active days</span></div>
+                <div>
+                  <div className="op-hm-m" style={{ gridTemplateColumns: `repeat(${heatWeeks}, 1fr)` }}>{h.labels.map(x => <span key={x.t + x.w} style={{ gridColumn: x.w + 1 }}>{x.t}</span>)}</div>
+                  <div className="op-hm" style={{ gridTemplateColumns: `repeat(${heatWeeks}, 1fr)` }}>
+                    {h.cells.map(c => <i key={c.d} className={`l${c.out ? 'x' : heatLvl(c.l.length)}${c.d === todayISO ? ' now' : ''}${c.l.length ? ' sl-click' : ''}`} title={c.out ? '' : `${fmtDate(c.d)} · ${c.l.length} session${c.l.length === 1 ? '' : 's'}`}
+                      onClick={c.l.length ? () => show(`Sessions on ${fmtDate(c.d)}`, egList(c.l), 'Sessions running on this day (start → end date).') : undefined} />)}
+                  </div>
+                </div>
+              </div>))}
+            <div className="op-hm-lg">Less {[0, 1, 2, 3, 4].map(n => <i key={n} className={`l${n}`} />)} More <span>· outlined = today</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="cg c11">
+        <div className="card"><h3>Consultant Load — {fyShort(CURRENT_FY - 2)} → {fyShort(CURRENT_FY)}</h3><div className="cs">Days per consultant · top {load.rows.length} this FY · avg {r2(load.avg)} days · ⚠ = 1.5× average · tap a row for sessions</div>
+          {load.rows.length === 0 ? <div className="erd-empty">No consultant days yet</div> : (
+            <div className="op-ld-list">
+              <div className="op-ld op-ld-hd"><span>Consultant</span><span className="r">{fyShort(CURRENT_FY - 2)}</span><span className="r">{fyShort(CURRENT_FY - 1)}</span><span>{fyShort(CURRENT_FY)} · delivered + booked</span><span className="r">Total</span></div>
+              {load.rows.map(r => (
+                <div key={r.k} className="op-ld sl-click" onClick={() => show(`${r.label} · ${fyShort(CURRENT_FY)}`, egList([...ops.curDel, ...ops.curUp].filter(e => consultantsOf(e).some(c => keyOf(c) === r.k))), 'This FY\'s delivered and booked sessions for the consultant. Day column credited to every consultant on the session.')}>
+                  <span className="op-ld-nm" title={r.label}>{r.warn && <b className="op-ld-w">⚠</b>}{r.label}</span>
+                  <span className="r op-dim">{r.ly2 ? r2(r.ly2) : '—'}</span><span className="r op-dim">{r.ly ? r2(r.ly) : '—'}</span>
+                  <span className="op-ld-track"><span className="op-ld-fill">
+                    {r.dd > 0 && <i style={{ width: `${(r.dd / load.max) * 100}%`, background: NV }} title={`${r2(r.dd)} days delivered`}>{r.dd / load.max >= 0.08 ? r2(r.dd) : ''}</i>}
+                    {r.du > 0 && <i style={{ width: `${(r.du / load.max) * 100}%`, background: GD }} title={`${r2(r.du)} days booked`}>{r.du / load.max >= 0.08 ? r2(r.du) : ''}</i>}</span>
+                    <u style={{ left: `${(load.avg / load.max) * 100}%` }} title={`Average ${r2(load.avg)} days`} /></span>
+                  <span className="r op-ld-tot">{r2(r.tot)}{r.trend != null ? <span className={`op-tr ${r.trend >= 0 ? 'up' : 'dn'}`}>{r.trend >= 0 ? '▲' : '▼'}{Math.abs(r.trend)}%</span> : !r.ly2 && <span className="op-tr nw">new</span>}</span>
+                </div>))}
+              <div className="op-ld-lg"><i style={{ background: NV }} />Delivered <i style={{ background: GD }} />Booked <u />Average · ▲▼ vs {fyShort(CURRENT_FY - 1)}</div>
+            </div>)}
+        </div>
+        <div className="card flex-card"><h3>Delivery Mode — by FY</h3><div className="cs">% In-Person vs Virtual · last 3 FYs delivered · this FY delivered + booked</div>
+          {mixCfg.rows.length ? <ChartBox config={mixCfg.cfg} className="ch-wrap s-fill" title="Delivery mode" how="Location VILT / Virtual / Online → Virtual, any other place → In-Person. Bars show % of the year's sessions; tooltip shows the count."
+            listFor={(lb, ds) => { const y = mixYears.find(v => String(lb).startsWith(fyShort(v))); const k = { 'In-Person': 'inPerson', Virtual: 'virtual', 'Not recorded': 'unknown' }[ds]; return y ? egList(mixRows(y).filter(e => modeOf(e) === k)) : []; }} /> : <div className="erd-empty">No sessions yet</div>}
+        </div>
+      </div>
+
+      <div className="cg c1">
+        <div className="card"><div className="sl-head"><div><h3>Client Portfolio — 3-year view</h3><div className="cs">{portfolio.length} active clients · sessions per FY · this FY = done + booked, compared with the full last FY · tap a tile to filter, a row for sessions</div></div>
+          <div className="erd-seg">{[['tot', 'Most sessions'], ['drop', 'Biggest drop'], ['nobook', 'Nothing booked'], ['fb', 'Best feedback']].map(([k, lb]) => <button key={k} type="button" className={pfSort === k ? 'on' : ''} onClick={() => setPfSort(k)}>{lb}</button>)}</div></div>
+          {portfolio.length === 0 ? <div className="erd-empty">No clients yet</div> : (<>
+            <div className="op-pf-tiles">
+              <div className="op-pf-tile"><span>Top 3 clients</span><b>{pf.top3Pct}%</b><em>of this FY's sessions · {pf.top3.map(c => c.name).join(', ')}</em></div>
+              {[['grow', 'Growing', pf.n.grow, `${pf.n.decl} declining vs ${fyShort(CURRENT_FY - 1)}`], ['decl', 'Declining', pf.n.decl, `${pf.n.risk} at risk — nothing booked`],
+                ['nobook', 'Nothing booked', pf.n.nobook, `${pf.n.nobookLy} had sessions last FY`], ['new', 'New this FY', pf.n.new, 'no sessions in the last 2 FYs']].map(([k, lb, n, sub]) => (
+                <button key={k} type="button" className={`op-pf-tile sl-click${pfPick === k ? ' on' : ''}`} onClick={() => setPfPick(pfPick === k ? '' : k)}><span>{lb}</span><b className={k === 'grow' ? 'g' : k === 'new' ? '' : n ? 'r' : ''}>{n}</b><em>{sub}</em></button>))}
+            </div>
+            <div className="tbl-x"><div className="op-pf-list">
+              <div className="op-pf op-pf-hd"><span>Client</span><span title="Sessions per FY">{[2, 1, 0].map(d => `FY${String(CURRENT_FY - d).slice(2)}`).join(' · ')}</span><span>This FY · done + booked</span><span className="r">vs last FY</span><span className="r">Feedback</span><span>Next session</span><span className="op-pf-mh">{MONTHS_FY.map((m, i) => <i key={i}>{m[0]}</i>)}</span></div>
+              {pfRows.length === 0 ? <div className="erd-empty">No clients in this filter</div> : pfRows.map(c => (
+                <div key={c.name} className="op-pf sl-click" onClick={() => show(`${c.name} · ${fyShort(CURRENT_FY)}`, egList(c.list), 'This FY\'s sessions for the client (cancelled / on hold excluded).')}>
+                  <span className="op-pf-nm"><b title={c.name}>{c.name}</b><span className={`op-tr ${PF_TAG[c.st][0]}`}>{PF_TAG[c.st][1]}</span></span>
+                  <span><Yr3 c={c} /></span>
+                  <span className="op-pf-fy"><span className="op-pf-bar"><span className="op-ld-track"><span className="op-ld-fill">
+                    {c.del > 0 && <i style={{ width: `${(c.del / pf.max) * 100}%`, background: NV }} title={`${c.del} done`}>{c.del / pf.max >= 0.07 ? c.del : ''}</i>}
+                    {c.up > 0 && <i style={{ width: `${(c.up / pf.max) * 100}%`, background: GD }} title={`${c.up} booked`}>{c.up / pf.max >= 0.07 ? c.up : ''}</i>}</span></span><b>{c.tot}</b></span>
+                    <em>{c.del} done · {c.up} booked · {r2(c.days)} days{showPax && c.pax ? ` · ${c.pax} pax` : ''}</em></span>
+                  <span className={`r op-pf-gr ${c.st === 'grow' ? 'g' : c.st === 'decl' || c.st === 'risk' ? 'r' : ''}`}>{c.growth || '—'}</span>
+                  <span className="r">{c.fbAvg != null ? <span className={`op-fl ${c.fbAvg >= 4.5 ? 'g' : c.fbAvg >= 4 ? 'n' : 'r'}`}>{c.fbAvg.toFixed(2)}</span> : c.del ? <span className="op-fl m">awaited</span> : <span className="op-dim">—</span>}</span>
+                  <span className="op-pf-nx">{c.next ? <><b>{fmtDate(c.next)}</b><em>{c.inDays <= 0 ? 'today' : c.inDays === 1 ? 'tomorrow' : `in ${c.inDays} days`}</em></> : c.ly ? <span className="op-fl r">none booked</span> : <span className="op-dim">none booked</span>}</span>
+                  <span><Spark v={c.months} /></span>
+                </div>))}
+            </div></div>
+          </>)}
         </div>
       </div>
 

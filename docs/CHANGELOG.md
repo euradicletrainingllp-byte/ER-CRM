@@ -238,3 +238,27 @@
 
 ## 2026-11-09 — Finance dashboard: Total Revenue = Price only
 - Total Revenue KPI and its list now sum Price (INR) — GST and travel excluded (same basis as the Revenue by FY chart). TDS card identity now reads Collection + TDS + still to collect = Price + GST. File: FinanceLiveDashboard.jsx.
+
+## 2026-11-10 — Win rate = Won ÷ total (Dashboard → Solutioning)
+- Win rate is now Won ÷ (Won + Lost + In Process); before it was Won ÷ (Won + Lost).
+- Applies to: Win Rate card (and last-FY comparison), What We Win table, Industry × Category dots, IP Library topics. "How" notes updated.
+- File: `src/components/SolLiveDashboard.jsx`. Parse-checked; build not run.
+- Not changed: Founder's Desk win rate / pipeline cover, BD & Solution Tracker KPI, Lead conversion %.
+
+## 2026-11-10 — Dashboard → Operations layout
+- Session Calendar: full row, this FY + previous 2 FYs one below the other (FY switch removed).
+- Program Quality (feedback): half width, next to Delivery Rhythm.
+- Delivery Rhythm: previous-FY lines no longer stack on each other (each line now reads on the axis scale).
+- Client Portfolio: full row, height limit / scroll removed.
+- Service Mix — by FY removed. Delivery Mode now sits beside Consultant Load.
+- Files: `src/components/OpsLiveDashboard.jsx`, `src/components/erdDashboard.css`. Parse-checked only; build and screenshot not run (Linux VM lacks the rollup binary).
+- Consultant Load: grouped bar chart replaced by a ranked list (previous 2 FYs as numbers, this FY one delivered + booked bar, average marker, total + ▲▼ vs last FY). Delivery Mode chart fills the card height.
+
+## 2026-11-10 — Operations → Client Portfolio redesign
+- Table replaced by: insight tiles (top-3 share, growing, declining / at risk, nothing booked, new — tap to filter), sort chips, and rows with status tag, 3-FY mini bars, this-FY done + booked bar, growth (× or %), feedback pill, next session with days to go, wider monthly spark.
+- Files: `src/components/OpsLiveDashboard.jsx`, `src/components/erdDashboard.css`. Parse-checked only.
+
+## 2026-11-11 — Operations: Financial year picker
+- "Financial year" switch (current FY and the two before; default current, not saved). The whole tab follows it; a closed FY is shown as at 31 Mar, with a note and a "Back to current" button.
+- `OpsLiveDashboard` is now a wrapper holding the FY + Count-by state; the tab body (`OpsLiveInner`) is remounted per FY.
+- Files: `src/components/OpsLiveDashboard.jsx`, `src/components/erdDashboard.css`. Parse + scope checked only.

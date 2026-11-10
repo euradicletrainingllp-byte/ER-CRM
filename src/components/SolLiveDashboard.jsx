@@ -121,12 +121,12 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
   const stat = list => {
     const won = list.filter(p => p.pipeline === 'closed'), lost = list.filter(p => p.pipeline === 'lost'), open = list.filter(p => p.pipeline === 'process');
     const valued = list.filter(p => p.value > 0), wonValued = won.filter(p => p.value > 0);
-    return { n: list.length, won: won.length, lost: lost.length, open: open.length, rate: pct(won.length, won.length + lost.length),
+    return { n: list.length, won: won.length, lost: lost.length, open: open.length, rate: pct(won.length, won.length + lost.length + open.length),
       value: valued.reduce((t, p) => t + p.value, 0), avg: valued.length ? valued.reduce((t, p) => t + p.value, 0) / valued.length : 0,
       wonAvg: wonValued.length ? wonValued.reduce((t, p) => t + p.value, 0) / wonValued.length : 0 };
   };
   const all = useMemo(() => stat(scoped), [scoped]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const baseRate = prevBase ? pct(prevBase.summary.closed, prevBase.summary.closed + prevBase.summary.lost) : null;
+  const baseRate = prevBase ? pct(prevBase.summary.closed, prevBase.summary.closed + prevBase.summary.lost + (prevBase.summary.process || 0)) : null;
 
   /* ── Turnaround & revisions (per Proposal ID, from the raw rows) ── */
   const team = useMemo(() => {
@@ -299,7 +299,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
           sub={isItem ? `${rawItems.filter(l => l.fy === CURRENT_FY).length} rows in tracker · ${rawItems.filter(l => l.fy === CURRENT_FY).length - items.filter(l => l.fy === CURRENT_FY).length} repeated in later versions${paceDelta != null ? ` · ${paceDelta >= 0 ? '▲' : '▼'} ${Math.abs(paceDelta)}% vs ${fyTiny(prevFy)}` : ''}` : paceDelta != null ? `${paceDelta >= 0 ? '▲' : '▼'} ${Math.abs(paceDelta)}% vs ${pace.prevSame} by this date in ${fyTiny(prevFy)}` : 'no last-year pace yet'} tag={paceDelta != null ? (paceDelta >= 0 ? 'Ahead' : 'Behind') : undefined} tagTone={paceDelta >= 0 ? 'up' : 'bad'}
           how={`${isItem ? 'Unique solutions (Proposal ID + Solution Topic, counted once across versions)' : 'Proposal lines (ID + version)'} dated April → today, against last FY up to the same day.`} />
         <Kpi tone="gn" label={`Win Rate · ${scope === 'all' ? 'all' : 'YTD'}`} list={() => scoped.filter(p => p.pipeline === 'closed').map(p => pi(p))} value={all.rate != null ? `${all.rate}%` : '--'}
-          sub={`${all.won} won · ${all.lost} lost · ${all.open} open${baseRate != null && scope === 'fy' ? ` · ${fyTiny(prevFy)}: ${baseRate}%` : ''}`} how={`Won ÷ (won + lost) ${Us}, latest proposal version only — open and replaced versions excluded.`} />
+          sub={`${all.won} won · ${all.lost} lost · ${all.open} open${baseRate != null && scope === 'fy' ? ` · ${fyTiny(prevFy)}: ${baseRate}%` : ''}`} how={`Won ÷ total (won + lost + in process) ${Us}, latest proposal version only — replaced versions excluded.`} />
         <Kpi tone="nv" label={isItem ? 'Avg Item Value' : 'Avg Proposal Value'} list={() => scoped.filter(p => p.value > 0).sort((a, b) => b.value - a.value).map(p => pi(p))} value={all.avg ? L(all.avg) : '--'}
           sub={all.wonAvg ? `won deals avg ${L(all.wonAvg)}` : `${scoped.filter(p => p.value > 0).length} valued ${Us}`} how={`Average Solution Value per ${Us.slice(0, -1)} (latest version) that has a value.`} />
         <Kpi tone="gd" label="IP Reuse" list={() => [...ip.reusedBy.entries()].map(([id, tps]) => latestById.get(id) && ({ ...pi(latestById.get(id)), sub: `Reused topics: ${tps.join(', ')}` })).filter(Boolean)} value={ip.reusePct != null ? `${ip.reusePct}%` : '--'}
@@ -323,7 +323,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
             <div className="s-scroll" style={{ maxHeight: 440 }}>
               <div className="sl-win sl-win-hd"><span>{DIMS.find(d => d[0] === winDim)[1]}</span><span>Proposals · won / open / lost</span><span className="r">Win rate</span><span className="r">Avg value</span><span className="r">Total value</span></div>
               {winRows.map(r => (
-                <div key={r.label} className={`sl-win sl-click${r.label === NR ? ' notrec' : ''}`} onClick={() => show(`${DIMS.find(d => d[0] === winDim)[1]}: ${r.label}`, () => r.list.slice().sort((a, b) => b.value - a.value).map(pi), `Latest version of each proposal in ${scopeName} with this ${DIMS.find(d => d[0] === winDim)[1]}. Win rate = won ÷ (won + lost); average value = Solution Value of proposals that have one.`)}>
+                <div key={r.label} className={`sl-win sl-click${r.label === NR ? ' notrec' : ''}`} onClick={() => show(`${DIMS.find(d => d[0] === winDim)[1]}: ${r.label}`, () => r.list.slice().sort((a, b) => b.value - a.value).map(pi), `Latest version of each proposal in ${scopeName} with this ${DIMS.find(d => d[0] === winDim)[1]}. Win rate = won ÷ total (won + lost + in process); average value = Solution Value of proposals that have one.`)}>
                   <span className="sl-win-lb" title={r.label}>{r.label}</span>
                   <span className="sl-win-bar"><span className="sl-win-track" style={{ width: `${(r.n / winMax) * 100}%` }}>
                     {r.won > 0 && <i className="won" style={{ flexGrow: r.won }} title={`${r.won} won`}>{r.won}</i>}
@@ -337,7 +337,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
               ))}
             </div>
           )}
-          <div className="fr-legend"><span><i style={{ background: GN }} />Won</span><span><i style={{ background: GD }} />Open</span><span><i style={{ background: RD }} />Lost</span><span className="sl-note">Win rate = won ÷ (won + lost)</span></div>
+          <div className="fr-legend"><span><i style={{ background: GN }} />Won</span><span><i style={{ background: GD }} />Open</span><span><i style={{ background: RD }} />Lost</span><span className="sl-note">Win rate = won ÷ total (won + lost + in process)</span></div>
         </div>
       </div>
 
@@ -415,7 +415,7 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
         <div className="card flex-card"><h3>IP Library — Most-used Solution Topics</h3><div className="cs">Topics proposed most often · clients reached and win rate · {scopeName}</div>
           {ip.top.length === 0 ? <div className="erd-empty">No solution topics recorded</div> : (
             <div className="s-scroll" style={{ maxHeight: 420 }}>
-              {ip.top.map((g, i) => { const max = ip.top[0].scopeIds.size || 1, rate = pct(g.won.size, g.won.size + g.lost.size); return (
+              {ip.top.map((g, i) => { const max = ip.top[0].scopeIds.size || 1, rate = pct(g.won.size, g.scopeIds.size); return (
                 <div key={g.label} className="sl-ip sl-click" onClick={() => show(`Solution topic: ${g.label}`, () => [...g.scopeIds].map(id => latestById.get(id)).filter(Boolean).map(pi), `Proposals (${scopeName}) with a solution item named "${g.label}". Reused = the topic appears in more than one proposal at any date.`)}>
                   <span className="sc-rank" style={i < 3 ? { background: NV, color: '#fff' } : undefined}>{i + 1}</span>
                   <span className="sl-ip-lb" title={g.label}>{g.label}{g.ids.size > 1 && <em className="sl-reuse">reused</em>}</span>
