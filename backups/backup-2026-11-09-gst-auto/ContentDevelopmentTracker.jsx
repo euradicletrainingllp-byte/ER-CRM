@@ -1,0 +1,675 @@
+import { useState, useEffect, useMemo } from 'react';
+import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
+import { peekList, getContentDevTracker, addContentDevRow, updateContentDevRow, deleteContentDevRow } from '../services/api.js';
+import { suggestIndexFor } from '../services/addToTrackers.js';
+import { usePermissions } from '../hooks/usePermissions.js';
+import ExportButton from '../components/ExportButton.jsx';
+import { autoColumns } from '../utils/exportExcel.js';
+import { DeleteButton } from '../components/ActionButtons.jsx';
+import { LinkButton } from '../components/LinkButton.jsx';
+import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
+import { pendingItems, CDT_RULES } from '../config/pendingFields.js';
+import { ClientPicker, TeamPicker } from '../components/pickers/index.jsx';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmtDt = d => {
+  if (!d) return '—';
+  const s = String(d).trim();
+  const num = Number(s);
+  if (!isNaN(num) && num > 25000) {
+    const dt = new Date(Math.round((num - 25569) * 86400 * 1000));
+    if (isNaN(dt)) return s;
+    return `${String(dt.getUTCDate()).padStart(2,'0')}/${String(dt.getUTCMonth()+1).padStart(2,'0')}/${String(dt.getUTCFullYear()).slice(2)}`;
+  }
+  const p = s.split('-');
+  if (p.length === 3 && p[0].length === 4) return `${p[2]}/${p[1]}/${p[0].slice(2)}`;
+  return s;
+};
+
+const toInputDate = d => {
+  if (!d) return '';
+  const s = String(d).trim();
+  const num = Number(s);
+  if (!isNaN(num) && num > 25000) {
+    const dt = new Date(Math.round((num - 25569) * 86400 * 1000));
+    return isNaN(dt) ? '' : dt.toISOString().slice(0, 10);
+  }
+  if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0, 10);
+  return '';
+};
+
+const EMPTY_FORM = { client:'', startDate:'', evRequired:'', poc:'', completionDate:'', pmRequired:'', topic:'',
+  contentAssets:[], preWorkItems:[], postWorkItems:[] };
+
+// ─── Work items: Content Assets / Pre-Work / Post-Work ───────────────────────
+const WORK_SECTIONS = [
+  { key:'contentAssets', label:'Content Assets', icon:'📦', hint:'Decks, facilitator guides, videos, handouts…' },
+  { key:'preWorkItems',  label:'Pre-Work',       icon:'📝', hint:'Reading, surveys, self-assessments before the session' },
+  { key:'postWorkItems', label:'Post-Work',      icon:'🎯', hint:'Assignments, reflections, follow-ups after the session' },
+];
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const newId = () => `w${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+function deadlineInfo(item) {
+  if (item.done) return { text:`Done ${fmtDt(item.done)}`, color:'#166534', bg:'#dcfce7' };
+  if (!item.deadline) return { text:'No deadline', color:'#64748b', bg:'#f1f5f9' };
+  const days = Math.round((new Date(item.deadline) - new Date(todayISO())) / 86400000);
+  if (days < 0)   return { text:`${-days}d overdue`, color:'#991b1b', bg:'#fee2e2' };
+  if (days === 0) return { text:'Due today',         color:'#9a3412', bg:'#ffedd5' };
+  if (days <= 3)  return { text:`Due in ${days}d`,   color:'#9a3412', bg:'#ffedd5' };
+  return { text:`Due ${fmtDt(item.deadline)}`, color:'#1e40af', bg:'#dbeafe' };
+}
+
+/** Open / overdue counts across all three sections of a CDT row. */
+function workSummary(row) {
+  let open = 0, overdue = 0, total = 0;
+  const t = todayISO();
+  WORK_SECTIONS.forEach(sec => (row[sec.key] || []).forEach(it => {
+    total++;
+    if (!it.done) { open++; if (it.deadline && it.deadline < t) overdue++; }
+  }));
+  return { open, overdue, total };
+}
+
+const miniInp = { fontSize:12, padding:'5px 8px', border:'1px solid var(--border)', borderRadius:6, boxSizing:'border-box', width:'100%' };
+
+function WorkItemRow({ item, canEdit, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item);
+  const info = deadlineInfo(item);
+
+  if (editing) {
+    const valid = draft.title.trim() && draft.deadline;
+    return (
+      <div data-pf={`wi-${item.id}`} style={{ display:'grid', gridTemplateColumns:'1.4fr 1.4fr 130px auto', gap:6, padding:'6px 0', borderBottom:'1px solid var(--border)', alignItems:'center' }}>
+        <input style={miniInp} value={draft.title} placeholder="Title *" onChange={e => setDraft(d => ({ ...d, title:e.target.value }))} />
+        <input style={miniInp} value={draft.link} placeholder="Link (https://…)" onChange={e => setDraft(d => ({ ...d, link:e.target.value }))} />
+        <input style={miniInp} type="date" value={draft.deadline} title="Deadline" onChange={e => setDraft(d => ({ ...d, deadline:e.target.value }))} />
+        <div style={{ display:'flex', gap:4 }}>
+          <button className="btn btn-primary btn-sm" disabled={!valid} onClick={() => { onSave(draft); setEditing(false); }}>Save</button>
+          <button className="btn btn-outline btn-sm" onClick={() => { setDraft(item); setEditing(false); }}>✕</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div data-pf={`wi-${item.id}`} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 0', borderBottom:'1px solid var(--border)', flexWrap:'wrap' }}>
+      {canEdit ? (
+        <input type="checkbox" checked={!!item.done} title={item.done ? 'Mark as not done' : 'Mark as done (today)'}
+          onChange={() => onSave({ ...item, done: item.done ? '' : todayISO() })}
+          style={{ width:15, height:15, accentColor:'#16a34a', cursor:'pointer' }} />
+      ) : <span style={{ width:15 }}>{item.done ? '✓' : '•'}</span>}
+      <div style={{ flex:1, minWidth:120, fontSize:13, fontWeight:600, textDecoration:item.done ? 'line-through' : 'none', color:item.done ? 'var(--muted)' : 'inherit' }}>
+        {item.title || <span style={{ color:'var(--muted)', fontWeight:400 }}>(untitled)</span>}
+      </div>
+      <LinkButton url={item.link} compact />
+      <span style={{ fontSize:11, fontWeight:700, color:info.color, background:info.bg, borderRadius:12, padding:'2px 8px', whiteSpace:'nowrap' }}
+        title={item.deadline ? `Deadline: ${fmtDt(item.deadline)}` : ''}>{info.text}</span>
+      {canEdit && (
+        <span style={{ display:'flex', gap:2 }}>
+          <button type="button" title="Edit" onClick={() => { setDraft(item); setEditing(true); }} style={{ border:'none', background:'none', cursor:'pointer', fontSize:13 }}>✏️</button>
+          <button type="button" title="Remove" onClick={onDelete} style={{ border:'none', background:'none', cursor:'pointer', fontSize:13 }}>🗑</button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** List editor for one section — every item needs a title and a deadline. */
+function WorkItemsEditor({ section, items, onChange, canEdit, defaultDeadline }) {
+  const [adding, setAdding] = useState(false);
+  const blank = () => ({ id:newId(), title:'', link:'', deadline:defaultDeadline || '', done:'' });
+  const [draft, setDraft] = useState(blank);
+  const list = items || [];
+  const open = list.filter(i => !i.done).length;
+  const valid = draft.title.trim() && draft.deadline;
+
+  const add = () => { if (!valid) return; onChange([...list, { ...draft, title:draft.title.trim(), link:draft.link.trim() }]); setDraft(blank()); setAdding(false); };
+
+  return (
+    <div style={{ border:'1px solid var(--border)', borderRadius:8, padding:'10px 12px', background:'#fff' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <span style={{ fontSize:13, fontWeight:800, color:'var(--primary)' }}>{section.icon} {section.label}</span>
+        <span style={{ fontSize:11, color:'var(--muted)' }}>{list.length ? `${list.length - open}/${list.length} done` : 'none yet'}</span>
+        {canEdit && !adding && (
+          <button type="button" className="btn btn-outline btn-sm" style={{ marginLeft:'auto', padding:'2px 10px', fontSize:11 }}
+            onClick={() => { setDraft(blank()); setAdding(true); }}>+ Add</button>
+        )}
+      </div>
+      {!list.length && !adding && <div style={{ fontSize:11, color:'#9ca3af', marginTop:4 }}>{section.hint}</div>}
+      <div style={{ marginTop:4 }}>
+        {list.map(it => (
+          <WorkItemRow key={it.id} item={it} canEdit={canEdit}
+            onSave={next => onChange(list.map(x => (x.id === it.id ? next : x)))}
+            onDelete={() => onChange(list.filter(x => x.id !== it.id))} />
+        ))}
+      </div>
+      {adding && (
+        <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1.4fr 130px auto', gap:6, marginTop:8, alignItems:'center' }}>
+          <input autoFocus style={miniInp} value={draft.title} placeholder={`${section.label} title *`} onChange={e => setDraft(d => ({ ...d, title:e.target.value }))}
+            onKeyDown={e => e.key === 'Enter' && add()} />
+          <input style={miniInp} value={draft.link} placeholder="Link (https://…)" onChange={e => setDraft(d => ({ ...d, link:e.target.value }))}
+            onKeyDown={e => e.key === 'Enter' && add()} />
+          <input style={{ ...miniInp, borderColor: draft.deadline ? 'var(--border)' : '#fca5a5' }} type="date" value={draft.deadline} title="Deadline *"
+            onChange={e => setDraft(d => ({ ...d, deadline:e.target.value }))} />
+          <div style={{ display:'flex', gap:4 }}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={!valid} onClick={add}>Add</button>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => setAdding(false)}>✕</button>
+          </div>
+          {!valid && <div style={{ gridColumn:'1 / -1', fontSize:10, color:'#b91c1c' }}>Title and deadline are required</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Add Modal ────────────────────────────────────────────────────────────────
+function AddModal({ onSave, onClose, saving }) {
+  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const inp = { className:'form-input', style:{ width:'100%', marginBottom:10 } };
+  const YesNoBtn = ({ field }) => (
+    <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+      {['Yes','No'].map(opt => {
+        const active = form[field] === opt;
+        return (
+          <button key={opt} type="button" onClick={() => set(field, active ? '' : opt)} style={{
+            flex:1, padding:'7px 0', borderRadius:6,
+            border:`2px solid ${active ? (opt==='Yes'?'#16a34a':'#dc2626') : 'var(--border)'}`,
+            background: active ? (opt==='Yes'?'#dcfce7':'#fee2e2') : '#fff',
+            color: active ? (opt==='Yes'?'#166534':'#991b1b') : 'var(--muted)',
+            fontWeight: active ? 700 : 400, cursor:'pointer', fontSize:13,
+          }}>{opt}</button>
+        );
+      })}
+    </div>
+  );
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ background:'#fff', borderRadius:12, padding:28, width:640, maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto', boxShadow:'0 8px 40px rgba(0,0,0,0.22)' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+          <h3 style={{ margin:0, fontSize:16, color:'var(--primary)' }}>➕ Add Entry</h3>
+          <button className="btn btn-outline btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 16px' }}>
+          <div style={{ gridColumn:'1 / -1' }}>
+            <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>Client *</label>
+            <div style={{ marginBottom:10 }}><ClientPicker value={form.client} onChange={v => set('client', v)} placeholder="Client / company name" /></div>
+          </div>
+          <div style={{ gridColumn:'1 / -1' }}>
+            <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>Program Topic</label>
+            <input {...inp} value={form.topic} onChange={e => set('topic', e.target.value)} placeholder="Topic" />
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>Start Date</label>
+            <input {...inp} type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} />
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>POC</label>
+            <div style={{ marginBottom:10 }}><TeamPicker value={form.poc} onChange={v => set('poc', v)} placeholder="Point of contact" /></div>
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>PM Required</label>
+            <YesNoBtn field="pmRequired" />
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>EV Required</label>
+            <YesNoBtn field="evRequired" />
+          </div>
+          <div>
+            <label style={{ fontSize:12, fontWeight:600, color:'var(--muted)' }}>Completion Date</label>
+            <input {...inp} type="date" value={form.completionDate} onChange={e => set('completionDate', e.target.value)} />
+          </div>
+          <div style={{ gridColumn:'1 / -1', display:'flex', flexDirection:'column', gap:10, marginBottom:10 }}>
+            {WORK_SECTIONS.map(sec => (
+              <WorkItemsEditor key={sec.key} section={sec} items={form[sec.key]} onChange={v => set(sec.key, v)} canEdit />
+            ))}
+          </div>
+        </div>
+        <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:8 }}>
+          <button className="btn btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => onSave(form)} disabled={saving || !form.client.trim()}>
+            {saving ? 'Saving…' : 'Add Entry'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Delete Confirm Modal ─────────────────────────────────────────────────────
+function DeleteConfirmModal({ row, onConfirm, onClose, saving }) {
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ background:'#fff', borderRadius:12, padding:28, width:380, boxShadow:'0 8px 40px rgba(0,0,0,0.22)' }}>
+        <h3 style={{ margin:'0 0 12px', fontSize:16, color:'var(--red)' }}>🗑 Delete Entry?</h3>
+        <div style={{ background:'#fff7ed', border:'1px solid #fbbf24', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:13 }}>
+          <strong>{row.client}</strong>
+          <div style={{ color:'var(--muted)', fontSize:12, marginTop:4 }}>Start: {fmtDt(row.startDate)}</div>
+        </div>
+        <p style={{ margin:'0 0 20px', fontSize:13, color:'var(--red)' }}>This cannot be undone.</p>
+        <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+          <button className="btn btn-outline" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn" style={{ background:'var(--red)', color:'#fff', border:'none' }} onClick={onConfirm} disabled={saving}>
+            {saving ? 'Deleting…' : 'Yes, Delete'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Inline editable field ────────────────────────────────────────────────────
+function EditField({ label, value, field, type='text', row, onSave, canEdit, autoEdit = 0 }) {
+  const [editing, setEditing] = useState(false);
+  // Opened from the pending-fields bar → go straight into edit mode
+  useEffect(() => { if (autoEdit && canEdit) setEditing(true); }, [autoEdit]);
+  const displayVal = type === 'date' ? fmtDt(value) : (value || '—');
+
+  const commit = raw => {
+    const next = (raw ?? '').trim();
+    setEditing(false);
+    if (next !== String(value || '').trim()) onSave(row, { [field]: next });
+  };
+
+  return (
+    <div data-pf={field}>
+      <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.3px' }}>{label}</div>
+      {editing ? (
+        <input
+          autoFocus
+          type={type}
+          defaultValue={type==='date' ? toInputDate(value) : (value||'')}
+          onBlur={e => commit(e.target.value)}
+          onKeyDown={e => { if(e.key==='Enter') e.target.blur(); if(e.key==='Escape') setEditing(false); }}
+          style={{ width:'100%', fontSize:13, padding:'5px 8px', border:'1px solid var(--accent)', borderRadius:6, outline:'none', boxSizing:'border-box' }}
+        />
+      ) : (
+        <div
+          onClick={() => canEdit && setEditing(true)}
+          title={canEdit ? 'Click to edit' : ''}
+          style={{
+            fontSize:13, fontWeight:500, padding:'5px 8px',
+            border:`1px ${canEdit ? 'dashed' : 'solid'} ${canEdit ? 'transparent' : 'var(--border)'}`,
+            borderRadius:6, cursor:canEdit?'pointer':'default',
+            background: canEdit ? 'transparent' : '#f8fafc',
+            color: value ? 'inherit' : 'var(--muted)',
+            transition:'border-color 0.15s, background 0.15s',
+            minHeight:32, display:'flex', alignItems:'center',
+          }}
+          onMouseEnter={e => { if(canEdit){ e.currentTarget.style.borderColor='var(--accent)'; e.currentTarget.style.background='#f0f7ff'; }}}
+          onMouseLeave={e => { e.currentTarget.style.borderColor='transparent'; e.currentTarget.style.background='transparent'; }}
+        >
+          {displayVal}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Yes/No pill (inline toggle) ─────────────────────────────────────────────
+function YesNoPill({ label, value, field, row, onSave, canEdit }) {
+  const cycle = () => {
+    if (!canEdit) return;
+    const next = value==='Yes' ? 'No' : value==='No' ? '' : 'Yes';
+    onSave(row, { [field]: next });
+  };
+  const color  = value==='Yes' ? '#16a34a' : value==='No' ? '#dc2626' : 'var(--muted)';
+  const bg     = value==='Yes' ? '#dcfce7'  : value==='No' ? '#fee2e2'  : '#f3f4f6';
+  const border = value==='Yes' ? '#86efac'  : value==='No' ? '#fca5a5'  : '#e5e7eb';
+  return (
+    <div data-pf={field}>
+      <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.3px' }}>{label}</div>
+      <div
+        onClick={cycle}
+        title={canEdit ? 'Click to toggle' : ''}
+        style={{
+          display:'inline-flex', alignItems:'center', justifyContent:'center',
+          padding:'5px 20px', borderRadius:20,
+          border:`1px solid ${border}`, background:bg, color,
+          fontWeight:600, fontSize:13,
+          cursor:canEdit?'pointer':'default',
+          userSelect:'none', transition:'all 0.15s', minWidth:64, minHeight:32,
+        }}
+      >
+        {value || '—'}
+      </div>
+      {canEdit && <div style={{ fontSize:10, color:'#9ca3af', marginTop:3 }}>click to toggle</div>}
+    </div>
+  );
+}
+
+// ─── Detail Panel ─────────────────────────────────────────────────────────────
+function DetailPanel({ row, canEdit, onUpdate, onDelete, saving, focus }) {
+  const ae = f => (focus?.field === f ? focus.n : 0);
+  const isCompleted = !!(row.completionDate && row.completionDate !== '—');
+  return (
+    <div className="card" style={{ height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+
+      {/* Header */}
+      <div className="card-header" style={{ flexShrink:0, flexWrap:'wrap', gap:8 }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:16, fontWeight:800, color:'var(--primary)' }}>{row.client}</div>
+          <div style={{ fontSize:12, color:'var(--muted)', marginTop:2 }}>
+            #{row.sno}
+            {row.startDate && <> · 📅 {fmtDt(row.startDate)}</>}
+            {row.poc && <> · <strong>POC:</strong> {row.poc}</>}
+          </div>
+          {row.topic && (
+            <div style={{ marginTop:6, fontSize:12, color:'#4f46e5', background:'#eef2ff', border:'1px solid #c7d2fe', borderRadius:6, padding:'3px 10px', display:'inline-block' }}>
+              {row.topic}
+            </div>
+          )}
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
+          <span style={{
+            padding:'4px 14px', borderRadius:20, fontWeight:700, fontSize:12,
+            background: isCompleted ? '#dcfce7' : '#fef9c3',
+            color: isCompleted ? '#166534' : '#854d0e',
+            border: `1px solid ${isCompleted ? '#86efac' : '#fde047'}`,
+          }}>
+            {isCompleted ? '✓ Completed' : '⏳ Pending'}
+          </span>
+          {canEdit && (
+            <DeleteButton title="Delete Entry" style={{ marginTop:4 }} onClick={() => onDelete(row)} />
+          )}
+        </div>
+      </div>
+
+      {/* Fields grid */}
+      <div style={{ flex:1, overflowY:'auto', padding:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+
+          {/* Index — view only */}
+          <div style={{ gridColumn:'1 / -1', fontSize:12, color:'var(--muted)' }}>
+            Index 🔒 <span style={{ fontWeight:600, color: row.engagementKey ? '#475569' : '#b91c1c' }}>{row.engagementKey || 'Missing in Excel — edits to this row can\'t be saved until its Index is filled in'}</span>
+          </div>
+
+          {/* Client — full width */}
+          <div style={{ gridColumn:'1 / -1' }}>
+            <EditField autoEdit={ae('client')} label="Client" value={row.client} field="client" row={row} onSave={onUpdate} canEdit={canEdit} />
+          </div>
+
+          {/* Topic — full width */}
+          <div style={{ gridColumn:'1 / -1' }}>
+            <EditField autoEdit={ae('topic')} label="Program Topic" value={row.topic} field="topic" row={row} onSave={onUpdate} canEdit={canEdit} />
+          </div>
+
+          <EditField autoEdit={ae('startDate')} label="Start Date" value={row.startDate} field="startDate" type="date" row={row} onSave={onUpdate} canEdit={canEdit} />
+          <EditField autoEdit={ae('poc')} label="POC" value={row.poc} field="poc" row={row} onSave={onUpdate} canEdit={canEdit} />
+
+          {/* PM Required BEFORE EV Required */}
+          <YesNoPill label="PM Required" value={row.pmRequired} field="pmRequired" row={row} onSave={onUpdate} canEdit={canEdit} />
+          <YesNoPill label="EV Required" value={row.evRequired} field="evRequired" row={row} onSave={onUpdate} canEdit={canEdit} />
+
+          {/* Due Date — read only */}
+          <div>
+            <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, marginBottom:4, textTransform:'uppercase', letterSpacing:'0.3px' }}>Due Date <span style={{ fontWeight:400, fontSize:10 }}>(auto-calculated)</span></div>
+            <div style={{ fontSize:13, fontWeight:500, padding:'5px 8px', border:'1px solid var(--border)', borderRadius:6, background:'#f8fafc', color:'var(--muted)', minHeight:32, display:'flex', alignItems:'center' }}>
+              {fmtDt(row.dueDate)}
+            </div>
+          </div>
+
+          <EditField autoEdit={ae('completionDate')} label="Completion Date" value={row.completionDate} field="completionDate" type="date" row={row} onSave={onUpdate} canEdit={canEdit} />
+        </div>
+
+        {/* Content Assets / Pre-Work / Post-Work — each item has its own deadline */}
+        <div style={{ marginTop:18, display:'flex', flexDirection:'column', gap:10 }}>
+          <div style={{ fontSize:11, color:'var(--muted)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.3px' }}>Work Items</div>
+          {WORK_SECTIONS.map(sec => (
+            <WorkItemsEditor key={sec.key} section={sec} items={row[sec.key]} canEdit={canEdit}
+              defaultDeadline={toInputDate(row.dueDate)}
+              onChange={list => onUpdate(row, { [sec.key]: list })} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+export default function ContentDevelopmentTracker({ onRefreshed }) {
+  const [data,      setData]      = useState(() => peekList('cdt') || []);
+  const [loading,   setLoading]   = useState(() => !peekList('cdt'));   // full loader only on the very first visit
+  const [refreshing, setRefreshing] = useState(false);                  // quiet background refresh
+  const [error,     setError]     = useState(null);
+  const [search,    setSearch]    = useState('');
+  const [statusF,   setStatusF]   = useState('All');
+  const [selected,  setSelected]  = useState(null);
+  const [toast,     setToast]     = useState('');
+  const [saving,    setSaving]    = useState(false);
+  const [showAdd,   setShowAdd]   = useState(false);
+  const [deleteRow, setDeleteRow] = useState(null);
+  const [focus,     setFocus]     = useState(null);   // { field, n } — field to open from the pending bar
+
+  const { canEdit } = usePermissions();
+  const editable = canEdit('content-dev');
+
+  // Show the last loaded rows straight away, then fetch fresh rows in the background
+  const load = async () => {
+    const saved = peekList('cdt');
+    if (saved) { setData(d => (d.length ? d : saved)); setLoading(false); }
+    else setLoading(true);
+    setRefreshing(true); setError(null);
+    try {
+      const rows = await getContentDevTracker();
+      setData(rows);
+      onRefreshed?.(new Date().toLocaleTimeString());
+    } catch(e) {
+      if (saved) showToast('⚠ Could not refresh from Excel — showing the last saved copy.');
+      else setError(e);
+    }
+    finally { setLoading(false); setRefreshing(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), String(msg).includes('⚠') ? 9000 : 3000); };
+
+  const filtered = useMemo(() => {
+    // Excel cells can be numbers, blank or carry stray spaces — compare as trimmed text
+    const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const q = norm(search);
+    return data.filter(r => {
+      const matchQ = !q || [r.client, r.poc, r.topic, r.programType, r.engagementKey].some(v => norm(v).includes(q));
+      const done = String(r.completionDate ?? '').trim();
+      const isCompleted = !!(done && done !== '—');
+      const matchS = statusF==='All' || (statusF==='Completed' && isCompleted) || (statusF==='Pending' && !isCompleted);
+      return matchQ && matchS;
+    }).sort((a,b) => (Number(a.sno)||0) - (Number(b.sno)||0));
+  }, [data, search, statusF]);
+
+  // keep selected in sync when data reloads
+  const sel = selected != null ? data.find(d => d.sno === selected) : null;
+
+  // Pending-fields bar: entries with empty fields, in S No order (follows search / status filter)
+  const pendingBar = useMemo(() => pendingItems(filtered, CDT_RULES, r => ({
+    id: r.sno, serial: r.sno, title: r.client || '(no client)', subtitle: r.topic,
+  })), [filtered]);
+  const openPending = (it, f) => {
+    setSelected(it.row.sno);
+    setFocus({ field: f.key, n: Date.now() });
+    revealField(f.key, f.label);
+  };
+
+  // Reminders popup: open work items with a deadline, and entries past their Due Date with no Completion Date
+  const dueBar = useMemo(() => filtered.map(r => {
+    const tasks = [];
+    WORK_SECTIONS.forEach(sec => (r[sec.key] || []).forEach(it => {
+      if (!it.done && it.deadline) tasks.push({ key: `wi-${it.id}`, label: `${sec.label}: ${it.title || '(untitled)'}`, due: toInputDate(it.deadline) });
+    }));
+    const done = String(r.completionDate ?? '').trim();
+    const due = toInputDate(r.dueDate);
+    if ((!done || done === '—') && due) tasks.push({ key: 'completionDate', label: 'Content completion', due });
+    return { id: r.sno, serial: r.sno, title: r.client || '(no client)', subtitle: r.topic, tasks: tasks.filter(t => t.due), row: r };
+  }).filter(x => x.tasks.length), [filtered]);
+  const openDue = (it, t) => {
+    setSelected(it.row.sno);
+    if (t.key === 'completionDate') { setFocus({ field: 'completionDate', n: Date.now() }); revealField('completionDate', 'Completion Date'); }
+    else { setFocus(null); revealField(t.key, t.label); }
+  };
+
+  const handleUpdate = async (row, changes) => {
+    // A row with an empty Index cell can't be found by the flow, so nothing would save.
+    if (!String(row.engagementKey ?? '').trim()) {
+      const guess = await suggestIndexFor(row);
+      showToast('⚠ Not saved — this row has no Index in Excel, so the CRM can\'t find it to update. ' +
+        (guess ? `Type ${guess} (its Engagement Calendar Index) in this row's Index cell in Excel, then Refresh. `
+               : 'Type its Engagement Calendar Index in this row\'s Index cell in Excel, then Refresh. ') +
+        'This happens when the CONTENT_DEV_CRUD flow\'s "Add a row" step doesn\'t map Index = triggerBody()?[\'Index\'].');
+      return;
+    }
+    try {
+      await updateContentDevRow(row.sno, { ...row, ...changes }, row.engagementKey);
+      setData(prev => prev.map(r => r.sno===row.sno ? { ...r, ...changes } : r));
+      showToast('✓ Saved');
+    } catch(e) { showToast('❌ ' + e.message); }
+  };
+
+  const handleAdd = async form => {
+    setSaving(true);
+    try { await addContentDevRow(form); showToast('✓ Entry added'); setShowAdd(false); await load(); }
+    catch(e) { showToast('❌ ' + e.message); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteRow) return; setSaving(true);
+    try {
+      await deleteContentDevRow(deleteRow.sno, deleteRow.engagementKey);
+      if (selected === deleteRow.sno) setSelected(null);
+      showToast('✓ Entry deleted'); setDeleteRow(null); await load();
+    } catch(e) { showToast('❌ ' + e.message); }
+    finally { setSaving(false); }
+  };
+
+
+  // KPIs follow the search / status filter (same rows and same "completed" test as the list)
+  const isDoneRow = r => { const d = String(r.completionDate ?? '').trim(); return !!(d && d !== '—'); };
+  const completed = filtered.filter(isDoneRow).length;
+  const pending   = filtered.length - completed;
+
+  if (loading) return <LoadingState message="Loading Content Dev Tracker from OneDrive…" />;
+  if (error)   return <ErrorState error={error} onRetry={load} />;
+
+  return (
+    <div className="tracker-page">
+      {toast && (
+        <div style={{ position:'fixed', top:70, right:24, background:'var(--primary)', color:'#fff', padding:'10px 20px', borderRadius:8, zIndex:999, fontSize:13, fontWeight:600, boxShadow:'0 4px 12px rgba(0,0,0,0.15)' }}>
+          {toast}
+        </div>
+      )}
+
+      {showAdd   && <AddModal onSave={handleAdd} onClose={() => setShowAdd(false)} saving={saving} />}
+      {deleteRow && <DeleteConfirmModal row={deleteRow} onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={saving} />}
+
+      {/* KPIs */}
+      <div className="kpi-compact">
+        <div className="kpi-card accent"><div className="kpi-label">{filtered.length === data.length ? 'Total Entries' : 'Filtered Entries'}</div><div className="kpi-value">{filtered.length}</div>{filtered.length !== data.length && <div className="kpi-sub">of {data.length} total</div>}</div>
+        <div className="kpi-card green"><div className="kpi-label">Completed</div><div className="kpi-value">{completed}</div></div>
+        <div className="kpi-card blue"><div className="kpi-label">Pending</div><div className="kpi-value">{pending}</div></div>
+        <div className="kpi-card purple"><div className="kpi-label">This Month</div><div className="kpi-value">
+          {filtered.filter(r => { if(!r.startDate) return false; const d=new Date(r.startDate); return d.getMonth()===new Date().getMonth()&&d.getFullYear()===new Date().getFullYear(); }).length}
+        </div></div>
+      </div>
+
+      <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={editable} storageKey="content-dev" noun="entry" />
+
+      {/* Two-column layout */}
+      <div className="grid-sidebar" style={{ flex:1, overflow:'hidden', minHeight:0 }}>
+
+        {/* LEFT — entry list */}
+        <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
+          <div className="filter-bar" style={{ flexShrink:0 }}>
+            <input className="form-input wide" placeholder="🔍 Client, topic, POC…" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="form-input" value={statusF} onChange={e => setStatusF(e.target.value)}>
+              {['All','Completed','Pending'].map(s => <option key={s}>{s}</option>)}
+            </select>
+            <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing} title={refreshing ? 'Refreshing from Excel…' : 'Refresh'}>{refreshing ? '⟳' : '↺'}</button>
+            <ExportButton
+              page="content-dev" filename="Content Development Tracker" sheetName="Content Dev"
+              rows={() => filtered}
+              columns={data => autoColumns(data, {
+                order: ['sno', 'engagementKey', 'client', 'topic', 'startDate', 'programType', 'poc', 'dueDate', 'completionDate'],
+                labels: { sno: 'S No', preWorkItems: 'Pre-Work', postWorkItems: 'Post-Work' },
+              })}
+              disabled={loading}
+            />
+            {editable && <button className="btn btn-primary btn-sm" onClick={() => setShowAdd(true)}>+ Add</button>}
+          </div>
+
+          <div className="card" style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+            <div className="card-header" style={{ flexShrink:0 }}>
+              <span className="card-title">📋 Entries</span>
+              <span style={{ fontSize:12, color:'var(--muted)' }}>{filtered.length} of {data.length}</span>
+            </div>
+            <div style={{ flex:1, overflowY:'auto' }}>
+              {filtered.length === 0
+                ? <div style={{ padding:32, textAlign:'center', color:'var(--muted)' }}>No entries found</div>
+                : filtered.map((r, i) => {
+                    const isCompleted = !!(r.completionDate && r.completionDate !== '—');
+                    const isSel = selected === r.sno;
+                    return (
+                      <div key={r.sno ?? i}
+                        onClick={() => { setFocus(null); setSelected(isSel ? null : r.sno); }}
+                        style={{
+                          padding:'10px 14px', borderBottom:'1px solid var(--border)',
+                          cursor:'pointer',
+                          background: isSel ? '#f0f7ff' : 'transparent',
+                          borderLeft: isSel ? '3px solid var(--accent)' : '3px solid transparent',
+                          transition:'background 0.1s',
+                        }}
+                      >
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                              <span style={{ fontSize:11, fontWeight:700, color:'var(--muted)', background:'var(--border)', borderRadius:4, padding:'1px 6px', flexShrink:0 }}>#{r.sno}</span>
+                              <span style={{ fontWeight:700, fontSize:13, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.client}</span>
+                            </div>
+                            {r.topic && <div style={{ fontSize:11, color:'var(--muted)', marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.topic}</div>}
+                          </div>
+                          <span style={{
+                            flexShrink:0, padding:'2px 10px', borderRadius:20, fontSize:11, fontWeight:600,
+                            background: isCompleted ? '#dcfce7' : '#fef9c3',
+                            color: isCompleted ? '#166534' : '#854d0e',
+                            border: `1px solid ${isCompleted ? '#86efac' : '#fde047'}`,
+                          }}>
+                            {isCompleted ? '✓' : '⏳'}
+                          </span>
+                        </div>
+                        <div style={{ display:'flex', gap:10, marginTop:5, fontSize:11, color:'var(--muted)' }}>
+                          {r.startDate && <span>📅 {fmtDt(r.startDate)}</span>}
+                          {r.poc && <span>👤 {r.poc}</span>}
+                          {r.pmRequired && <span style={{ color:r.pmRequired==='Yes'?'#16a34a':'#dc2626' }}>PM:{r.pmRequired}</span>}
+                          {r.evRequired && <span style={{ color:r.evRequired==='Yes'?'#16a34a':'#dc2626' }}>EV:{r.evRequired}</span>}
+                          {(() => { const w = workSummary(r); return w.total > 0 && (
+                            <span style={{ color: w.overdue ? '#dc2626' : w.open ? '#9a3412' : '#16a34a', fontWeight:600 }}
+                              title={`${w.total} work item(s) · ${w.open} open · ${w.overdue} overdue`}>
+                              🧩 {w.open ? `${w.open} open` : 'all done'}{w.overdue ? ` · ${w.overdue} overdue` : ''}
+                            </span>); })()}
+                        </div>
+                      </div>
+                    );
+                  })
+              }
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT — detail panel */}
+        <div style={{ height:'100%', overflowY:'auto' }}>
+          {sel
+            ? <DetailPanel row={sel} canEdit={editable} onUpdate={handleUpdate} onDelete={setDeleteRow} saving={saving} focus={focus} />
+            : (
+              <div className="card" style={{ textAlign:'center', padding:'60px 20px', color:'var(--muted)' }}>
+                <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
+                <div style={{ fontWeight:600, marginBottom:6 }}>Select an entry</div>
+                <div style={{ fontSize:13 }}>Click any entry on the left to view and edit its details</div>
+              </div>
+            )
+          }
+        </div>
+      </div>
+    </div>
+  );
+}

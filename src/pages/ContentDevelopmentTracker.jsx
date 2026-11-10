@@ -429,6 +429,10 @@ function DetailPanel({ row, canEdit, onUpdate, onDelete, saving, focus }) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+/** One key per row. S No can be blank or repeated in Excel (every blank S No matched, so one click selected them all):
+ *  use the Index plus the row's position in the sheet, which is always unique. */
+const rowKeyOf = r => `${String(r?.engagementKey ?? '').trim()}#${r?.id}`;
+
 export default function ContentDevelopmentTracker({ onRefreshed }) {
   const [data,      setData]      = useState(() => peekList('cdt') || []);
   const [loading,   setLoading]   = useState(() => !peekList('cdt'));   // full loader only on the very first visit
@@ -480,14 +484,14 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
   }, [data, search, statusF]);
 
   // keep selected in sync when data reloads
-  const sel = selected != null ? data.find(d => d.sno === selected) : null;
+  const sel = selected != null ? data.find(d => rowKeyOf(d) === selected) : null;
 
   // Pending-fields bar: entries with empty fields, in S No order (follows search / status filter)
   const pendingBar = useMemo(() => pendingItems(filtered, CDT_RULES, r => ({
-    id: r.sno, serial: r.sno, title: r.client || '(no client)', subtitle: r.topic,
+    id: rowKeyOf(r), serial: r.sno, title: r.client || '(no client)', subtitle: r.topic,
   })), [filtered]);
   const openPending = (it, f) => {
-    setSelected(it.row.sno);
+    setSelected(rowKeyOf(it.row));
     setFocus({ field: f.key, n: Date.now() });
     revealField(f.key, f.label);
   };
@@ -501,10 +505,10 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
     const done = String(r.completionDate ?? '').trim();
     const due = toInputDate(r.dueDate);
     if ((!done || done === '—') && due) tasks.push({ key: 'completionDate', label: 'Content completion', due });
-    return { id: r.sno, serial: r.sno, title: r.client || '(no client)', subtitle: r.topic, tasks: tasks.filter(t => t.due), row: r };
+    return { id: rowKeyOf(r), serial: r.sno, title: r.client || '(no client)', subtitle: r.topic, tasks: tasks.filter(t => t.due), row: r };
   }).filter(x => x.tasks.length), [filtered]);
   const openDue = (it, t) => {
-    setSelected(it.row.sno);
+    setSelected(rowKeyOf(it.row));
     if (t.key === 'completionDate') { setFocus({ field: 'completionDate', n: Date.now() }); revealField('completionDate', 'Completion Date'); }
     else { setFocus(null); revealField(t.key, t.label); }
   };
@@ -521,7 +525,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
     }
     try {
       await updateContentDevRow(row.sno, { ...row, ...changes }, row.engagementKey);
-      setData(prev => prev.map(r => r.sno===row.sno ? { ...r, ...changes } : r));
+      setData(prev => prev.map(r => rowKeyOf(r) === rowKeyOf(row) ? { ...r, ...changes } : r));
       showToast('✓ Saved');
     } catch(e) { showToast('❌ ' + e.message); }
   };
@@ -537,7 +541,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
     if (!deleteRow) return; setSaving(true);
     try {
       await deleteContentDevRow(deleteRow.sno, deleteRow.engagementKey);
-      if (selected === deleteRow.sno) setSelected(null);
+      if (selected === rowKeyOf(deleteRow)) setSelected(null);
       showToast('✓ Entry deleted'); setDeleteRow(null); await load();
     } catch(e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
@@ -608,10 +612,10 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
                 ? <div style={{ padding:32, textAlign:'center', color:'var(--muted)' }}>No entries found</div>
                 : filtered.map((r, i) => {
                     const isCompleted = !!(r.completionDate && r.completionDate !== '—');
-                    const isSel = selected === r.sno;
+                    const isSel = selected === rowKeyOf(r);
                     return (
-                      <div key={r.sno ?? i}
-                        onClick={() => { setFocus(null); setSelected(isSel ? null : r.sno); }}
+                      <div key={rowKeyOf(r)}
+                        onClick={() => { setFocus(null); setSelected(isSel ? null : rowKeyOf(r)); }}
                         style={{
                           padding:'10px 14px', borderBottom:'1px solid var(--border)',
                           cursor:'pointer',
@@ -659,7 +663,7 @@ export default function ContentDevelopmentTracker({ onRefreshed }) {
         {/* RIGHT — detail panel */}
         <div style={{ height:'100%', overflowY:'auto' }}>
           {sel
-            ? <DetailPanel row={sel} canEdit={editable} onUpdate={handleUpdate} onDelete={setDeleteRow} saving={saving} focus={focus} />
+            ? <DetailPanel key={rowKeyOf(sel)} row={sel} canEdit={editable} onUpdate={handleUpdate} onDelete={setDeleteRow} saving={saving} focus={focus} />
             : (
               <div className="card" style={{ textAlign:'center', padding:'60px 20px', color:'var(--muted)' }}>
                 <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
