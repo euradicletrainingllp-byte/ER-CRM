@@ -10,6 +10,7 @@ export const CLIENT_ALIASES = {
   'SocGen': 'Societe Generale',
   'Société Générale': 'Societe Generale',
   'Avery Dennisen': 'Avery Dennison',
+  'Ashiana': 'Ashiana Housing',
 };
 
 /** Names in the trackers that are not clients — never offered for the directory or flagged. */

@@ -65,6 +65,8 @@ function build() {
 
   const byKey = new Map();
   for (const c of clients) for (const n of [c.name, c.legalName]) { const k = nameKey(n); if (k && !byKey.has(k)) byKey.set(k, c); }
+  // "Also Known As" spellings saved on the client (never override a real client / legal name)
+  for (const c of clients) for (const n of txt(c.aliases).split(/\s*[;\n]\s*/)) { const k = nameKey(n); if (k && !byKey.has(k)) byKey.set(k, c); }
   return {
     clients, contacts, consultants, proposals,
     vendors: [...vMap.values()].sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name)),

@@ -16,7 +16,7 @@
  *
  * Commercial & billing fields are shown only to admins and people with Finance view access.
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useMsal } from '@azure/msal-react';
 import {
   Building2, MapPin, Users, Briefcase, Phone, Mail, Linkedin, CalendarClock, FileText, Wallet, ShieldCheck, Star,
@@ -38,6 +38,10 @@ import '../styles/leadsVendors.css';
 import '../styles/clients.css';
 import { TeamPicker, ConsultantPicker, ProposalPicker } from '../components/pickers/index.jsx';
 import DirectoryCleanup from '../components/DirectoryCleanup.jsx';
+import { useClientWorld, LiveStrip, NameLinks, ProfileTabs, AlertList, TrackerTab, UnlinkedView, profileDefaultsFrom } from '../components/Client360.jsx';
+import { clientSummary, nearClients, duplicateClients, splitAliases } from '../services/client360.js';
+import { aliasColumnReady } from '../services/clientsApi.js';
+import { _rememberList as rememberList, peekList } from '../services/api.js';
 
 /* ─── Helpers ─── */
 const pad2 = n => String(n).padStart(2, '0');
@@ -94,7 +98,8 @@ const FORMS = {
     { section: 'Identity', fields: [
       F('name', 'Client Name *'), F('legalName', 'Legal / Billing Entity Name'), F('parentGroup', 'Parent Group'),
       F('businessUnit', 'Business Unit / Division'), F('clientType', 'Client Type *', 'select', { options: O.CLIENT_TYPES }),
-      F('tier', 'Account Tier', 'select', { options: O.ACCOUNT_TIERS })] },
+      F('tier', 'Account Tier', 'select', { options: O.ACCOUNT_TIERS }),
+      F('aliases', 'Also Known As (other spellings used in the trackers)', 'area', { full: true, optional: true, ph: 'One per line — e.g. Ashiana. Tracker rows under these names show in this profile.' })] },
     { section: 'Organisation profile', fields: [
       F('industry', 'Industry', 'select', { options: O.INDUSTRIES }), F('subIndustry', 'Sub-Industry / Segment'),
       F('orgType', 'Organisation Type', 'select', { options: O.ORG_TYPES }), F('employeeSize', 'Employee Size', 'select', { options: O.EMPLOYEE_SIZES }),
@@ -184,6 +189,8 @@ function RecordModal({ kind, initial, defaults, title, onSave, onClose, saving, 
   const sections = FORMS[kind].filter(sec => showMoney || !sec.money);
   const missing = REQUIRED[kind].filter(k => !s(f[k]));
   const dupName = kind === 'clients' && s(f.name) && clientNames.some(([id, n]) => norm(n) === norm(f.name) && id !== f.clientId);
+  const similar = kind === 'clients' && s(f.name).length >= 3 && !dupName
+    ? nearClients(f.name, clientNames.filter(([id]) => id !== f.clientId).map(([clientId, name]) => ({ clientId, name })), 4) : [];
   const input = fd => {
     const v = f[fd.k] ?? '';
     switch (fd.type) {
@@ -206,7 +213,7 @@ function RecordModal({ kind, initial, defaults, title, onSave, onClose, saving, 
           <div key={sec.section}>
             <div className="lv-form-section">{sec.section}</div>
             <div className="form-grid lv-grid-4">
-              {sec.fields.filter(fd => showMoney || !fd.money).map(fd => (
+              {sec.fields.filter(fd => (showMoney || !fd.money) && (!fd.optional || aliasColumnReady())).map(fd => (
                 <div key={fd.k} className={`form-field${fd.full ? ' full' : ''}`} data-pf={fd.k}>
                   <label className="form-label">{fd.label}</label>{input(fd)}
                 </div>
@@ -214,6 +221,9 @@ function RecordModal({ kind, initial, defaults, title, onSave, onClose, saving, 
             </div>
           </div>
         ))}
+        {!!similar.length && <div className="c360-near modal"><AlertTriangle size={15} />
+          <div><b>Similar client{similar.length > 1 ? 's' : ''} already in the directory:</b> {similar.map(x => `${x.client.name} (${x.client.clientId} · ${x.score}% match)`).join(', ')}
+            <em>If this is the same organisation, open that profile instead of creating a second one.</em></div></div>}
         <div style={{ display: 'flex', gap: 10, marginTop: 20, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn btn-cta" disabled={!!missing.length || saving || dupName} onClick={() => onSave(f)}>
             {saving ? 'Saving…' : isEdit ? 'Update' : 'Save'}</button>
@@ -252,7 +262,7 @@ const Note = ({ icon: I, title, text }) => (s(text) ? <div className="cl-note"><
 const Ext = ({ url, label }) => (s(url) ? <a className="cl-ext" href={/^https?:/i.test(url) ? url : `https://${url}`} target="_blank" rel="noreferrer">{label}<ExternalLink size={12} /></a> : null);
 
 /* ─── Directory card ─── */
-function ClientCard({ c, kids, showMoney, onOpen }) {
+function ClientCard({ c, kids, showMoney, onOpen, flag }) {
   const open = kids.actions.filter(isOpenAction);
   const over = open.filter(a => a.due && daysFromToday(a.due) < 0).length;
   const active = kids.programs.filter(p => ['In delivery', 'PO / SOW received', 'In negotiation'].includes(p.status)).length;
@@ -271,6 +281,7 @@ function ClientCard({ c, kids, showMoney, onOpen }) {
         {c.tier && <span className="cl-tier"><Star size={11} />{c.tier}</span>}
         <Health value={c.health} />
         {c.relStatus && c.relStatus !== 'To confirm' && <span className="cl-tag-soft">{c.relStatus}</span>}
+        {flag && <span className="c360-flag" title={flag.title}><AlertTriangle size={11} />{flag.text}</span>}
       </div>
       <div className="cl-card-stats">
         <span title="Contacts"><Users size={13} />{kids.contacts.filter(p => !isFormer(p)).length}<em>contacts</em></span>
@@ -287,7 +298,17 @@ function ClientCard({ c, kids, showMoney, onOpen }) {
 }
 
 /* ─── Account profile ─── */
-function ClientProfile({ c, kids, rules, showMoney, perm, saving, nav, onBack, onEdit, onDelete, onAdd, onEditKid, onDeleteKid, onToggleAction, onFix }) {
+function ClientProfile({ c, kids, rules, showMoney, perm, saving, nav, onBack, onEdit, onDelete, onAdd, onEditKid, onDeleteKid, onToggleAction, onFix, w, canSee, dups, onLink, onOpenClient }) {
+  // Client 360 — everything the trackers hold for this client
+  const [tab, setTab] = useState('overview');
+  const tabsRef = useRef(null);
+  const { ensure } = w;
+  useEffect(() => { ensure(); }, [ensure]);
+  useEffect(() => { setTab('overview'); }, [c.clientId]);
+  const bucket = w.index ? w.index.bucket(c.clientId) : null;
+  const sm = useMemo(() => (bucket ? clientSummary(bucket) : null), [bucket]);
+  const goTab = t => { setTab(t); setTimeout(() => tabsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30); };
+
   const contacts = [...kids.contacts].sort((a, b) => (b.primary === 'Yes') - (a.primary === 'Yes'));
   const current = contacts.filter(p => !isFormer(p)), former = contacts.filter(isFormer);
   const programs = [...kids.programs].sort((a, b) => String(b.fy).localeCompare(String(a.fy)));
@@ -418,7 +439,17 @@ function ClientProfile({ c, kids, rules, showMoney, perm, saving, nav, onBack, o
         ))}
       </div>
 
-      {pct < 60 && (
+      <LiveStrip sm={sm} showMoney={showMoney} loading={w.loading} complete={w.complete} onTab={goTab} onRefresh={() => w.refresh(true)} />
+      <NameLinks c={c} index={w.index} canLink={perm.update} aliasReady={aliasColumnReady()} busy={saving} onLink={onLink} onIgnore={w.toggleIgnore} />
+      {!!dups?.length && <div className="c360-near"><AlertTriangle size={15} />
+        <div><b>Possible duplicate profile:</b> {dups.map(d => <button key={d.client.clientId} type="button" className="c360-link" onClick={() => onOpenClient(d.client.clientId)}>{d.client.name} ({d.client.clientId} · {d.score}% match)</button>)}
+          <em>If both are the same organisation, keep one profile and add the other name under “Also Known As”.</em></div></div>}
+      <div ref={tabsRef} className="c360-tabs-anchor"><ProfileTabs tab={tab} onTab={setTab} bucket={bucket} sm={sm} showMoney={showMoney} /></div>
+
+      {tab !== 'overview' && <div className="c360-pane"><TrackerTab tab={tab} bucket={bucket} sm={sm} showMoney={showMoney} canSee={canSee} loading={w.loading} /></div>}
+      {tab === 'overview' && <AlertList sm={sm} showMoney={showMoney} onTab={goTab} />}
+
+      {tab === 'overview' && pct < 60 && (
         <div className="cl-setup">
           <Gauge size={18} />
           <div><b>This profile is {pct}% complete.</b> Fill the key details so everyone sees the same picture of this account:</div>
@@ -429,7 +460,7 @@ function ClientProfile({ c, kids, rules, showMoney, perm, saving, nav, onBack, o
         </div>
       )}
 
-      <div className="cl-cols">
+      {tab === 'overview' && <div className="cl-cols">
         {/* ── main column ── */}
         <div className="cl-col">
           {(c.nextFollowUp || c.nextAction) && (
@@ -635,13 +666,13 @@ function ClientProfile({ c, kids, rules, showMoney, perm, saving, nav, onBack, o
             {(c.updatedOn || c.createdOn) && <div className="cl-audit">Updated {fmtD(c.updatedOn) || '—'}{c.updatedBy ? ` by ${c.updatedBy}` : ''} · created {fmtD(c.createdOn) || '—'}</div>}
           </Panel>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
 
 /* ─── Page ─── */
-const VIEWS = [['clients', 'Clients'], ['contacts', 'Contacts'], ['actions', 'Actions'], ['programs', 'Programs']];
+const VIEWS = [['clients', 'Clients'], ['contacts', 'Contacts'], ['actions', 'Actions'], ['programs', 'Programs'], ['unlinked', 'Not in directory']];
 const EMPTY_DATA = { clients: [], contacts: [], programs: [], actions: [], interactions: [] };
 const SORTS = [['id', 'Client ID'], ['name', 'Name A–Z'], ['dues', 'Highest dues'], ['actions', 'Most open actions'], ['followup', 'Next follow-up']];
 
@@ -669,6 +700,8 @@ export default function ClientDirectory({ onRefreshed }) {
   const [modal, setModal] = useState(null);          // { kind, rec?, defaults? }
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
+  const w = useClientWorld();                          // tracker rows indexed by client (Client 360)
+  const aliasReady = aliasColumnReady();
 
   const showToast = m => { setToast(m); setTimeout(() => setToast(''), /^[❌⚠]/.test(String(m)) ? 9000 : 3000); };
   const load = async () => {
@@ -683,6 +716,13 @@ export default function ClientDirectory({ onRefreshed }) {
     finally { setLoading(false); setRefreshing(false); }
   };
   useEffect(() => { load(); }, []);
+  // Read the trackers quietly once the directory is on screen (names without a profile, near matches)
+  const { ensure: ensureWorld } = w;
+  useEffect(() => { if (loading || !data.clients.length) return undefined; const t = setTimeout(ensureWorld, 800); return () => clearTimeout(t); }, [loading, data.clients.length, ensureWorld]);
+  // Keep the shared client list (pickers, name matching) in step with edits made on this page
+  useEffect(() => { if (data.clients.length && peekList('client-dir:clients') !== data.clients) rememberList('client-dir:clients', data.clients); }, [data.clients]);
+  const dupMap = useMemo(() => duplicateClients(data.clients), [data.clients]);
+  const unlinkedOpen = useMemo(() => (w.index ? w.index.unlinked.filter(u => !u.ignored) : null), [w.index]);
   useEffect(() => { try { localStorage.setItem('ercrm.clients.layout', layout); } catch { /* ignore */ } }, [layout]);
   useEffect(() => { try { document.querySelector('.cl-scroll')?.scrollTo(0, 0); } catch { /* ignore */ } }, [selected, view]);
 
@@ -709,9 +749,10 @@ export default function ClientDirectory({ onRefreshed }) {
     all: () => true,
     existing: c => c.clientType === 'Existing', prospect: c => c.clientType === 'Prospect', dormant: c => ['Dormant', 'Lost'].includes(c.clientType),
     untyped: c => !c.clientType || c.clientType === 'To confirm', dues: c => num(c.outstanding) > 0, noowner: c => !c.owner,
+    dups: c => dupMap.has(c.clientId) || !!w.index?.nearBy.get(c.clientId)?.length,
   };
   const QUICK = [['all', 'All'], ['existing', 'Existing'], ['prospect', 'Prospects'], ['dormant', 'Dormant / Lost'], ['untyped', 'Type not set'],
-    ...(showMoney ? [['dues', 'With dues']] : []), ['noowner', 'No owner']];
+    ...(showMoney ? [['dues', 'With dues']] : []), ['noowner', 'No owner'], ['dups', 'Similar names']];
 
   const filtered = useMemo(() => {
     const openCount = c => kidsOf(c.clientId).actions.filter(isOpenAction).length;
@@ -723,7 +764,7 @@ export default function ClientDirectory({ onRefreshed }) {
       followup: (a, b) => String(a.nextFollowUp || '9999').localeCompare(String(b.nextFollowUp || '9999')),
     }[sortBy] || ((a, b) => idNum(a.clientId) - idNum(b.clientId));
     return data.clients.filter(c => baseMatch(c) && (quickTests[quick] || quickTests.all)(c)).sort(sorter);
-  }, [data.clients, search, industryF, statusF, ownerF, quick, sortBy, kidsOf]);
+  }, [data.clients, search, industryF, statusF, ownerF, quick, sortBy, kidsOf, dupMap, w.index]);
 
   // Search / industry / status / owner (everything except the quick type tabs). Used by the list
   // above and by the KPI cards, so the cards follow the same filters.
@@ -732,7 +773,7 @@ export default function ClientDirectory({ onRefreshed }) {
     let mQ = true;
     if (q) {
       const kids = kidsOf(c.clientId);
-      const hay = [c.clientId, c.name, c.legalName, c.parentGroup, c.businessUnit, c.industry, c.subIndustry, c.hqCity, c.locations, c.owner,
+      const hay = [c.clientId, c.name, c.legalName, c.aliases, c.parentGroup, c.businessUnit, c.industry, c.subIndustry, c.hqCity, c.locations, c.owner,
         c.delivered, c.activePrograms, c.opportunities, ...kids.contacts.map(p => p.fullName), ...kids.programs.map(p => p.program)].map(norm).join(' | ');
       mQ = q.split(' ').every(w => hay.includes(w));
     }
@@ -771,6 +812,10 @@ export default function ClientDirectory({ onRefreshed }) {
     try {
       if (isNew) {
         const row = { ...rec, [t.idKey]: nextId(kind, data[kind]) };
+        if (kind === 'clients' && rec._fromName) {      // created from a tracker name: keep that spelling linked if the name was changed
+          if (norm(rec._fromName) !== norm(rec.name) && aliasColumnReady()) row.aliases = [...new Set([...splitAliases(rec.aliases), rec._fromName])].join('\n');
+          delete row._fromName;
+        }
         if (kind === 'clients') Object.assign(row, { createdBy: me, createdOn: todayIso(), updatedBy: me, updatedOn: todayIso() });
         if (kind === 'contacts') Object.assign(row, { createdBy: me, updatedOn: todayIso() });
         if (kind === 'programs') row.updatedOn = todayIso();
@@ -823,6 +868,22 @@ export default function ClientDirectory({ onRefreshed }) {
     catch (e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
   };
+  /** Links a spelling used in the trackers to a client: saved in the client's "Also Known As". No tracker row is changed. */
+  const linkName = async (name, client) => {
+    if (!client || !s(name)) return;
+    if (!aliasColumnReady()) { showToast('⚠ Add the column "Also Known As" to ClientTable in Client_Directory.xlsx, then Refresh — the link is saved there.'); return; }
+    const cur = data.clients.find(x => x.clientId === client.clientId) || client;
+    const list = splitAliases(cur.aliases);
+    if (list.some(a => norm(a) === norm(name))) { showToast('Already linked'); return; }
+    setSaving(true);
+    try {
+      const row = { ...cur, aliases: [...list, s(name)].join('\n'), updatedBy: me, updatedOn: todayIso() };
+      await updateRecord('clients', row); putLocal('clients', row, false);
+      showToast(`✓ “${name}” linked to ${cur.name} — its tracker rows now show in the profile`);
+    } catch (e) { showToast('❌ ' + e.message); }
+    finally { setSaving(false); }
+  };
+  const createFromTracker = u => setModal({ kind: 'clients', defaults: { geography: 'India', owner: me, ...profileDefaultsFrom(u), _fromName: u.name } });
   const toggleAction = a => save('actions', { ...a, status: a.status === 'Done' ? 'Open' : 'Done', closedOn: a.status === 'Done' ? '' : todayIso() }, false);
 
   const openAdd = (kind, client = sel) => {
@@ -894,6 +955,13 @@ export default function ClientDirectory({ onRefreshed }) {
     return `${verb} ${noun}${m.rec ? ` · ${m.rec[TABLES[m.kind].idKey]}` : ''}${who ? ` — ${who}` : ''}`;
   };
 
+  const cardFlag = c => {
+    const near = w.index?.nearBy.get(c.clientId), dup = dupMap.get(c.clientId);
+    if (near?.length) return { text: `Also “${near[0].name}”?`, title: `“${near[0].name}” is used on ${near[0].total} tracker row(s) and looks like this client. Open the profile to link it.` };
+    if (dup?.length) return { text: 'Similar profile', title: `Looks like ${dup.map(d => d.client.name).join(', ')}` };
+    return null;
+  };
+
   // profile navigation (within the current filter + sort)
   const pos = sel ? filtered.findIndex(c => c.clientId === sel.clientId) : -1;
   const nav = {
@@ -921,7 +989,7 @@ export default function ClientDirectory({ onRefreshed }) {
         </div>
 
         <div className="filter-bar lv-filters" style={{ flexShrink: 0 }}>
-          <div className="lv-tabs">{[...VIEWS, ...(isAdmin ? [['cleanup', '🧹 Clean-up']] : [])].map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}</button>)}</div>
+          <div className="lv-tabs">{[...VIEWS, ...(isAdmin ? [['cleanup', '🧹 Clean-up']] : [])].map(([k, l]) => <button key={k} className={view === k ? 'on' : ''} onClick={() => setView(k)}>{l}{k === 'unlinked' && !!unlinkedOpen?.length && <b className="c360-tab-badge">{unlinkedOpen.length}</b>}</button>)}</div>
           <input className="form-input wide" placeholder="🔍 Client, contact, program, city…" value={search} onChange={e => setSearch(e.target.value)} />
           {view === 'clients' && <>
             <select className="form-input" value={industryF} onChange={e => setIndustryF(e.target.value)}>
@@ -944,7 +1012,7 @@ export default function ClientDirectory({ onRefreshed }) {
           <button className="btn btn-outline btn-sm" onClick={load} disabled={refreshing}>{refreshing ? '⟳' : '↺'}</button>
           {view === 'clients'
             ? <ExportButton page="clients" filename="Client Directory" sheetName="Clients" rows={() => filtered} columns={clientCols} />
-            : view !== 'cleanup' && <ExportButton page="clients" filename={`Client ${viewLabel}`} sheetName={viewLabel} rows={() => data[view].filter(matchQ)} columns={colsOf(view)} />}
+            : view !== 'cleanup' && view !== 'unlinked' && <ExportButton page="clients" filename={`Client ${viewLabel}`} sheetName={viewLabel} rows={() => data[view].filter(matchQ)} columns={colsOf(view)} />}
           {perm.create && view === 'clients' && <button className="btn btn-primary btn-sm" onClick={() => openAdd('clients', null)}>+ Add Client</button>}
         </div>
 
@@ -955,16 +1023,24 @@ export default function ClientDirectory({ onRefreshed }) {
 
       {view === 'clients' && (
         <div className="tracker-scroll cl-scroll">
+          {!sel && !!unlinkedOpen?.length && (
+            <button type="button" className="c360-banner" onClick={() => setView('unlinked')}>
+              <AlertTriangle size={16} />
+              <span><b>{unlinkedOpen.length} client name{unlinkedOpen.length === 1 ? '' : 's'} used in the trackers {unlinkedOpen.length === 1 ? 'has' : 'have'} no profile here</b>
+                {(() => { const n = unlinkedOpen.filter(u => u.near.length).length; return n ? ` — ${n} look${n === 1 ? 's' : ''} like an existing client (e.g. “${unlinkedOpen.find(u => u.near.length).name}” ≈ ${unlinkedOpen.find(u => u.near.length).near[0].client.name})` : ''; })()}</span>
+              <em>Review →</em>
+            </button>)}
           {sel ? (
             <ClientProfile c={sel} kids={kidsOf(sel.clientId)} rules={rules} showMoney={showMoney} perm={perm} saving={saving} nav={nav}
               onBack={() => setSelected(null)} onEdit={() => setModal({ kind: 'clients', rec: sel })} onDelete={removeClient}
               onAdd={k => openAdd(k)} onEditKid={(kind, rec) => setModal({ kind, rec })} onDeleteKid={removeKid}
-              onToggleAction={toggleAction} onFix={f => fixField(sel, f)} />
+              onToggleAction={toggleAction} onFix={f => fixField(sel, f)}
+              w={w} canSee={canAccess} dups={dupMap.get(sel.clientId)} onLink={linkName} onOpenClient={id => setSelected(id)} />
           ) : !filtered.length ? (
             <div className="lv-empty" style={{ margin: 16 }}>No clients match these filters.</div>
           ) : layout === 'grid' ? (
             <div className="cl-grid">
-              {filtered.map(c => <ClientCard key={c.clientId} c={c} kids={kidsOf(c.clientId)} showMoney={showMoney} onOpen={() => setSelected(c.clientId)} />)}
+              {filtered.map(c => <ClientCard key={c.clientId} c={c} kids={kidsOf(c.clientId)} showMoney={showMoney} onOpen={() => setSelected(c.clientId)} flag={cardFlag(c)} />)}
             </div>
           ) : (
             <div className="card" style={{ padding: 0, marginBottom: 80 }}><div className="table-wrap">
@@ -1022,6 +1098,9 @@ export default function ClientDirectory({ onRefreshed }) {
               {showMoney && <><td>{inr(p.feeRate) || '—'}</td><td>{inr(p.poValue) || '—'}</td></>}
               <td>{p.feedback || '—'}</td><td className="lv-muted" style={{ maxWidth: 280 }}>{p.nextMilestone}</td>
             </tr>))}</tbody></table></div></div></div>}
+
+      {view === 'unlinked' && <UnlinkedView w={w} search={search} perm={perm} aliasReady={aliasReady} busy={saving}
+        onCreate={createFromTracker} onLink={linkName} onOpenClient={id => { setView('clients'); setSelected(id); }} />}
 
       {view === 'cleanup' && isAdmin && <DirectoryCleanup />}
 

@@ -262,3 +262,13 @@
 - "Financial year" switch (current FY and the two before; default current, not saved). The whole tab follows it; a closed FY is shown as at 31 Mar, with a note and a "Back to current" button.
 - `OpsLiveDashboard` is now a wrapper holding the FY + Count-by state; the tab body (`OpsLiveInner`) is remounted per FY.
 - Files: `src/components/OpsLiveDashboard.jsx`, `src/components/erdDashboard.css`. Parse + scope checked only.
+
+## 2026-11-12 — Client Directory: Client 360 + names not in the directory
+- Profile page: "Live from the trackers" numbers (sessions, next session, proposals, business / outstanding, feedback) and tabs — Overview · Engagements · Proposals · Leads · Finance (Finance viewers) · Delivery (Ops + Content) · Vendors & POs · Tasks. Read-only, each with "Open <tracker>". Overview shows alerts (overdue payment, to invoice, ended not Delivered, low readiness, open proposals / leads, no next business).
+- New tab **Not in directory** (+ coral banner on the Clients grid): client names used in EC / BD / Leads / Ops / CDT / Vendors / PO / Tasks with no profile; closest client with match %; Link · Create profile (pre-filled from tracker rows) · hide (per browser).
+- Near-name highlights (gold): on the profile ("Ashiana" looks like this client → link), on cards, in Add / Edit client, quick filter "Similar names".
+- Matching: Client Name, Legal entity, new **Also Known As** field, `config/clientAliases.js`, and suffix-only differences (Ltd / Pvt Ltd / India) when one client fits. `'Ashiana' → 'Ashiana Housing'` added to clientAliases.js (no tracker row changed).
+- Files: new `src/services/client360.js`, `src/components/Client360.jsx`, `src/styles/client360.css`; changed `ClientDirectory.jsx`, `clientsApi.js` (optional column, `aliasColumnReady`), `directoryCache.js` (aliases in byKey), `clientAliases.js`.
+- Checks: Babel parse + undefined-name check on all changed files; matching engine run on mock data. Build and screenshot not run (Linux VM lacks the rollup binary) — run `npm run build` and check `/clients` before pushing.
+- Manual setup pending: add column **Also Known As** to ClientTable (Client_Directory.xlsx). Until then Link buttons are disabled and saves are unchanged; the Ashiana link already works from the config list.
+- Backup: `Claude outputs/backup-2026-11-12-client-360/`.

@@ -55,7 +55,11 @@ export const TABLES = {
       lastInteraction: 'Last Interaction Date', nextFollowUp: 'Next Follow-up Date', nextAction: 'Next Action',
       folderLink: 'Account Folder Link', comments: 'Overall Comments', dataNotes: 'Data Source / Verification Notes',
       createdBy: 'Created By', createdOn: 'Created On', updatedBy: 'Last Updated By', updatedOn: 'Last Updated On',
+      aliases: 'Also Known As',          // other spellings used in the trackers, one per line / separated by ;
     },
+    // Columns added after the first workbook: sent to Excel only once the header has been seen in a read,
+    // so saves keep working until the column is added to ClientTable.
+    optional: ['aliases'],
     dates: ['lastEngagement', 'contractStart', 'contractEnd', 'outstandingAsOf', 'lastInteraction', 'nextFollowUp', 'createdOn', 'updatedOn'],
     nums: ['clientSince', 'potential', 'dayRate', 'payDays', 'outstanding'],
   },
@@ -109,6 +113,17 @@ export const PROGRAM_MONEY_KEYS = ['feeBasis', 'feeRate', 'tsTerms', 'poRef', 'p
 
 export const emptyRecord = kind => Object.fromEntries(Object.keys(TABLES[kind].cols).map(k => [k, '']));
 
+const seenOptional = new Set();
+const flat = k => String(k).replace(/_x[0-9a-f]{4}_/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+function noteOptional(kind, rawRows) {
+  const t = TABLES[kind];
+  if (!t.optional?.length || !rawRows.length) return;
+  const keys = new Set(Object.keys(rawRows[0]).map(flat));
+  for (const k of t.optional) { const h = t.cols[k]; if (keys.has(flat(h))) seenOptional.add(h); else seenOptional.delete(h); }
+}
+/** True once ClientTable has the "Also Known As" column (needed to save name links from the CRM). */
+export const aliasColumnReady = () => seenOptional.has(TABLES.clients.cols.aliases);
+
 function readRow(kind, raw) {
   const t = TABLES[kind];
   const r = withDecodedKeys(raw);
@@ -128,6 +143,7 @@ function toBody(kind, rec, { create }) {
   for (const [k, h] of Object.entries(t.cols)) {
     let v = rec[k];
     v = v == null ? '' : v;
+    if (t.optional?.includes(k) && !seenOptional.has(h)) continue;
     if (create && t.dates.includes(k) && !v) continue;
     if (t.nums.includes(k) && v !== '' && Number.isFinite(Number(v))) v = Number(v);
     body[h] = typeof v === 'number' ? v : String(v);
@@ -149,6 +165,7 @@ async function fetchTable(kind) {
   const t = TABLES[kind];
   const data = await callFlow('CLIENTS_CRUD', { action: 'get', table: t.table });
   // Skip blank template rows (no ID and no name)
+  noteOptional(kind, rowsOf(data));
   return rowsOf(data).map(r => readRow(kind, r)).filter(r => r[t.idKey] || r.name || r.fullName || r.program || r.action || r.summary);
 }
 
