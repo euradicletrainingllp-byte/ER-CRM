@@ -55,18 +55,31 @@ export const updatePO = p => {
 };
 export const deletePO = id => callFlow('PO_CRUD', { action: 'delete', sno: id });
 
-/** Live usage from the Engagement Calendar (cancelled / lost rows not counted). */
+/** Links typed in the PO Link cell — several allowed, separated by a comma, semicolon, space or new line. */
+export const splitLinks = v => [...new Set(txt(v).split(/[\s,;]+/).map(txt).filter(Boolean))].map(u => (/^https?:\/\//i.test(u) ? u : `https://${u}`));
+
+/**
+ * Live usage from the Engagement Calendar (cancelled / lost rows not counted).
+ *   used    = Price of linked engagements marked Delivered
+ *   booked  = Price of linked engagements not yet Delivered
+ *   balance = PO value − used − booked (what is still free to allocate)
+ */
 export function poUsage(po, ecRows) {
   const ids = splitIdx(po.indexes);
   const rows = ids.map(i => (ecRows || []).find(e => String(e.engagementKey) === i)).filter(Boolean);
-  const used = rows.filter(e => !/cancel|lost|drop/i.test(String(e.status || ''))).reduce((s, e) => s + (Number(e.price) || 0), 0);
+  const live = rows.filter(e => !/cancel|lost|drop/i.test(String(e.status || '')));
+  const isDone = e => /deliver|complet/i.test(String(e.status || ''));
+  const sum = l => l.reduce((s, e) => s + (Number(e.price) || 0), 0);
+  const used = sum(live.filter(isDone)), booked = sum(live.filter(e => !isDone(e)));
   const value = Number(po.value) || 0;
-  return { ids, rows, missing: ids.filter(i => !rows.some(e => String(e.engagementKey) === i)), used, balance: value - used, pct: value ? Math.min(999, Math.round((used / value) * 100)) : 0 };
+  const p = n => (value ? Math.min(999, Math.round((n / value) * 100)) : 0);
+  return { ids, rows, missing: ids.filter(i => !rows.some(e => String(e.engagementKey) === i)), used, booked, committed: used + booked,
+    balance: value - used - booked, pct: p(used), bookedPct: p(booked), committedPct: p(used + booked) };
 }
-/** Shown status: Expired / Fully Used worked out from dates and usage unless Closed. */
+/** Shown status: Expired / Fully Used worked out from dates and usage unless Closed. Fully Used = delivered engagements cover the PO value. */
 export function poStatus(po, u, today = new Date().toISOString().slice(0, 10)) {
   if (po.status === 'Closed') return 'Closed';
-  if (u && Number(po.value) > 0 && u.balance <= 0) return 'Fully Used';
+  if (u && Number(po.value) > 0 && u.used >= Number(po.value)) return 'Fully Used';
   if (po.validTo && po.validTo < today) return 'Expired';
   return po.status || 'Active';
 }

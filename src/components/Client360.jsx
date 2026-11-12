@@ -22,6 +22,7 @@ import {
 import { financeStage, totalOf, overdueDays } from '../pages/FinanceTracker.jsx';
 import { clScore } from '../pages/OpsChecklist.jsx';
 import { money, collectedOf, fmtInrShort } from '../services/money.js';
+import { splitLinks } from '../services/poApi.js';
 import { leadIsOpen } from '../config/leadVendorOptions.js';
 import { taskIsOpen } from '../config/taskOptions.js';
 import '../styles/client360.css';
@@ -311,7 +312,7 @@ export function TrackerTab({ tab, bucket, sm, showMoney, canSee, loading }) {
                 <td className={`nowrap${d != null && d < 0 ? ' bad' : ''}`}>{fmtD(p.validTo) || '—'}</td>
                 {mp && <><td className="num">{inr(p.value)}</td><td className="num">{inr(p.balance)}</td></>}
                 <td><Pill cls={/active/i.test(p.status) ? 'lv-st-won' : 'lv-st-new'}>{p.status || '—'}</Pill></td>
-                <td>{/^https?:/i.test(txt(p.link)) ? <a className="cl-ext" href={p.link} target="_blank" rel="noreferrer">Open<ArrowUpRight size={12} /></a> : '—'}</td>
+                <td>{splitLinks(p.link).length ? splitLinks(p.link).map((url, i, all) => <a key={url} className="cl-ext" style={{ marginRight: 8 }} href={url} target="_blank" rel="noreferrer">{all.length > 1 ? `PO ${i + 1}` : 'Open'}<ArrowUpRight size={12} /></a>) : '—'}</td>
               </tr>); })}
           </Table>)}
       </Section>

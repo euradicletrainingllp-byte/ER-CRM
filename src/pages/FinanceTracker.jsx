@@ -420,7 +420,7 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
               {!poConfigured() ? <Val style={{ color: 'var(--muted)', fontWeight: 400 }}>PO Tracker not connected yet</Val>
                 : myPOs.length === 0 ? <Val style={{ color: 'var(--muted)', fontWeight: 400 }}>Not linked to a PO (link it in PO Tracker by Index {ec.engagementKey})</Val>
                 : myPOs.map(po => { const all = peekAllEngagements() || []; const u = poUsage(po, all.length ? all : [ec]); return (
-                  <Val key={po.poId}><Link to={`/po?po=${encodeURIComponent(po.poId)}`}>{po.poNumber || po.poId}</Link> · {poStatus(po, u)} · used {inr(u.used)} of {inr(money(po.value))} · <b style={{ color: u.balance < 0 ? '#b91c1c' : undefined }}>balance {inr(u.balance)}</b></Val>); })}
+                  <Val key={po.poId}><Link to={`/po?po=${encodeURIComponent(po.poId)}`}>{po.poNumber || po.poId}</Link> · {poStatus(po, u)} · used {inr(u.used)}{u.booked > 0 ? ` + booked ${inr(u.booked)}` : ''} of {inr(money(po.value))} · <b style={{ color: u.balance < 0 ? '#b91c1c' : undefined }}>balance {inr(u.balance)}</b></Val>); })}
             </Field>
 
             <Section>Ops Checklist</Section>

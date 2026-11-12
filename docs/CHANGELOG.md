@@ -280,3 +280,10 @@
 - Name matching: full name, `CONSULTANT_ALIASES` (config/clientAliases.js), or the only consultant whose name contains every typed word. Banner on the list for calendar names with no profile.
 - Files: new `src/services/consultant360.js`, `src/components/Consultant360.jsx`; changed `ConsultantDirectory.jsx`, `Client360.jsx` (shared exports), `client360.css`, `clientAliases.js`.
 - Checks: Babel parse + undefined-name check; summary engine run on mock data. Build and screenshot not run — run `npm run build` and check `/consultants` before pushing. Manual setup: none.
+
+## 2026-11-12 — PO Tracker: Used only when Delivered; several PO links
+- Used = Price of linked engagements marked Delivered. Booked = linked engagements not yet Delivered (cancelled / lost excluded). Balance = Value − Used − Booked. Bar shows used (navy) + booked (light mauve); red when over the PO value.
+- "Fully Used" now needs delivered engagements to cover the PO value. Excel "Used Amount (INR)" / "Balance (INR)" follow the new rule on the next save of each PO.
+- PO Link: several links separated by a comma (or space / new line) → one button per link (PO 1, PO 2…), also in Client 360 → Vendors & POs.
+- Follow-ons: Finance Tracker PO line shows "used + booked"; Sales dashboard Order Book "confirmed" = used + booked (figure unchanged).
+- Files: poApi.js, POTracker.jsx, SalesLiveDashboard.jsx, FinanceTracker.jsx, Client360.jsx. Parse-checked; build not run. No Excel / flow change. Backup: Claude outputs/backup-2026-11-12-po-booked.tgz.

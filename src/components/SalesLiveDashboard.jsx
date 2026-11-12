@@ -122,7 +122,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   const poBook = useMemo(() => pos.filter(po => Number(po.value) > 0).map(po => {
     const u = poUsage(po, engagements || []), st = poStatus(po, u);
     const delivered = u.rows.filter(isDelivered).reduce((t, e) => t + (Number(e.price) || 0), 0);
-    return { po, st, u, booked: Number(po.value), delivered, confirmed: u.used, balance: u.balance };
+    return { po, st, u, booked: Number(po.value), delivered, confirmed: u.committed, balance: u.balance };
   }).filter(r => r.st !== 'Closed').sort((a, b) => b.balance - a.balance || b.booked - a.booked), [pos, engagements]);
   /* Fallback when no POs are recorded: Won proposals (BD Tracker) vs Engagement Calendar sessions */
   const orderBookWon = useMemo(() => {
