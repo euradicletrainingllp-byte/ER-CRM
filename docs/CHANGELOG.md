@@ -273,3 +273,10 @@
 - Manual setup pending: add column **Also Known As** to ClientTable (Client_Directory.xlsx). Until then Link buttons are disabled and saves are unchanged; the Ashiana link already works from the config list.
 - Backup: `Claude outputs/backup-2026-11-12-client-360/`.
 - 2026-11-12 (later): Client 360 "Business to date" (delivered only) → "Total business" = Price of every session except Cancelled / Dropped; sub-line shows delivered, not yet delivered, cancelled excluded. Files: client360.js, Client360.jsx. Parse-checked.
+
+## 2026-11-12 — Consultant Directory: Consultant 360 (journey with EuRadicle)
+- Profile page: live strip + tabs — Profile (existing sheet) · Journey (FY-by-FY sessions / days / clients / feedback, milestones, alerts) · Engagements · Clients · Programs · Revenue (admins + Finance viewers) · Delivery (Ops Checklist). Read-only.
+- Source: Engagement Calendar Consultant 1 / 2 / 3 (a cell may hold several names) + Ops Checklist. Revenue = Price (INR) of delivered sessions, split equally when a session names several consultants; booked shown separately. No payout / fee figures (no per-session payout data).
+- Name matching: full name, `CONSULTANT_ALIASES` (config/clientAliases.js), or the only consultant whose name contains every typed word. Banner on the list for calendar names with no profile.
+- Files: new `src/services/consultant360.js`, `src/components/Consultant360.jsx`; changed `ConsultantDirectory.jsx`, `Client360.jsx` (shared exports), `client360.css`, `clientAliases.js`.
+- Checks: Babel parse + undefined-name check; summary engine run on mock data. Build and screenshot not run — run `npm run build` and check `/consultants` before pushing. Manual setup: none.

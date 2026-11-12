@@ -426,3 +426,6 @@ export function profileDefaultsFrom(u) {
     dataNotes: `Created from tracker data (${SOURCES.filter(s => u.where[s.id]).map(s => `${s.short} ${u.where[s.id]}`).join(', ')}) on ${fmtD(todayIso())}.`,
   };
 }
+
+// Shared building blocks, re-used by Consultant360.jsx
+export { Section, Empty, Table, Tile, Pill, Bar };

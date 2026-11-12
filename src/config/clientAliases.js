@@ -18,3 +18,10 @@ export const NOT_A_CLIENT = ['Open Program', 'EuRadicle', 'Internal', 'TBD', 'NA
 
 /** Extra names allowed in consultant fields besides the Consultant Directory and the team. */
 export const CONSULTANT_EXTRAS = ['EuRadicle', 'ER PMO Team', 'TBD'];
+
+/**
+ * Short names / spelling variants used in the Engagement Calendar consultant cells → Full Name in the Consultant Directory.
+ * Needed only when the short name is not simply part of the full name. Example:  'Shan': 'Shahnawaz Khan',
+ */
+export const CONSULTANT_ALIASES = {
+};

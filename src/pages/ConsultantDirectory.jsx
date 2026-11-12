@@ -30,6 +30,8 @@ import {
 import '../styles/leadsVendors.css';
 import '../styles/consultants.css';
 import { TeamPicker } from '../components/pickers/index.jsx';
+import { useConsultantWorld, ConsultantLive, ConsultantTabs, ConsultantPane, UnlinkedConsultants } from '../components/Consultant360.jsx';
+import { consultantSummary } from '../services/consultant360.js';
 
 /* ─── Helpers ─── */
 const pad2 = n => String(n).padStart(2, '0');
@@ -478,6 +480,11 @@ export default function ConsultantDirectory({ onRefreshed }) {
   const [view, setView] = useState('list');
   const [selected, setSelected] = useState(null);
   const [modal, setModal] = useState(null);
+  // Consultant 360 — Engagement Calendar + Ops Checklist rows per consultant (read when a profile is opened)
+  const w360 = useConsultantWorld(data);
+  const [tab360, setTab360] = useState('profile');
+  const { ensure: ensure360 } = w360;
+  useEffect(() => { if (selected) ensure360(); setTab360('profile'); }, [selected, ensure360]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
 
@@ -516,6 +523,8 @@ export default function ConsultantDirectory({ onRefreshed }) {
     [data, search, statusF, badgeF, cityF]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const sel = selected ? data.find(c => c.consultantId === selected) : null;
+  const bucket360 = sel && w360.index ? w360.index.bucket(sel.consultantId) : null;
+  const sm360 = useMemo(() => (bucket360 ? consultantSummary(bucket360) : null), [bucket360]);
   const live = kpiBase.filter(c => c.status !== 'Inactive');
   const countAlert = a => live.filter(c => contractAlert(c) === a).length;
 
@@ -625,19 +634,29 @@ export default function ConsultantDirectory({ onRefreshed }) {
                   <button className="btn btn-outline btn-sm" disabled={!prev} onClick={() => setSelected(prev.consultantId)}>‹ {prev ? prev.fullName : 'Previous'}</button>
                   <button className="btn btn-outline btn-sm" disabled={!next} onClick={() => setSelected(next.consultantId)}>{next ? next.fullName : 'Next'} ›</button>
                 </div>
-                <div className="cd-profile-wrap">
-                  <ProfileSheet c={sel} />
-                  <InternalPanel c={sel} canEdit={editable} saving={saving} showMoney={showMoney} onEdit={() => setModal(sel)}
-                    onDelete={canDelete('consultants') ? remove : undefined} onQuick={ch => save({ ...sel, ...ch, lastUpdated: todayIso() }, false)} />
-                </div>
+                <ConsultantLive sm={sm360} showMoney={showMoney} loading={w360.loading} onTab={setTab360} onRefresh={() => w360.refresh(true)} />
+                <ConsultantTabs tab={tab360} onTab={setTab360} sm={sm360} showMoney={showMoney} />
+                {tab360 === 'profile' ? (
+                  <div className="cd-profile-wrap">
+                    <ProfileSheet c={sel} />
+                    <InternalPanel c={sel} canEdit={editable} saving={saving} showMoney={showMoney} onEdit={() => setModal(sel)}
+                      onDelete={canDelete('consultants') ? remove : undefined} onQuick={ch => save({ ...sel, ...ch, lastUpdated: todayIso() }, false)} />
+                  </div>
+                ) : (
+                  <div className="c360-cons-pane">
+                    <ConsultantPane tab={tab360} c={sel} sm={sm360} showMoney={showMoney} loading={w360.loading} contract={contractAlert(sel)}
+                      variants={w360.index ? w360.index.variants(sel.consultantId) : []} onTab={setTab360} />
+                  </div>
+                )}
               </>
             );
           })() : !filtered.length ? (
             <div className="lv-empty" style={{ margin: 16 }}>No consultants match these filters{data.length ? '' : ' — add the first one with “+ Add Consultant”'}.</div>
           ) : (
+            <><UnlinkedConsultants index={w360.index} loading={w360.loading} />
             <div className="cd-grid">
               {filtered.map(c => <ProfileCard key={c.consultantId} c={c} onOpen={() => setSelected(c.consultantId)} />)}
-            </div>
+            </div></>
           )}
         </div>
       )}
