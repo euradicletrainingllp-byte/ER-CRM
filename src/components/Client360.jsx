@@ -98,7 +98,7 @@ export function LiveStrip({ sm, showMoney, loading, complete, onTab, onRefresh }
     { tab: 'ec', label: 'Next session', value: nx ? fmtD(nx.startDate) : '—', sub: nx ? `${d === 0 ? 'today' : d === 1 ? 'tomorrow' : `in ${d} days`} · ${txt(nx.topic) || 'topic not set'}` : 'nothing booked', tone: sm.delivered && !nx ? 'warn' : '' },
     { tab: 'bd', label: 'Proposals', value: sm.proposals, sub: sm.proposals ? `${sm.won} won · ${sm.open} open · ${sm.lost} lost${sm.winRate != null ? ` · ${sm.winRate}% win` : ''}` : 'none in the BD Tracker' },
     showMoney
-      ? { tab: 'finance', label: 'Business to date', value: short(sm.deliveredValue), sub: sm.bookedValue ? `+ ${short(sm.bookedValue)} booked ahead` : 'nothing booked ahead' }
+      ? { tab: 'ec', label: 'Total business', value: short(sm.totalValue), sub: `${short(sm.deliveredValue)} delivered${sm.totalValue - sm.deliveredValue > 0 ? ` · ${short(sm.totalValue - sm.deliveredValue)} not yet delivered` : ''}${sm.cancelledCount ? ` · ${sm.cancelledCount} cancelled excluded` : ''}` }
       : { tab: 'leads', label: 'Open leads', value: sm.leadsOpen.length, sub: `${sm.leads} in the Lead Tracker` },
     showMoney
       ? { tab: 'finance', label: 'Outstanding', value: short(sm.outstanding), sub: sm.overdue ? `${short(sm.overdue)} overdue · ${sm.maxOverdue}d` : sm.toInvoice ? `${short(sm.toInvoice)} to invoice` : 'nothing overdue', tone: sm.overdue ? 'bad' : sm.outstanding || sm.toInvoice ? 'warn' : '' }

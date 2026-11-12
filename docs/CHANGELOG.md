@@ -272,3 +272,4 @@
 - Checks: Babel parse + undefined-name check on all changed files; matching engine run on mock data. Build and screenshot not run (Linux VM lacks the rollup binary) — run `npm run build` and check `/clients` before pushing.
 - Manual setup pending: add column **Also Known As** to ClientTable (Client_Directory.xlsx). Until then Link buttons are disabled and saves are unchanged; the Ashiana link already works from the config list.
 - Backup: `Claude outputs/backup-2026-11-12-client-360/`.
+- 2026-11-12 (later): Client 360 "Business to date" (delivered only) → "Total business" = Price of every session except Cancelled / Dropped; sub-line shows delivered, not yet delivered, cancelled excluded. Files: client360.js, Client360.jsx. Parse-checked.

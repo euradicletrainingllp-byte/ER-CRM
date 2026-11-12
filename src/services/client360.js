@@ -214,6 +214,8 @@ export function clientSummary(bucket, today = todayIso()) {
     days: sum(delivered, e => e.day), pax: sum(delivered, e => e.pax),
     revenue: sum(ec.filter(e => !isPostponed(e)), e => money(e.price)), deliveredValue: sum(delivered, e => money(e.price)),
     bookedValue: sum(upcoming, e => money(e.price)),
+    totalValue: sum(ec, e => money(e.price)),          // every session except Cancelled / Dropped: delivered + booked + on hold + ended-not-updated
+    cancelledValue: sum(b.ec.filter(isCancelled), e => money(e.price)), cancelledCount: b.ec.length - ec.length,
     firstSession: ec.map(e => iso(e.startDate)).filter(Boolean).sort()[0] || '', lastDelivered: past.pop() || '', next: upcoming[0] || null,
     feedbackAvg: fb.length ? Math.round((fb.reduce((a, c) => a + c, 0) / fb.length) * 100) / 100 : null, feedbackCount: fb.length,
     topics: [...topics.entries()].sort((a, c) => c[1] - a[1]), consultants: [...cons.entries()].sort((a, c) => c[1] - a[1]),
