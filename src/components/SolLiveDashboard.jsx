@@ -271,7 +271,21 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
   ].map(([lb, f]) => { const miss = scoped.filter(p => !clean(f(p))); return { lb, n: miss.length, pct: pct(miss.length, scoped.length) || 0, list: miss }; })
     .sort((a, b) => b.n - a.n), [scoped]);
 
-  const paceDelta = pace.prevSame ? Math.round(((pace.curYtd - pace.prevSame) / pace.prevSame) * 100) : null;
+  /* ── Top KPI row (16 Nov 2026): solutions, top programs, customization, top line of service ── */
+  const topKpi = useMemo(() => {
+    const tk = it => `${it.id}|${it.topic.toLowerCase().replace(/\s+/g, ' ')}`;
+    const vers = new Map(); rawItems.forEach(it => { const k = tk(it); if (!vers.has(k)) vers.set(k, new Set()); vers.get(k).add(it.version); });
+    const uniq = items.filter(inScope), revised = uniq.filter(it => vers.get(tk(it)).size > 1);
+    const rank = (list, f) => {
+      const m = new Map(); list.forEach(x => { const v = clean(f(x)); if (!v) return; const k = keyOf(v); const g = m.get(k) || { label: v, list: [] }; g.list.push(x); m.set(k, g); });
+      return [...m.values()].sort((a, b) => b.list.length - a.list.length);
+    };
+    const programs = rank(latest.filter(inScope), p => p.topic), los = rank(scoped, p => p.lineOfService);
+    const typed = scoped.filter(p => clean(p.customization)), cnt = re => typed.filter(p => re.test(p.customization)).length;
+    return { uniq, revised, programs, los, typed, cust: cnt(/custom/i), newC: cnt(/new/i), std: cnt(/standard/i) };
+  }, [rawItems, items, latest, scoped, scope]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const top3 = g => g.slice(0, 3).map(x => `${x.label} (${x.list.length})`).join(' · ') || 'none recorded';
+
 
   return (
     <div className="erd" style={{ opacity: refreshing ? 0.85 : 1, transition: 'opacity .2s' }}>
@@ -294,12 +308,19 @@ export default function SolLiveDashboard({ solutions, refreshing }) {
         <span className="sl-note">Pace and mix always compare {fyTiny(prevFy)} with {fyTiny(CURRENT_FY)}</span>
       </div>
 
-      <div className="kg g5">
-        <Kpi tone="tl" label={`${isItem ? 'Solution Items' : 'Proposals'} YTD`} list={() => base.filter(l => l.fy === CURRENT_FY).map(p => pi(p))} value={pace.curYtd}
-          sub={isItem ? `${rawItems.filter(l => l.fy === CURRENT_FY).length} rows in tracker · ${rawItems.filter(l => l.fy === CURRENT_FY).length - items.filter(l => l.fy === CURRENT_FY).length} repeated in later versions${paceDelta != null ? ` · ${paceDelta >= 0 ? '▲' : '▼'} ${Math.abs(paceDelta)}% vs ${fyTiny(prevFy)}` : ''}` : paceDelta != null ? `${paceDelta >= 0 ? '▲' : '▼'} ${Math.abs(paceDelta)}% vs ${pace.prevSame} by this date in ${fyTiny(prevFy)}` : 'no last-year pace yet'} tag={paceDelta != null ? (paceDelta >= 0 ? 'Ahead' : 'Behind') : undefined} tagTone={paceDelta >= 0 ? 'up' : 'bad'}
-          how={`${isItem ? 'Unique solutions (Proposal ID + Solution Topic, counted once across versions)' : 'Proposal lines (ID + version)'} dated April → today, against last FY up to the same day.`} />
-        <Kpi tone="gn" label={`Win Rate · ${scope === 'all' ? 'all' : 'YTD'}`} list={() => scoped.filter(p => p.pipeline === 'closed').map(p => pi(p))} value={all.rate != null ? `${all.rate}%` : '--'}
-          sub={`${all.won} won · ${all.lost} lost · ${all.open} open${baseRate != null && scope === 'fy' ? ` · ${fyTiny(prevFy)}: ${baseRate}%` : ''}`} how={`Won ÷ total (won + lost + in process) ${Us}, latest proposal version only — replaced versions excluded.`} />
+      <div className="kg g4">
+        <Kpi tone="tl" label={`Total Solutions · ${scope === 'all' ? 'all' : 'YTD'}`} list={() => topKpi.uniq.map(pi)} value={topKpi.uniq.length}
+          sub={`${topKpi.uniq.length - topKpi.revised.length} unique · ${topKpi.revised.length} revised (in 2+ versions)`}
+          how="Unique solutions = Proposal ID + Solution Topic, counted once across versions. Revised = those carried in more than one version of the proposal." />
+        <Kpi tone="nv" label="Top Programs" list={() => topKpi.programs.slice(0, 3).flatMap(g => g.list).map(pi)} value={topKpi.programs[0]?.label || '--'}
+          sub={top3(topKpi.programs)} how={`Program Topic ranked by number of proposals (latest version) · ${scopeName}.`} />
+        <Kpi tone="gd" label="% Customization" list={() => topKpi.typed.filter(p => /custom/i.test(p.customization)).map(pi)} value={pct(topKpi.cust, topKpi.typed.length) != null ? `${pct(topKpi.cust, topKpi.typed.length)}%` : '--'}
+          sub={`${topKpi.cust} customized · ${topKpi.newC} new creation · ${topKpi.std} standard of ${topKpi.typed.length}`} how={`${UC} whose Program Type is Customized ÷ ${Us} with a Program Type · ${scopeName}.`} />
+        <Kpi tone="rd" label="Top Line of Service" list={() => topKpi.los.slice(0, 3).flatMap(g => g.list).map(pi)} value={topKpi.los[0]?.label || '--'}
+          sub={top3(topKpi.los)} how={`Line of Service ranked by number of ${Us} · ${scopeName}.`} />
+      </div>
+
+      <div className="kg g3">
         <Kpi tone="nv" label={isItem ? 'Avg Item Value' : 'Avg Proposal Value'} list={() => scoped.filter(p => p.value > 0).sort((a, b) => b.value - a.value).map(p => pi(p))} value={all.avg ? L(all.avg) : '--'}
           sub={all.wonAvg ? `won deals avg ${L(all.wonAvg)}` : `${scoped.filter(p => p.value > 0).length} valued ${Us}`} how={`Average Solution Value per ${Us.slice(0, -1)} (latest version) that has a value.`} />
         <Kpi tone="gd" label="IP Reuse" list={() => [...ip.reusedBy.entries()].map(([id, tps]) => latestById.get(id) && ({ ...pi(latestById.get(id)), sub: `Reused topics: ${tps.join(', ')}` })).filter(Boolean)} value={ip.reusePct != null ? `${ip.reusePct}%` : '--'}

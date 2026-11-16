@@ -287,3 +287,10 @@
 - PO Link: several links separated by a comma (or space / new line) → one button per link (PO 1, PO 2…), also in Client 360 → Vendors & POs.
 - Follow-ons: Finance Tracker PO line shows "used + booked"; Sales dashboard Order Book "confirmed" = used + booked (figure unchanged).
 - Files: poApi.js, POTracker.jsx, SalesLiveDashboard.jsx, FinanceTracker.jsx, Client360.jsx. Parse-checked; build not run. No Excel / flow change. Backup: Claude outputs/backup-2026-11-12-po-booked.tgz.
+
+## 2026-11-16 — Solutioning dashboard: new top KPI row
+- Top row (g4): Total Solutions (unique · revised in 2+ versions), Top Programs (Program Topic, top 3), % Customization (Program Type = Customized; new/standard split), Top Line of Service (top 3).
+- Win Rate KPI card removed. Items YTD, Avg Value, IP Reuse, Journey Share moved to a second row (g4).
+- All new cards follow the YTD / All scope toggle; Line of Service and Customization also follow the items/proposals toggle. Each card drills down.
+- Files: src/components/SolLiveDashboard.jsx. No manual setup.
+- Removed duplicate 'Solution Items YTD' card (same as Total Solutions); second row now 3 cards (g3).
