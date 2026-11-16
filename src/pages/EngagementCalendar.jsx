@@ -506,6 +506,7 @@ function EngagementCard({ eng, onEdit, onDelete, canEditEng, highlight = false,
     }}>
       {/* ── Header row ── */}
       <div
+        className="eg-row"
         onClick={() => setOpen(o => !o)}
         style={{
           display: 'grid',
@@ -1400,7 +1401,7 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
       </CollapsibleFilterBar>
 
       {/* ── Column header labels (list view) ── */}
-      {view === 'list' && <div style={{
+      {view === 'list' && <div className="eg-head" style={{
         display: 'grid',
         gridTemplateColumns: '100px 50px minmax(0,1fr) 120px 120px 160px 120px 108px 22px',
         gap: '0 16px',

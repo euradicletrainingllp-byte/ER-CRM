@@ -1,5 +1,5 @@
 import { useMsal, useAccount } from '@azure/msal-react';
-import { Compass } from 'lucide-react';
+import { Compass, Menu, LogOut } from 'lucide-react';
 import { logEvent, flushSoon, endAuditSession } from '../services/auditLogger.js';
 import { useTour } from './tour/TourProvider.jsx';
 
@@ -44,11 +44,15 @@ export default function TopBar({ path, lastRefreshed, onRefresh, loading }) {
 
   return (
     <header className="topbar">
+      <button type="button" className="tb-menu" aria-label="Open menu"
+        onClick={() => window.dispatchEvent(new Event('ercrm:toggle-nav'))}>
+        <Menu size={22} strokeWidth={2} />
+      </button>
       <div className="topbar-title">{title}</div>
       <div className="topbar-right">
 
         {lastRefreshed && (
-          <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+          <span className="tb-sync" style={{ fontSize: 12, color: 'var(--muted)' }}>
             Last synced: {lastRefreshed}
           </span>
         )}
@@ -77,11 +81,11 @@ export default function TopBar({ path, lastRefreshed, onRefresh, loading }) {
           {tour.hasNew && <i className="tour-launch-dot" aria-label="New pages to explore" />}
         </button>
 
-        <span className="pill">Live Excel</span>
+        <span className="pill tb-pill">Live Excel</span>
 
         {/* User identity */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ textAlign: 'right' }}>
+          <div className="tb-user" style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)', lineHeight: 1.2 }}>
               {displayName}
             </div>
@@ -102,6 +106,7 @@ export default function TopBar({ path, lastRefreshed, onRefresh, loading }) {
           </div>
 
           <button
+            className="tb-signout"
             onClick={handleLogout}
             title="Sign out"
             style={{
@@ -111,7 +116,8 @@ export default function TopBar({ path, lastRefreshed, onRefresh, loading }) {
               cursor: 'pointer', fontWeight: 600,
             }}
           >
-            Sign out
+            <LogOut size={14} strokeWidth={2} className="tb-signout-ic" />
+            <span>Sign out</span>
           </button>
         </div>
       </div>

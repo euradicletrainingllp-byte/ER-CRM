@@ -294,3 +294,17 @@
 - All new cards follow the YTD / All scope toggle; Line of Service and Customization also follow the items/proposals toggle. Each card drills down.
 - Files: src/components/SolLiveDashboard.jsx. No manual setup.
 - Removed duplicate 'Solution Items YTD' card (same as Total Solutions); second row now 3 cards (g3).
+
+## 2026-11-17 — Mobile layout + installable app (PWA)
+- ≤900px: sidebar is a slide-in drawer (menu button in top bar / "Menu" tab, backdrop closes, auto-closes on navigation); bottom tab bar shows first 4 permitted pages.
+- Top bar compact on mobile: hides sync text, Live Excel pill, name/email; Tour + Sign out become icon buttons.
+- ≤640px: dense KPI tiles (KPI "How" note hidden), tighter cards/tables, modals open as bottom sheets, 2-col form grids → 1 col, .erd dashboards tightened.
+- Fixed old 900px rule that hid sidebar nav icons.
+- PWA: public/manifest.webmanifest, icons (192/512/maskable/apple-touch/favicon-48), public/sw.js (no caching), meta tags in index.html, SW registration in main.jsx (prod only).
+- Files: src/styles/mobile.css (new), Sidebar.jsx, TopBar.jsx, App.jsx, main.jsx, index.html, styles/index.css.
+- Manual: after deploy, on phone open crm.euradicle.com → browser menu → "Add to phone / Install app".
+
+## 2026-11-17
+- vite.config.js: added allowedHosts [".trycloudflare.com"] to server and preview, so the dev server can be reached through a Cloudflare quick tunnel. Restart Vite after pulling.
+- Follow-up: drawer items no longer squeeze/overlap (logo row 52px, drawer scrolls); trackers scroll as one page on mobile; Engagement Calendar rows stack as cards ≤640px (eg-row/eg-head classes).
+- Dashboards (/ and /founder) render at 0.8 overview scale on phones (.is-dash on main); .erd elsewhere 0.82; Portfolio Mix rows one line.

@@ -477,8 +477,6 @@ select.form-input   { cursor: pointer; }
 
 /* ─── Responsive ─── */
 @media (max-width: 900px) {
-  :root { --sidebar-w: 56px; }
-  .logo-name, .logo-sub, .nav-item span, .sidebar-section-label, .sidebar-footer { display: none; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .grid-2, .grid-3, .grid-sidebar { grid-template-columns: 1fr; }
   .page-content { padding: 18px 16px; }

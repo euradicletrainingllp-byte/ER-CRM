@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Menu } from 'lucide-react';
 
 const SB_KEY = 'ercrm.sidebar.collapsed.v1';
 import { usePermissions } from '../hooks/usePermissions.js';
@@ -23,6 +23,10 @@ const NAV = [
   { path: '/consultants', page: 'consultants',icon: '🧑‍🏫', label: 'Consultant Directory' },
 ];
 
+// Short labels for the mobile bottom tab bar
+const TAB_LABEL = { dashboard: 'Home', founder: 'Founder', tasks: 'Projects', leads: 'Leads', bd: 'BD', solution: 'Solutions',
+  engagement: 'Calendar', ops: 'Ops', finance: 'Finance', 'content-dev': 'Content', vendors: 'Vendors', clients: 'Clients', po: 'PO', consultants: 'Consultants' };
+
 export default function Sidebar() {
   const location  = useLocation();
   const navigate  = useNavigate();
@@ -34,10 +38,23 @@ export default function Sidebar() {
   }, [collapsed]);
   const Toggle = collapsed ? PanelLeftOpen : PanelLeftClose;
 
+  // Mobile: sidebar becomes a slide-in drawer (opened from the TopBar menu button / tab bar "Menu")
+  const [mOpen, setMOpen] = useState(false);
+  useEffect(() => {
+    const t = () => setMOpen(o => !o);
+    window.addEventListener('ercrm:toggle-nav', t);
+    return () => window.removeEventListener('ercrm:toggle-nav', t);
+  }, []);
+  useEffect(() => { setMOpen(false); }, [location.pathname]);
+  useEffect(() => { document.documentElement.classList.toggle('sb-mobile-open', mOpen); }, [mOpen]);
+
   // Only show pages the current user has access to
   const visibleNav = NAV.filter(n => isAdmin || (canAccess(n.page) && (n.also || []).every(p => canAccess(p))));
 
+  const tabs = visibleNav.slice(0, 4);
+
   return (
+    <>
     <aside className="sidebar" style={{ display: 'flex', flexDirection: 'column' }}>
       <div className="sidebar-logo">
         <button type="button" className="sb-toggle" onClick={() => setCollapsed(c => !c)}
@@ -114,5 +131,21 @@ export default function Sidebar() {
         <div style={{ marginTop: 4, fontSize: 10 }}>Powered by Power Automate</div>
       </div>
     </aside>
+
+    {/* Mobile only: drawer backdrop + bottom tab bar */}
+    <div className="m-backdrop" onClick={() => setMOpen(false)} aria-hidden="true" />
+    <nav className="m-tabbar" aria-label="Quick navigation">
+      {tabs.map(n => (
+        <button key={n.path} type="button" className={`m-tab ${location.pathname === n.path ? 'active' : ''}`} onClick={() => navigate(n.path)}>
+          <span className="m-tab-ic">{n.icon}</span>
+          <span className="m-tab-lb">{TAB_LABEL[n.page] || n.label}</span>
+        </button>
+      ))}
+      <button type="button" className={`m-tab ${mOpen ? 'active' : ''}`} onClick={() => setMOpen(o => !o)}>
+        <span className="m-tab-ic"><Menu size={20} strokeWidth={2} /></span>
+        <span className="m-tab-lb">Menu</span>
+      </button>
+    </nav>
+    </>
   );
 }

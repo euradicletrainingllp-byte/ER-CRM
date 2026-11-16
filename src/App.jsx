@@ -27,6 +27,7 @@ import { PermissionsProvider } from './context/PermissionsContext.jsx';
 import { usePermissions } from './hooks/usePermissions.js';
 import { logEvent, setAuditUser, firstTimeThisSession, AUDIT_OPTIONS } from './services/auditLogger.js';
 import './styles/index.css';
+import './styles/mobile.css';
 
 /**
  * PermissionRoute — wraps a page with an access check.
@@ -104,7 +105,7 @@ function Shell() {
       <Sidebar />
       <div className="main-area">
         <TopBar path={location.pathname} lastRefreshed={lastRefreshed} loading={loading} />
-        <main className="page-content">
+        <main className={`page-content${['/', '/founder'].includes(location.pathname) ? ' is-dash' : ''}`}>
           <Routes>
             <Route path="/" element={
               <PermissionRoute page="dashboard">
