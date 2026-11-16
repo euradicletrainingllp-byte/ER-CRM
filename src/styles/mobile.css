@@ -6,7 +6,17 @@
 ═══════════════════════════════════════════════════ */
 
 /* Desktop: mobile-only chrome stays hidden */
-.tb-menu, .m-tabbar, .m-backdrop { display: none; }
+.tb-menu, .m-tabbar, .m-backdrop, .tp-bar { display: none; }
+.tp-bar {
+  align-items: center; gap: 8px; width: 100%; height: 42px; margin-bottom: 10px; padding: 0 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--white); color: var(--navy);
+  font-family: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow-card);
+}
+.tp-bar svg:first-child { color: var(--mauve); }
+.tp-bar span { flex: 1; text-align: left; }
+.tp-bar .tp-chev { color: var(--muted); transition: transform .2s; }
+.tp-bar.open { border-color: var(--mauve); background: #FBF8FB; }
+.tp-bar.open .tp-chev { transform: rotate(180deg); }
 .tb-signout { display: inline-flex; align-items: center; gap: 5px; }
 
 html { -webkit-tap-highlight-color: transparent; }
@@ -91,9 +101,15 @@ html { -webkit-tap-highlight-color: transparent; }
   html .page-content { padding: 14px 14px calc(var(--m-tab-h) + 24px + env(safe-area-inset-bottom)); -webkit-overflow-scrolling: touch; }
   html .page-title { font-size: 18px; margin-bottom: 14px; }
 
-  /* Trackers: whole page scrolls (no small inner scroll box under a tall header) */
-  html .tracker-page { display: block; height: auto; overflow: visible; }
-  html .tracker-scroll { flex: none; min-height: 0; overflow-y: visible; }
+  /* Trackers with a list: top panels fold into the "Views, filters & actions" bar;
+     bar + list stay on screen, only the list scrolls */
+  html .page-content:has(.tracker-page > .tracker-scroll) .tp-bar { display: flex; }
+  html .tracker-page:has(> .tracker-scroll) { height: calc(100% - 52px); }
+  html:not(.tp-open) .tracker-page > :has(~ .tracker-scroll) { display: none !important; }
+  html.tp-open .tracker-page:has(> .tracker-scroll) { overflow-y: auto; display: block; }
+  html.tp-open .tracker-page > .tracker-scroll { flex: none; overflow-y: visible; }
+  /* Pages without that structure: whole page scrolls */
+  html .tracker-page:not(:has(> .tracker-scroll)) { display: block; height: auto; overflow: visible; }
 
   /* ── Floating launchers sit above the tab bar ── */
   html .tkf-launch { right: 12px; bottom: calc(var(--m-tab-h) + 12px + env(safe-area-inset-bottom)); height: 40px; border-radius: 20px; padding: 0 14px; }

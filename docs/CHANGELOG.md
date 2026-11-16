@@ -309,3 +309,4 @@
 - Follow-up: drawer items no longer squeeze/overlap (logo row 52px, drawer scrolls); trackers scroll as one page on mobile; Engagement Calendar rows stack as cards ≤640px (eg-row/eg-head classes).
 - Dashboards (/ and /founder) render at 0.8 overview scale on phones (.is-dash on main); .erd elsewhere 0.82; Portfolio Mix rows one line.
 - Fix: drawer labels/logo padding hidden when desktop menu was saved as collapsed (sb-collapsed overridden on mobile).
+- Mobile trackers: top panels (views/period/KPIs/filters/actions) fold into a 'Views, filters & actions' bar (MobilePanelBar.jsx, html.tp-open); list fills the screen and scrolls alone.

@@ -6,6 +6,7 @@ import { msalConfig } from './config/authConfig.js';
 import AuthGuard          from './components/AuthGuard.jsx';
 import Sidebar            from './components/Sidebar.jsx';
 import TopBar             from './components/TopBar.jsx';
+import MobilePanelBar     from './components/MobilePanelBar.jsx';
 import Dashboard          from './pages/Dashboard.jsx';
 import FounderDashboard   from './pages/FounderDashboard.jsx';
 import LeadTracker        from './pages/LeadTracker.jsx';
@@ -106,6 +107,7 @@ function Shell() {
       <div className="main-area">
         <TopBar path={location.pathname} lastRefreshed={lastRefreshed} loading={loading} />
         <main className={`page-content${['/', '/founder'].includes(location.pathname) ? ' is-dash' : ''}`}>
+          <MobilePanelBar path={location.pathname} />
           <Routes>
             <Route path="/" element={
               <PermissionRoute page="dashboard">
