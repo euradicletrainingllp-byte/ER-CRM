@@ -31,14 +31,16 @@ html { -webkit-tap-highlight-color: transparent; }
   html .sidebar > * { flex-shrink: 0; }   /* stop logo/menu squeezing into each other — drawer scrolls instead */
   html .sidebar-logo { display: flex; align-items: center; gap: 12px; }
   html .sb-toggle { display: none; }
-  html .sidebar-logo { padding: 16px 18px 12px; min-height: 0; }
+  html .sidebar .sidebar-logo, html.sb-collapsed .sidebar .sidebar-logo { padding: 16px 18px 12px; min-height: 0; }
   html .sidebar-logo img { display: block !important; width: 52px !important; max-width: 52px !important; margin: 0 !important; border-radius: 10px !important; }
   html .sidebar .logo-sub { font-size: 12px; line-height: 1.35; color: rgba(255,255,255,.6); }
   html .sidebar .logo-sub,
   html .sidebar .sidebar-section-label,
   html .sidebar .sidebar-footer { display: block; }
   html .sidebar .nav-item { justify-content: flex-start; padding: 12px 20px; font-size: 14px; min-height: 46px; }
-  html .sidebar .nav-item span { display: inline; }
+  /* desktop 'collapsed menu' setting must not leak into the phone drawer */
+  html .sidebar .nav-item span, html.sb-collapsed .sidebar .nav-item span:not(.nav-icon) { display: inline; }
+  html.sb-collapsed .sidebar .nav-item { justify-content: flex-start; padding: 12px 20px; }
   html .sidebar .nav-item .nav-icon { font-size: 17px; width: 22px; }
 
   .m-backdrop {
