@@ -1,0 +1,39 @@
+/* Engagement Calendar — Bulk Upload review window */
+.bu-modal.modal-box { width: 1200px; max-width: 96vw; max-height: 92vh; display: flex; flex-direction: column; padding: 22px 24px; overflow: hidden; }
+.bu-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.bu-head .modal-title { margin: 0; }
+.bu-file { font-size: 12px; color: var(--muted); }
+.bu-link { background: none; border: 0; color: var(--purple); font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: underline; padding: 0; }
+.bu-spacer { flex: 1; }
+.bu-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.bu-chip { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--white); color: var(--navy); cursor: default; }
+.bu-chip.ok   { background: var(--success-lt); border-color: #b7ecc9; color: #08803a; }
+.bu-chip.err  { background: var(--error-lt);   border-color: #f3c3bb; color: #b4483a; cursor: pointer; }
+.bu-chip.dup  { background: var(--warning-lt); border-color: #F1E2A6; color: #8a6d0b; }
+.bu-chip.on   { outline: 2px solid currentColor; }
+.bu-drop { border: 2px dashed var(--border); border-radius: 12px; padding: 40px 20px; text-align: center; color: var(--muted); font-size: 13px; }
+.bu-drop.over { border-color: var(--cta); background: #fff6f0; }
+.bu-drop strong { color: var(--navy); display: block; font-size: 15px; margin-bottom: 6px; }
+.bu-grid-wrap { flex: 1; min-height: 160px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+.bu-grid { border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 100%; }
+.bu-grid th { position: sticky; top: 0; z-index: 2; background: var(--navy); color: #fff; font-weight: 600; text-align: left; padding: 7px 6px; white-space: nowrap; }
+.bu-grid td { border-bottom: 1px solid var(--border); padding: 3px 4px; vertical-align: middle; background: var(--white); }
+.bu-grid .bu-sticky { position: sticky; left: 0; z-index: 1; }
+.bu-grid th.bu-sticky { z-index: 3; }
+.bu-grid tr.err td { background: var(--error-lt); }
+.bu-grid tr.dup td { background: var(--warning-lt); }
+.bu-grid tr.saving td { opacity: .55; }
+.bu-in { width: 100%; box-sizing: border-box; border: 1px solid transparent; border-radius: 6px; padding: 5px 6px; font-size: 12px; background: transparent; color: var(--navy); font-family: inherit; }
+.bu-in:hover { border-color: var(--border); background: #fff; }
+.bu-in:focus { outline: none; border-color: var(--mauve); background: #fff; }
+.bu-in.bad { border-color: var(--error); background: #fff; }
+.bu-cell-picker .form-input { padding: 5px 6px; font-size: 12px; min-height: 0; }
+.bu-state { font-size: 14px; font-weight: 700; text-align: center; cursor: help; width: 26px; }
+.bu-act { display: flex; gap: 2px; }
+.bu-act button { border: 0; background: none; cursor: pointer; font-size: 13px; padding: 3px 5px; border-radius: 5px; color: var(--muted); }
+.bu-act button:hover { background: var(--bg); color: var(--navy); }
+.bu-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.bu-msg { font-size: 12px; color: var(--muted); }
+.bu-msg.err { color: #b4483a; font-weight: 600; }
+.bu-progress { flex: 1; min-width: 160px; height: 6px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+.bu-progress > div { height: 100%; background: var(--cta); transition: width .2s; }

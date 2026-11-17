@@ -310,3 +310,15 @@
 - Dashboards (/ and /founder) render at 0.8 overview scale on phones (.is-dash on main); .erd elsewhere 0.82; Portfolio Mix rows one line.
 - Fix: drawer labels/logo padding hidden when desktop menu was saved as collapsed (sb-collapsed overridden on mobile).
 - Mobile trackers: top panels (views/period/KPIs/filters/actions) fold into a 'Views, filters & actions' bar (MobilePanelBar.jsx, html.tp-open); list fills the screen and scrolls alone.
+
+## 2026-11-17 — Engagement Calendar: Bulk Upload
+- New "⇪ Bulk Upload" button (engagement edit rights) beside "+ Add Engagement".
+- Upload .xlsx/.csv → editable review grid: inline edit, Client/Consultant pickers, date pickers, Status dropdown, add/duplicate/remove rows, "Download template".
+- Checks: EG ID, Company, Topic, Start Date required; End ≥ Start; numbers; amber flag for same company + start date + topic already in calendar or repeated in file.
+- Headers matched by name/aliases; Excel serial and dd-mm-yyyy dates converted; blank End Date = Start Date; blank EG ID → one new EG ID per company + topic.
+- Save: Index fetched once then +1 per saved row; BD checklist + GST same as single add; failed rows stay red with the error for retry.
+- Files: src/components/BulkUploadEngagements.jsx, src/utils/importExcel.js (no-library .xlsx reader), src/styles/bulkUpload.css, src/pages/EngagementCalendar.jsx.
+- Manual setup: none (uses the existing EC create flow).
+- Follow-up (same day): Bulk Upload now matches file rows to the calendar. If the file has an Index column it matches on Index only; without one it matches on company + Start Date + topic.
+  Each row is tagged New / "N changes · #Index" / Same. Changed cells are highlighted, with the old value on hover. Unchanged rows are hidden behind a chip and never uploaded.
+  Updates use the Edit path (finance columns taken fresh from Excel, per-engagement lock). Blank cells in the file never clear values. The template now has an Index column.

@@ -24,6 +24,7 @@ import { pendingItems, EC_RULES } from '../config/pendingFields.js';
 import CalendarView from './ERCalendar.jsx';
 import { ClientPicker, ConsultantPicker, ProposalPicker } from '../components/pickers/index.jsx';
 import { fillNonEmpty } from '../services/directoryCache.js';
+import BulkUploadEngagements from '../components/BulkUploadEngagements.jsx';
 
 /* ─── Date helpers ──────────────────────────────────────────────────────── */
 const DAYS   = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -932,6 +933,7 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
   const [syncing,     setSyncing]     = useState(false);   // background refresh in progress
   const [error,       setError]       = useState(null);
   const [showAdd,     setShowAdd]     = useState(false);
+  const [showBulk,    setShowBulk]    = useState(false);
   const [addPrefill,  setAddPrefill]  = useState(null);
   const [allRows,     setAllRows]     = useState(null);    // full list, loaded only for the Add form
   const [preparingAdd, setPreparingAdd] = useState(false);
@@ -1247,6 +1249,28 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
     finally { setSaving(false); }
   };
 
+  // Bulk upload: one row at a time, same rules as handleAdd; Index is handed out by the upload window
+  const handleBulkSaveRow = async (form, index) => {
+    if (!String(form.opsChecklist || '').trim()) {
+      const cl = await checklistForEngagement(form).catch(() => '');
+      if (cl) form = { ...form, opsChecklist: cl };
+    }
+    await addEngagementRow({ ...rowFromForm(form), engagementKey: index });
+  };
+  // Bulk update of a matched row: same path as Edit (finance columns fresh from Excel, per-engagement lock)
+  const handleBulkUpdateRow = async (original, changes) => {
+    await withEcLock(original.engagementKey, async () => {
+      const fresh = await freshEcFinance(original.engagementKey, original.startDate).catch(() => null);
+      await updateEngagementRow(original.egId, original.sno, formToExcel({ ...original, ...changes, ...(fresh || {}) }), original.engagementKey);
+    });
+    patchEngagementCaches(rows => rows.map(r => (r.engagementKey === original.engagementKey ? { ...r, ...rowFromForm({ ...r, ...changes }) } : r)));
+  };
+  const handleBulkFinished = ({ added, updated }) => {
+    setAllRows(null);
+    showToast(`✓ Bulk upload: ${[added && `${added} added`, updated && `${updated} updated`].filter(Boolean).join(', ')}.`);
+    revalidateSoon();
+  };
+
   // Edit: optimistic — the card updates instantly, Excel is written in the
   // background, and the change is rolled back if the save fails.
   const handleEdit = async (form) => {
@@ -1394,6 +1418,11 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
             disabled={rangeLoading}
           />
           {canEdit('engagement') && (
+            <button className="btn btn-outline btn-sm" onClick={() => setShowBulk(true)} title="Upload many engagements from Excel">
+              ⇪ Bulk Upload
+            </button>
+          )}
+          {canEdit('engagement') && (
             <button className="btn btn-primary btn-sm" onClick={() => openAdd()} disabled={preparingAdd}>
               {preparingAdd ? '⏳ Preparing…' : '+ Add Engagement'}
             </button>
@@ -1493,6 +1522,8 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
         )}
       </div>
 
+      {showBulk  && <BulkUploadEngagements onClose={() => setShowBulk(false)} onSaveRow={handleBulkSaveRow} onUpdateRow={handleBulkUpdateRow}
+                      genEgId={generateNextEgId} onFinished={handleBulkFinished} />}
       {showAdd   && <AddEditEngagementModal initial={null} prefill={addPrefill} onSave={handleAdd}  onClose={() => { setShowAdd(false); setAddPrefill(null); }} saving={saving} engagements={allRows || data} />}
       {editRow   && <AddEditEngagementModal initial={editRow} onSave={handleEdit} onClose={() => setEditRow(null)}    saving={false} engagements={data} />}
       {deleteRow && <DeleteEngagementModal  eng={deleteRow}   onConfirm={handleDelete} onClose={() => setDeleteRow(null)} saving={false} />}
