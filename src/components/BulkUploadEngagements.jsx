@@ -67,7 +67,22 @@ const BLANK = {
 const INDEX_ALIASES = ['index', 'engagementkey', 'engagementindex', 'idx'];
 const norm = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const lc = s => String(s ?? '').trim().toLowerCase();
-const dupKey = r => `${lc(r.company)}|${toISODate(r.startDate) || ''}|${lc(r.topic)}`;
+const alnum = s => norm(String(s ?? '').trim());
+// spaces / punctuation / case never make two rows different (old EC files carry double spaces, trailing spaces)
+const dupKey = r => `${alnum(r.company)}|${toISODate(r.startDate) || ''}|${alnum(r.topic)}`;
+const egDateKey = r => `${alnum(r.egId)}|${toISODate(r.startDate) || ''}`;
+const squash = s => String(s ?? '').replace(/\s+/g, ' ').trim();
+// bigram Dice similarity 0..1 for picking the closest topic among same EG ID + date rows
+const similar = (a, b) => {
+  a = alnum(a); b = alnum(b);
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return 0;
+  const g = new Map();
+  for (let i = 0; i < a.length - 1; i++) { const x = a.slice(i, i + 2); g.set(x, (g.get(x) || 0) + 1); }
+  let hit = 0;
+  for (let i = 0; i < b.length - 1; i++) { const x = b.slice(i, i + 2); if (g.get(x) > 0) { hit++; g.set(x, g.get(x) - 1); } }
+  return (2 * hit) / (a.length + b.length - 2);
+};
 const numOf = v => Number(String(v ?? '').replace(/[₹,\s]/g, '')) || 0;
 const show = v => (v == null || String(v).trim() === '' ? '(blank)' : String(v));
 let uid = 0;
@@ -109,7 +124,8 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
     if (t === 'number') return numOf(a) === numOf(b);
     if (t === 'date') return (toISODate(a) || '') === (toISODate(b) || '');
     if (t === 'status') return lc(a) === lc(b);
-    return String(a ?? '').trim() === String(b ?? '').trim();
+    if (k === 'topic' && alnum(a) && alnum(b).startsWith(alnum(a))) return true;   // calendar adds detail, e.g. " - Bangalore"
+    return squash(a) === squash(b);
   };
   const [existing, setExisting] = useState(null);
   const [fileName, setFileName] = useState('');
@@ -118,14 +134,15 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
   const [readErr, setReadErr]   = useState('');
   const [reading, setReading]   = useState(false);
   const [over, setOver]         = useState(false);
-  const [onlyErr, setOnlyErr]   = useState(false);
-  const [showSame, setShowSame] = useState(false);
+  // Grid filter: 'new' (default) | 'update' | 'same' | 'err' | 'all'. Upload saves only the rows in view.
+  const [view, setView]         = useState('new');
   const [run, setRun]           = useState(null);     // { done, total } while saving
   const [msg, setMsg]           = useState('');
   const fileRef = useRef(null);
 
   useEffect(() => {
-    getAllEngagementsCached().then(setExisting).catch(() => setExisting([]));
+    // always read Excel fresh: rows deleted straight in Excel must not count as "already in the calendar"
+    getAllEngagementsCached({ force: true }).then(setExisting).catch(() => setExisting([]));
   }, []);
 
   const existingByKey = useMemo(() => {
@@ -166,11 +183,13 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
   const active = checked.filter(c => c.kind !== 'same');
   const nErr  = active.filter(c => c.errs.length).length;
   const nDup  = active.filter(c => !c.errs.length && c.dup).length;
-  const nNew  = active.filter(c => !c.errs.length && c.kind === 'new').length;
-  const nUpd  = active.filter(c => !c.errs.length && c.kind === 'update').length;
   const nSame = checked.length - active.length;
-  const nOk   = nNew + nUpd;
-  const shown = checked.filter(c => (onlyErr ? c.errs.length > 0 : (showSame || c.kind !== 'same')));
+  // rows edited/added in the grid stay visible even if the edit moves them to another filter
+  const inView = c => view === 'all' || c.r._edited || (view === 'err' ? c.errs.length > 0 : c.kind === view);
+  const shown = checked.filter(inView);
+  const ready = shown.filter(c => c.kind !== 'same' && !c.errs.length);
+  const rNew  = ready.filter(c => c.kind === 'new').length;
+  const rUpd  = ready.length - rNew;
   const busy  = !!run;
 
   async function loadFile(file) {
@@ -188,14 +207,40 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
       // one column per field — first match wins
       const used = new Set();
       map.forEach((k, i) => { if (k && used.has(k)) map[i] = null; else if (k) used.add(k); });
-      setUnmapped(header.filter((h, i) => h && !map[i] && !INDEX_ALIASES.includes(norm(h)) && !['sno', 'sn', 'serialno'].includes(norm(h))));
+      setUnmapped(header.filter((h, i) => h && !map[i] && !INDEX_ALIASES.includes(norm(h)) && !['sno', 'sn', 'serialno'].includes(norm(h)) && !/^column\d+$/.test(norm(h))));
 
-      const all = await (existing ? Promise.resolve(existing) : getAllEngagementsCached().catch(() => []));
+      const all = await (existing ? Promise.resolve(existing) : getAllEngagementsCached({ force: true }).catch(() => []));
       if (!existing) setExisting(all);
       const taken = new Set(all.map(e => e.egId).filter(Boolean));
       const byIndex = new Map(all.filter(e => e.engagementKey).map(e => [String(e.engagementKey).trim(), e]));
-      const byKey = new Map();
-      all.forEach(e => { const k = dupKey(e); if (!byKey.has(k)) byKey.set(k, e); });
+      // Old-format files (no Index): match on company + Start Date + topic, then fall back to
+      // EG ID + Start Date (closest topic). Each calendar row is claimed once, so repeated
+      // sessions on the same day pair up one-to-one instead of all hitting the first row.
+      const byKey = new Map(), byEgDate = new Map();
+      const push = (m, k, e) => { if (!m.has(k)) m.set(k, []); m.get(k).push(e); };
+      const byEg = new Map();
+      all.forEach(e => {
+        push(byKey, dupKey(e), e);
+        if (e.egId && e.startDate) push(byEgDate, egDateKey(e), e);
+        if (e.egId) push(byEg, alnum(e.egId), e);
+      });
+      const claimed = new Set();
+      // Passes run over the whole file, strongest key first, so a loose match never steals
+      // a calendar row that a later file row matches exactly.
+      const PASSES = [
+        r => (r.company && r.topic ? byKey.get(dupKey(r)) || [] : []).map(e => [e, 1]),
+        r => (r.egId ? byEgDate.get(egDateKey(r)) || [] : []).map(e => [e, similar(r.topic, e.topic)])
+               .filter(([, sc], _, a) => a.length === 1 || sc >= 0.5),
+        r => (r.egId ? byEg.get(alnum(r.egId)) || [] : []).map(e => [e, similar(r.topic, e.topic)])
+               .filter(([, sc]) => sc >= 0.85),
+      ];
+      const matchAll = list => {
+        for (const pass of PASSES) for (const r of list) {
+          if (r._match || !r.startDate) continue;
+          const best = pass(r).filter(([e]) => !claimed.has(e)).sort((x, y) => y[1] - x[1])[0];
+          if (best) { claimed.add(best[0]); r._match = best[0]; }
+        }
+      };
       const groupEg = new Map();                    // company|topic → EG ID given to blank rows
 
       const parsed = raw.map(cells => {
@@ -216,16 +261,21 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
         });
         // Match to the calendar, then seed cells the file left blank with the calendar's values
         const fileIndex = idxCol >= 0 ? String(cells[idxCol] ?? '').trim().replace(/\.0+$/, '') : '';
-        const match = idxCol >= 0 ? (fileIndex ? byIndex.get(fileIndex) || null : null)
-                                  : (r.company && r.startDate && r.topic ? byKey.get(dupKey(r)) || null : null);
-        if (match) {
-          for (const [k] of cols) if (!filledIn(cells, map, k)) r[k] = gridVal(k, match[k]);
-        }
-        r._match = match; r._fileIndex = match ? '' : fileIndex;
-        if (!match && !r.endDate && r.startDate) r.endDate = r.startDate;
-        if (r.egId) taken.add(r.egId);
+        r._match = idxCol >= 0 && fileIndex ? byIndex.get(fileIndex) || null : null;
+        r._fileIndex = fileIndex; r._cells = cells;
         return r;
-      });
+      })
+        // rows with no company, topic or start date are leftovers (formulas, stray marks) — skip them
+        .filter(r => r.company || r.topic || r.startDate || r._badDate.startDate);
+      if (idxCol < 0) matchAll(parsed);
+      for (const r of parsed) {
+        const m = r._match;
+        if (m) for (const [k] of cols) if (!filledIn(r._cells, map, k)) r[k] = gridVal(k, m[k]);
+        if (m) r._fileIndex = '';
+        if (!m && !r.endDate && r.startDate) r.endDate = r.startDate;
+        if (r.egId) taken.add(r.egId);
+        delete r._cells;
+      }
       // Blank EG IDs: one new EG ID per company + topic in the file
       for (const r of parsed) {
         if (r.egId) continue;
@@ -244,17 +294,17 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
 
   const setCell = (id, k, v) => setRows(rs => rs.map(r => {
     if (r._id !== id) return r;
-    const next = { ...r, [k]: v, _saveErr: '' };
+    const next = { ...r, [k]: v, _saveErr: '', _edited: true };
     if (r._badDate?.[k]) next._badDate = { ...r._badDate, [k]: undefined };
     return next;
   }));
   const removeRow = id => setRows(rs => rs.filter(r => r._id !== id));
   const copyRow = id => setRows(rs => {
     const i = rs.findIndex(r => r._id === id);
-    const copy = { ...rs[i], _id: newId(), _saveErr: '', _badDate: { ...rs[i]._badDate }, _match: null, _fileIndex: '' };  // a copy is always a new row
+    const copy = { ...rs[i], _id: newId(), _saveErr: '', _badDate: { ...rs[i]._badDate }, _match: null, _fileIndex: '', _edited: true };  // a copy is always a new row
     return [...rs.slice(0, i + 1), copy, ...rs.slice(i + 1)];
   });
-  const addRow = () => setRows(rs => [...rs, { ...BLANK, _id: newId(), _badDate: {}, egId: genEgId(egIdsInUse(rs)) }]);
+  const addRow = () => setRows(rs => [...rs, { ...BLANK, _id: newId(), _badDate: {}, _edited: true, egId: genEgId(egIdsInUse(rs)) }]);
 
   function downloadTemplate() {
     downloadXlsx({
@@ -265,7 +315,6 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
   }
 
   async function upload() {
-    const ready = checked.filter(c => c.kind !== 'same' && !c.errs.length);
     if (!ready.length) return;
     setMsg(''); setRun({ done: 0, total: ready.length });
     let idx = null;
@@ -279,7 +328,7 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
       const r = c.r;
       setRows(rs => rs.map(x => (x._id === r._id ? { ...x, _saving: true } : x)));
       try {
-        const { _id, _badDate, _saveErr, _saving, _match, _fileIndex, ...form } = r;
+        const { _id, _badDate, _saveErr, _saving, _match, _fileIndex, _edited, ...form } = r;
         if (c.kind === 'new') {
           await onSaveRow(form, String(idx));
           idx += 1; added += 1;
@@ -300,7 +349,7 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
     if (!failed && ready.length === active.length) { onClose(); return; }
     const done = [added && `${added} added`, updated && `${updated} updated`].filter(Boolean).join(' · ') || 'Nothing saved';
     setMsg(failed ? `${done} · ${failed} failed. Fix the red rows and upload again.` : `${done}. Rows with errors are still here.`);
-    if (failed) setOnlyErr(true);
+    if (failed) setView('err');
   }
 
   const cell = (c, col) => {
@@ -360,7 +409,7 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
             onDrop={e => { e.preventDefault(); setOver(false); loadFile(e.dataTransfer.files?.[0]); }}>
             <strong>{reading ? '⏳ Reading file…' : 'Drop an Excel (.xlsx) or .csv file here'}</strong>
             Column names are matched to the Engagement Calendar (Index, EG ID, company, Start Date, topic …).<br />
-            A full calendar export works too: rows are matched by Index (or company + start date + topic), and only new or changed rows are uploaded.<br />
+            A full calendar export or the old EC master works too: rows are matched by Index, or (no Index column) by company + start date + topic, then EG ID + start date. Only new or changed rows are uploaded.<br />
             Blank cells never clear a value. Blank EG IDs on new rows are filled automatically, with one new EG ID per company + topic.
             <div style={{ marginTop: 14, display: 'flex', gap: 10, justifyContent: 'center' }}>
               <button className="btn btn-outline btn-sm" onClick={() => fileRef.current?.click()} disabled={reading}>Choose file</button>
@@ -371,14 +420,28 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
         ) : (
           <>
             <div className="bu-chips">
-              <span className="bu-chip">{rows.length} rows</span>
-              <span className="bu-chip new">{nNew} new</span>
-              <span className="bu-chip upd" title="Matched to the calendar with changed cells (hover a highlighted cell to see the old value)">{nUpd} updates</span>
-              <span className={'bu-chip same' + (showSame ? ' on' : '')} onClick={() => setShowSame(v => !v)}
-                title="Already in the calendar with no changes. Not uploaded. Click to show or hide.">{nSame} unchanged{showSame ? ' (shown)' : ''}</span>
-              <span className={'bu-chip err' + (onlyErr ? ' on' : '')} onClick={() => setOnlyErr(v => !v)}
-                title="Show only rows with errors">{nErr} with errors</span>
+              <span className="bu-msg">Show:</span>
+              {[
+                ['new',    'new',  `${active.filter(c => c.kind === 'new').length} new`,  'Rows not in the calendar yet'],
+                ['update', 'upd',  `${active.filter(c => c.kind === 'update').length} updates`, 'Matched rows with changed cells (hover a highlighted cell to see the old value)'],
+                ['same',   'same', `${nSame} unchanged`, 'Already in the calendar with no changes. Edit a cell to turn it into an update.'],
+                ['err',    'err',  `${nErr} with errors`, 'Rows that need fixing before upload'],
+                ['all',    '',     `All ${rows.length}`, 'Every row in the file'],
+              ].map(([v, cls, label, tip]) => (
+                <span key={v} role="button" className={`bu-chip ${cls} bu-filter${view === v ? ' on' : ''}`} title={tip} onClick={() => setView(v)}>{label}</span>
+              ))}
               <span className="bu-chip dup" title="Uploaded anyway — check before saving">{nDup} possible duplicates</span>
+              {view === 'update' && (() => {
+                // which fields drive the updates, e.g. "Topic 39 · Comments 2" — spots a column that differs everywhere
+                const n = {};
+                active.filter(c => c.kind === 'update').forEach(c => c.changes.forEach(k => { n[k] = (n[k] || 0) + 1; }));
+                const list = Object.entries(n).sort((x, y) => y[1] - x[1]);
+                return list.length > 0 && (
+                  <span className="bu-msg" title="Number of update rows where each field differs from the calendar">
+                    Changed fields: {list.map(([k, v]) => `${cols.find(x => x[0] === k)[1]} ${v}`).join(' · ')}
+                  </span>
+                );
+              })()}
               {unmapped.length > 0 && (
                 <span className="bu-msg" title={unmapped.join(', ')}>Ignored columns: {unmapped.slice(0, 4).join(', ')}{unmapped.length > 4 ? ` +${unmapped.length - 4}` : ''}</span>
               )}
@@ -434,8 +497,9 @@ export default function BulkUploadEngagements({ onClose, onSaveRow, onUpdateRow,
             </>
           ) : <span className={'bu-msg' + (msg.includes('failed') || msg.startsWith('❌') ? ' err' : '')} style={{ flex: 1 }}>{msg}</span>}
           <button className="btn btn-outline" onClick={onClose} disabled={busy}>{msg ? 'Close' : 'Cancel'}</button>
-          <button className="btn btn-primary" onClick={upload} disabled={busy || !nOk || existing === null}>
-            {busy ? '⏳ Uploading…' : `⇪ Upload ${[nNew && `${nNew} new`, nUpd && `${nUpd} update${nUpd === 1 ? '' : 's'}`].filter(Boolean).join(' + ') || '0 rows'}`}
+          <button className="btn btn-primary" onClick={upload} disabled={busy || !ready.length || existing === null}
+            title="Uploads only the rows in the current filter">
+            {busy ? '⏳ Uploading…' : `⇪ Upload ${[rNew && `${rNew} new`, rUpd && `${rUpd} update${rUpd === 1 ? '' : 's'}`].filter(Boolean).join(' + ') || '0 rows'}`}
           </button>
         </div>
       </div>

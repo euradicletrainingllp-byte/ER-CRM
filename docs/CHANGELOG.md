@@ -322,3 +322,17 @@
 - Follow-up (same day): Bulk Upload now matches file rows to the calendar. If the file has an Index column it matches on Index only; without one it matches on company + Start Date + topic.
   Each row is tagged New / "N changes · #Index" / Same. Changed cells are highlighted, with the old value on hover. Unchanged rows are hidden behind a chip and never uploaded.
   Updates use the Edit path (finance columns taken fresh from Excel, per-engagement lock). Blank cells in the file never clear values. The template now has an Index column.
+
+## 2026-11-19 — EC Bulk Upload: old-format EC master matches existing rows
+- Files without an Index column (old "ER - Engagement Calender Master") no longer add every row as new.
+- Match order: company + Start Date + topic ignoring spaces/punctuation/case → else EG ID + Start Date (closest topic). Each calendar row is claimed once, so same-day repeat sessions pair one-to-one.
+- Text compare ignores extra/trailing spaces, so double-space topics are not counted as changes. "Column1…ColumnN" headers no longer listed as unmapped.
+- Tested against the 18-Nov master copy vs the calendar export: 636/636 rows matched, 0 new; only real edits (e.g. topic wording, EG.ID 460 on RISE, Consultant "TBD") show as updates.
+- Files: src/components/BulkUploadEngagements.jsx. Manual setup: none. Backup: backups/ec-bulk-match-*.tgz.
+- Follow-up (same day): blank leftover rows (no company, topic or start date) are skipped, so no empty "New" rows with auto EG IDs.
+- Matching now runs in passes over the whole file (exact key → EG ID + Start Date → EG ID + similar topic ≥85%), so a loose match can't steal a row that matches exactly later; rows whose date moved are still matched (shown as a date change).
+- A topic that is the start of the calendar topic (calendar adds " - Bangalore"/" - Mohali") is not counted as a change.
+- Follow-up: review grid opens on "New" rows only. Filter chips at top: New / Updates / Unchanged / With errors / All. Upload button saves only the valid rows in the current filter. Rows edited or added in the grid stay visible when an edit moves them to another filter (e.g. editing an Unchanged row makes it an update). Files: BulkUploadEngagements.jsx, styles/bulkUpload.css.
+- Fix: Bulk Upload reads the calendar fresh from Excel when opened (force), so rows deleted directly in Excel show as New instead of matching the stale cached copy.
+- Updates view shows a 'Changed fields: <field> <count>' summary to spot a column that differs on every row.
+- Added docs/office-scripts/FillMissingIndex.ts: fills blank EC Index cells with highest+1 (plain numbers). Manual: create the script in Excel Online; optionally add "Run script" after "Add a row" in ENGAGEMENT_CRUD (create), before the sort script. Root cause to fix: ENGAGEMENT_CRUD "Add a row" not mapping Index = triggerBody()?['Index'].
