@@ -69,6 +69,28 @@ const SOURCES = [
     fix: (r, name) => callFlow('PO_CRUD', { action: 'update', sno: need(r.poId, 'PO ID'), Client: name }) },
 ];
 
+/**
+ * One-click spelling fix (Client Directory → Not in directory): change the client-name field of the given
+ * tracker rows to the directory name — the same one-field update as "Fix spelling everywhere" below.
+ * rowsBySource = { ec: [], bd: [], ... } (rows as read by the trackers). Rows one at a time; never writes an empty name.
+ * Trackers without a fix here (Project Management tasks) are reported as skipped.
+ */
+export async function fixNameRows(rowsBySource, newName, onStep) {
+  const name = txt(newName);
+  if (!name) throw new Error('No directory name to write');
+  const out = { done: 0, failed: [], skipped: 0 };
+  for (const [id, list] of Object.entries(rowsBySource || {})) {
+    const src = SOURCES.find(x => x.id === id && x.on());
+    for (const r of list || []) {
+      if (!src) { out.skipped++; continue; }
+      if (txt(src.get(r)) === name) continue;
+      try { await src.fix(r, name); out.done++; } catch (e) { out.failed.push(`${src.label} · ${src.rowLabel(r)}: ${e.message}`); }
+      onStep?.(out);
+    }
+  }
+  return out;
+}
+
 async function loadAll() {
   const on = SOURCES.filter(s => s.on());
   const res = await Promise.allSettled(on.map(s => s.load()));

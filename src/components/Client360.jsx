@@ -350,7 +350,7 @@ export function TrackerTab({ tab, bucket, sm, showMoney, canSee, loading }) {
 }
 
 /* ─── Not in directory ─── */
-export function UnlinkedView({ w, search, perm, aliasReady, busy, onCreate, onLink, onOpenClient }) {
+export function UnlinkedView({ w, search, perm, aliasReady, busy, onCreate, onLink, onFixName, onOpenClient }) {
   const [showIgnored, setShowIgnored] = useState(false);
   const [pick, setPick] = useState({});
   const { ensure } = w;
@@ -402,7 +402,8 @@ export function UnlinkedView({ w, search, perm, aliasReady, busy, onCreate, onLi
                         </select></div>}
                     </td>
                     <td><div className="c360-un-acts">
-                      {perm.update && <button type="button" className="btn btn-primary btn-sm" disabled={busy || !target || !aliasReady} title={!aliasReady ? 'Add the column "Also Known As" to ClientTable first' : target ? `Show these rows in ${target.name}` : 'Pick a client'} onClick={() => onLink(u.name, target)}><Link2 size={13} />Link</button>}
+                      {perm.update && onFixName && <button type="button" className="btn btn-primary btn-sm" disabled={busy || !target} title={target ? `Change “${u.name}” to “${target.name}” in all ${u.total} tracker rows` : 'Pick a client'} onClick={() => onFixName(u, target)}><CheckCircle2 size={13} />Fix spelling</button>}
+                      {perm.update && <button type="button" className="btn btn-outline btn-sm" disabled={busy || !target || !aliasReady} title={!aliasReady ? 'Add the column "Also Known As" to ClientTable first' : target ? `Show these rows in ${target.name}` : 'Pick a client'} onClick={() => onLink(u.name, target)}><Link2 size={13} />Link</button>}
                       {perm.create && <button type="button" className="btn btn-outline btn-sm" disabled={busy} onClick={() => onCreate(u)}><UserPlus size={13} />Create profile</button>}
                       <button type="button" className="btn btn-outline btn-sm" title={u.ignored ? 'Show again' : 'Not a client — hide'} onClick={() => w.toggleIgnore(u.key)}>{u.ignored ? <Eye size={13} /> : <EyeOff size={13} />}</button>
                     </div></td>

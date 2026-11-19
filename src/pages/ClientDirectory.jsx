@@ -37,7 +37,7 @@ import * as O from '../config/clientOptions.js';
 import '../styles/leadsVendors.css';
 import '../styles/clients.css';
 import { TeamPicker, ConsultantPicker, ProposalPicker } from '../components/pickers/index.jsx';
-import DirectoryCleanup from '../components/DirectoryCleanup.jsx';
+import DirectoryCleanup, { fixNameRows } from '../components/DirectoryCleanup.jsx';
 import { useClientWorld, LiveStrip, NameLinks, ProfileTabs, AlertList, TrackerTab, UnlinkedView, profileDefaultsFrom } from '../components/Client360.jsx';
 import { clientSummary, nearClients, duplicateClients, splitAliases } from '../services/client360.js';
 import { aliasColumnReady } from '../services/clientsApi.js';
@@ -883,6 +883,21 @@ export default function ClientDirectory({ onRefreshed }) {
     } catch (e) { showToast('❌ ' + e.message); }
     finally { setSaving(false); }
   };
+  // One click: rewrite the tracker spelling to the directory name in every row found under it (client-name field only)
+  const fixName = async (u, client) => {
+    if (!client || !u?.total) return;
+    if (!window.confirm(`Change “${u.name}” to “${client.name}” in ${u.total} tracker row${u.total === 1 ? '' : 's'}?\n\nOnly the client-name cell of those rows is changed. Excel version history can restore it if needed.`)) return;
+    setSaving(true);
+    showToast(`Fixing “${u.name}” → ${client.name}…`);
+    try {
+      const r = await fixNameRows(u.rows, client.name, p => showToast(`Fixing “${u.name}” → ${client.name}… ${p.done} of ${u.total}`));
+      showToast(r.failed.length
+        ? `⚠ ${r.done} row(s) fixed, ${r.failed.length} failed: ${r.failed.slice(0, 2).join(' | ')}`
+        : `✓ “${u.name}” changed to ${client.name} in ${r.done} row(s)${r.skipped ? ` · ${r.skipped} task row(s) to edit by hand` : ''}`);
+      await w.refresh(true);
+    } catch (e) { showToast('❌ ' + e.message); }
+    finally { setSaving(false); }
+  };
   const createFromTracker = u => setModal({ kind: 'clients', defaults: { geography: 'India', owner: me, ...profileDefaultsFrom(u), _fromName: u.name } });
   const toggleAction = a => save('actions', { ...a, status: a.status === 'Done' ? 'Open' : 'Done', closedOn: a.status === 'Done' ? '' : todayIso() }, false);
 
@@ -1100,7 +1115,7 @@ export default function ClientDirectory({ onRefreshed }) {
             </tr>))}</tbody></table></div></div></div>}
 
       {view === 'unlinked' && <UnlinkedView w={w} search={search} perm={perm} aliasReady={aliasReady} busy={saving}
-        onCreate={createFromTracker} onLink={linkName} onOpenClient={id => { setView('clients'); setSelected(id); }} />}
+        onCreate={createFromTracker} onLink={linkName} onFixName={isAdmin ? fixName : undefined} onOpenClient={id => { setView('clients'); setSelected(id); }} />}
 
       {view === 'cleanup' && isAdmin && <DirectoryCleanup />}
 
