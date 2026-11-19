@@ -65,7 +65,9 @@ export function ChartBox({ config, className = 'ch-wrap', height, listFor, title
       .then(Chart => {
         if (dead || !canvas.current) return;
         const onClick = (ev, els, ch) => {
-          const el = els?.[0]; if (!el) return;
+          // Tap opens the exact segment under the finger (charts may hover in 'index' mode, which lists every series)
+          const hit = ch.getElementsAtEventForMode(ev, 'nearest', { intersect: true }, false);
+          const el = hit?.[0] || els?.[0]; if (!el) return;
           const label = String(ch.data.labels?.[el.index] ?? ''), ds = ch.data.datasets[el.datasetIndex] || {};
           const raw = ds.data?.[el.index], value = typeof raw === 'object' && raw ? (raw.y ?? raw.x) : raw;
           const items = lf.current ? lf.current(label, ds.label || '', value)

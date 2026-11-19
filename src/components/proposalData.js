@@ -75,6 +75,8 @@ const industryFromConfig = client => {
 };
 
 const hasBdNo = r => clean(r?.bdSNo) !== '';
+/** Solution Value written as NA / N/A / Not applicable — the proposal has no value by design, not a missing field. */
+export const isNA = v => /^(n\.?\s*\/?\s*a\.?|not\s+applicable|nil)$/i.test(clean(v));
 
 /**
  * A month written without a year ("April", "Sept") — as many BD Month cells are. The BD Tracker page files it
@@ -90,8 +92,11 @@ function monthInFy(v, refYear) {
   return `${mon >= 4 ? CURRENT_FY : CURRENT_FY + 1}-${pad2(mon)}-01`;
 }
 
-/** One record per Proposal ID + version (see the note at the top). */
-export function buildProposalLines(solutions) {
+/**
+ * One record per Proposal ID + version (see the note at the top).
+ * industryOf(client) — optional Client Directory lookup; used when the tracker row has no Industry.
+ */
+export function buildProposalLines(solutions, { industryOf } = {}) {
   const byId = new Map();
   (solutions || []).forEach(r => {
     const id = clean(r.proposalId);
@@ -156,9 +161,10 @@ export function buildProposalLines(solutions) {
         solTopics: [...new Set(vr.map(r => clean(r.solutionTopic).toLowerCase().replace(/\s+/g, ' ')).filter(Boolean))],
         itemRows: vr.filter(r => clean(r.solutionTopic)),   // the solution-item rows of this version (Solutioning tab counts these)
         solCount,    // number of solution items (rows with a Solution Topic) in this version
+        solNA: !solFull && vr.some(r => isNA(r.solutionValue)),   // Solution Value marked NA (no value by design)
         solValue,    // Solution Values only — used by the Solutioning tab (matches the Solution Tracker)
         pipeline: isLatest ? pipelineOf(clean(anchor.bdStatus) || f('bdStatus'), f('status')) : 'lost',
-        industry: clean(f('industry')) || industryFromConfig(client),
+        industry: clean(f('industry')) || clean(industryOf?.(client)) || industryFromConfig(client),
         developmentCategory: f('developmentCategory'), engagementType: f('engagementType'),
         lineOfService: f('lineOfService'), typeOfService: f('typeOfService'),
         customization: customizationOf(f('programType')),

@@ -17,7 +17,7 @@
  *   Due in market    invoice amount − received, for every invoice not marked Received / NA (any year)
  *   Overdue          the part of that due whose Invoice date + 30 days has passed
  *   To be raised     sessions that have ended, are not Cancelled / NA and have no Invoice date
- * Earlier years (Apr–Oct as recorded) and credit notes: fixed, Dashboard Report Data (12 Oct 2026).
+ * Earlier years: Apr–Oct from Dashboard Report Data (12 Oct 2026); Nov–Mar from the Engagement Master (19 Nov 2026). Credit notes fixed.
  */
 import { useMemo, useState, useEffect } from 'react';
 import {
@@ -140,8 +140,11 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     return out;
   }, [rows, basis]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Months shown: April → current month (same-period comparison with the earlier years, like the Excel)
-  const months = MONTHS.slice(0, Math.max(7, NOW_SLOT + 1));
+  // Months shown: the whole financial year up to the last month that has data in any year (earlier years run Apr → Mar),
+  // never less than April → current month. FY totals add every month shown.
+  const lastWithData = Math.max(NOW_SLOT, ...[FIN_REVENUE_L, FIN_INVOICES, FIN_BILLING_DAYS].flatMap(o => Object.values(o))
+    .concat(Object.values(live).flatMap(o => [o.rev, o.inv, o.days])).map(a => a.reduce((m, v, i) => (v > 0 ? i : m), -1)));
+  const months = MONTHS.slice(0, lastWithData + 1);
   const series = (fixed, key) => {
     const out = Object.entries(fixed).map(([y, v]) => ({ label: fyShortName(+y), values: v }));
     for (let y = LIVE_FROM_FY; y <= CURRENT_FY; y++) out.push({ label: fyShortName(y), values: live[y][key].map(v => Math.round(v * 100) / 100) });
@@ -330,7 +333,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
     <div className="erd" style={{ opacity: refreshing ? 0.85 : 1, transition: 'opacity .2s' }}>
       <div className="pg-hdr"><h2>Finance</h2><p>Revenue, invoices &amp; outstanding collections</p></div>
       <SourceNote live={`${fyLong(LIVE_FROM_FY)} onward and all dues from the Engagement Calendar finance columns (same values as the Finance Tracker)`}
-                  fixed="earlier years (Apr–Oct) from Dashboard Report Data (12 Oct 2026)" />
+                  fixed="earlier years: Apr–Oct from Dashboard Report Data (12 Oct 2026), Nov–Mar from the Engagement Master" />
 
       <div className="erd-period" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, margin: '4px 0 12px' }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--e-text2, #6B7280)', textTransform: 'uppercase', letterSpacing: 0.4 }}>Period</span>
@@ -375,7 +378,7 @@ export default function FinanceLiveDashboard({ engagements, refreshing }) {
       </div>
 
       <div className="cg c11">
-        <div className="card"><h3>Revenue by FY (Rs. Lakhs)</h3><div className="cs">Monthly revenue per financial year (FY total shown with label) · April → {months[months.length - 1]} · live years by {basis === 'invoice' ? 'Invoice date' : 'session start date'}; earlier years fixed from the Excel report</div><ChartBox config={revCfg} title="Revenue" how={`Price (INR) by ${basis === 'invoice' ? 'Invoice date' : 'session start'} month (cancelled / lost / on hold excluded). Earlier years are fixed report figures with no records to list.`} listFor={(lb, ds) => finList('rev', lb, ds)} className="ch-wrap tall" /></div>
+        <div className="card"><h3>Revenue by FY (Rs. Lakhs)</h3><div className="cs">Monthly revenue per financial year (FY total shown with label) · April → {months[months.length - 1]} · live years by {basis === 'invoice' ? 'Invoice date' : 'session start date'}; earlier years fixed (Apr–Oct Excel report, Nov–Mar Engagement Master)</div><ChartBox config={revCfg} title="Revenue" how={`Price (INR) by ${basis === 'invoice' ? 'Invoice date' : 'session start'} month (cancelled / lost / on hold excluded). Earlier years are fixed report figures with no records to list.`} listFor={(lb, ds) => finList('rev', lb, ds)} className="ch-wrap tall" /></div>
         <div className="card"><h3>Invoices &amp; Vouchers Raised</h3><div className="cs">Count per month by financial year (FY total shown with label)</div><ChartBox config={invCfg} title="Invoices" how="Sessions whose Invoice date falls in that month (one invoice can cover several sessions). Earlier years are fixed report figures." listFor={(lb, ds) => finList('inv', lb, ds)} className="ch-wrap tall" /></div>
       </div>
 

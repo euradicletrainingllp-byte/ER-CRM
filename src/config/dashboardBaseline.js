@@ -127,21 +127,23 @@ export const SALES_CLIENT_ENGAGEMENT = [
 export const SALES_NEW_CLIENTS = { 2020: 2, 2021: 2, 2022: 7, 2023: 10, 2024: 9, 2025: 8 };
 
 /* ─────────────────────────────── FINANCE ─────────────────────────────── */
-// Earlier years as recorded in the Finance sheet (April → October only). FY 2026-27 onward is live.
-export const FIN_REVENUE_L = {          // Revenue (₹ Lakhs) per month, Apr → Oct
-  2023: [10.78, 10.18, 28.98, 19.24, 10.51, 12.42, 9],
-  2024: [17.8, 16.4, 4.85, 4.16, 6, 8.75, 0],
-  2025: [8.86, 4.52, 11.98, 16.75, 8.94, 13.92, 8.72],
+// Earlier years: Apr → Oct as recorded in the Finance sheet; Nov → Mar (and FY 2024-25 October, recorded as 0)
+// filled from the Engagement Master by Invoice date, excl. cancelled (ER_Engagement_Master_CLEAN, 19 Nov 2026).
+// FY 2026-27 onward is live.
+export const FIN_REVENUE_L = {          // Revenue (₹ Lakhs) per month, Apr → Mar
+  2023: [10.78, 10.18, 28.98, 19.24, 10.51, 12.42, 9, 15.23, 13.67, 2.96, 5.65, 2.4],
+  2024: [17.8, 16.4, 4.85, 4.16, 6, 8.75, 7.52, 7.98, 13.19, 5.66, 2.25, 3.96],
+  2025: [8.86, 4.52, 11.98, 16.75, 8.94, 13.92, 8.72, 21.59, 16.2, 9.86, 13.87, 10.08],
 };
-export const FIN_INVOICES = {           // Invoices / vouchers raised per month, Apr → Oct
-  2023: [11, 10, 24, 14, 10, 10, 9],
-  2024: [8, 8, 2, 2, 6, 8, 0],
-  2025: [7, 7, 6, 9, 11, 12, 9],
+export const FIN_INVOICES = {           // Invoices / vouchers raised per month, Apr → Mar
+  2023: [11, 10, 24, 14, 10, 10, 9, 8, 10, 3, 7, 4],
+  2024: [8, 8, 2, 2, 6, 8, 7, 5, 10, 4, 2, 5],
+  2025: [7, 7, 6, 9, 11, 12, 9, 9, 15, 9, 10, 8],
 };
-export const FIN_BILLING_DAYS = {       // Billing days per month, Apr → Oct
-  2023: [11, 10, 24, 23, 18.5, 18, 18.5],
-  2024: [14.5, 32.5, 0.75, 5.5, 10.5, 12.5, 7],
-  2025: [7, 9, 6.5, 19, 13.75, 12.5, 10],
+export const FIN_BILLING_DAYS = {       // Billing days per month, Apr → Mar
+  2023: [11, 10, 24, 23, 18.5, 18, 18.5, 20.5, 22, 2.5, 6.25, 3],
+  2024: [14.5, 32.5, 0.75, 5.5, 10.5, 12.5, 7, 7.5, 14.25, 3, 1.75, 3.75],
+  2025: [7, 9, 6.5, 19, 13.75, 12.5, 10, 15.75, 15.5, 7.25, 10, 10.5],
 };
 export const FIN_AVG_PER_DAY = [         // Avg. Billing per Day — full financial years
   { fy: 2023, revenueL: 139.96, days: 231.75 },

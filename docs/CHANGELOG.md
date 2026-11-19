@@ -336,3 +336,24 @@
 - Fix: Bulk Upload reads the calendar fresh from Excel when opened (force), so rows deleted directly in Excel show as New instead of matching the stale cached copy.
 - Updates view shows a 'Changed fields: <field> <count>' summary to spot a column that differs on every row.
 - Added docs/office-scripts/FillMissingIndex.ts: fills blank EC Index cells with highest+1 (plain numbers). Manual: create the script in Excel Online; optionally add "Run script" after "Add a row" in ENGAGEMENT_CRUD (create), before the sort script. Root cause to fix: ENGAGEMENT_CRUD "Add a row" not mapping Index = triggerBody()?['Index'].
+
+## 2026-11-19 — Solution dashboard review (18 Nov feedback)
+- Solutioning: removed KPI tiles Top Line of Service + IP Reuse (KPIs now one row of 5); removed Portfolio Mix chart; What We Win drops Avg/Total value columns.
+- Solutioning: old Pace chart replaced by shared "Monthly Proposal Status & Pace" (Solution Value).
+- New src/components/ProposalStatusPace.jsx (used by Sales + Solutioning): count = latest version per Proposal ID only (V1 replaced by V2 not counted as lost); value chart shows replaced-version price drop as orange "Commercial loss (revised)", not Lost.
+- proposalData.js: buildProposalLines(solutions, { industryOf }) — blank Industry falls back to Client Directory, then config; new isNA() + line.solNA.
+- Data Gaps: Solution Value marked NA / N/A / Not applicable is not a gap; card shows "n marked NA".
+- Files: SolLiveDashboard.jsx, SalesLiveDashboard.jsx, ProposalStatusPace.jsx, proposalData.js, erdDashboard.css. Backup: backups/sol-dash-*.tgz
+- Manual setup pending: none. Engine unchanged for Founder's Desk / action items (replaced versions still pipeline 'lost' there).
+- 2026-11-19 (fix): Commercial loss now only for multi-version proposals whose latest version is Won = first version − won version, in the won month. Single-version lost = normal Lost (count + full value); replaced versions of lost / in-process proposals add nothing. ProposalStatusPace takes fullKey (bdFull / solFull).
+- 2026-11-19 (fix 2): ProposalStatusPace now takes { records, revised } from proposalPace() (Sales) / itemPace() (Solutioning). Single-version Lost proposal = Lost count + full value. Solutioning chart renamed "Monthly Solution Items Status & Pace" — counts unique solution items (status = latest version carrying the item; dropped topic = Lost), value = Solution Value; no proposal report baseline for last FY.
+- 2026-11-19 (fix 3): Commercial loss bar colour orange → dark red (#A61B1B).
+- 2026-11-19 (fix 4): Sales — Proposal Funnel (YTD) and KPIs Total Proposals / Won Value / In-Process Value use the same rule (each proposal once by latest version; single-version Lost = Lost; commercial loss slice, dark red, only for revised proposals that were Won).
+- 2026-11-19 (fix 5): Commercial loss (Sales) falls back to Solution Value when a version has no BD Proposal Value (older lines), so revised won proposals show in every month, not only recent ones.
+- 2026-11-19 (fix 6): itemPace commercial loss — a topic on 2+ rows is paired row by row (1st with 1st); was summing first-version rows against each won row (P.ID 61 / 62 inflated). Checked against Solutioning_Tracker.xlsx.
+- 2026-11-19 (fix 7): Status & Pace charts — tooltip on hover anywhere in a month (index mode, zero values hidden); commercial loss bar min 6px so small losses are visible.
+- 2026-11-19 (fix 8): ChartBox tap opens the exact segment tapped (was first series in index-hover charts → always Won). Status & Pace: segment labels hidden when segment < 16px (no overlapping labels).
+- 2026-11-19 (fix 9): Commercial-loss drill rows show the loss amount (not the won value); segment-label fit uses y-scale pixels (labels had vanished during animation).
+- 2026-11-19 (fix 10): Status & Pace — segments under 16px get a side label (right of bar; left for last month) joined by a leader line, spaced to avoid overlap; inline sideLabels plugin in ProposalStatusPace.jsx.
+- 2026-11-19 (finance): FIN_REVENUE_L / FIN_INVOICES / FIN_BILLING_DAYS extended to Apr→Mar — Nov–Mar and FY24-25 Oct (was 0) filled from ER_Engagement_Master_CLEAN by Invoice date; earlier-year Oct/Nov bars now show. Labels updated.
+- 2026-11-19 (finance): FY × month charts show April → last month with data in any year (full Apr–Mar when present), min April → current month; FY totals add every month shown.

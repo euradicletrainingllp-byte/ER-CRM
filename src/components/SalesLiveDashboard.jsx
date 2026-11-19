@@ -15,15 +15,16 @@
  */
 import { useMemo, useState, useEffect } from 'react';
 import {
-  ChartBox, Kpi, SourceNote, NV, TL, GD, GN, PU, RD, bOpts, dlInr, dlStack, dlStackInr, dlInrH, fmtInr, fmtShort, inrAxis, heightFor,
+  ChartBox, Kpi, SourceNote, NV, TL, GD, GN, PU, RD, bOpts, dlInr, dlInrH, fmtInr, fmtShort, inrAxis, heightFor,
   CURRENT_FY, fyStartOf, fyLong, fyTiny, todayISO, clean, keyOf,
 } from './erdCharts.jsx';
-import { buildProposalLines, monthSlot, uniqueProposals } from './proposalData.js';
+import { buildProposalLines, monthSlot } from './proposalData.js';
 import KpiListModal, { egItem, propItem, inrS } from './KpiListModal.jsx';
 import { getPOs, peekPOs, poConfigured, poUsage, poStatus } from '../services/poApi.js';
 import SalesClients from './SalesClients.jsx';
+import ProposalStatusPace, { proposalPace } from './ProposalStatusPace.jsx';
 
-import { LIVE_FROM_FY, SOL_BASELINE, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
+import { LIVE_FROM_FY, SALES_QUARTERLY_REVENUE, SALES_TARGETS, SALES_CLIENT_ENGAGEMENT, SALES_NEW_CLIENTS } from '../config/dashboardBaseline.js';
 
 const MONTHS = ['April', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
 const monthIdx = iso => (+iso.slice(5, 7) + 8) % 12;          // Apr = 0 … Mar = 11
@@ -49,6 +50,7 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   // Value = BD Proposal Value only (same as the BD Tracker — no fallback to Solution Values)
   const allLines = useMemo(() => buildProposalLines(solutions).map(p => ({ ...p, value: p.bdValue })), [solutions]);
   const proposals = useMemo(() => allLines.filter(p => p.fy >= LIVE_FROM_FY), [allLines]);
+  const salesPace = useMemo(() => proposalPace(allLines, 'bdFull'), [allLines]);
   const curProps = useMemo(() => proposals.filter(p => p.fy === CURRENT_FY), [proposals]);
   const [drill, setDrill] = useState(null);
   const show = (title, items, how) => setDrill({ title, items, how });
@@ -61,9 +63,13 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
     .map(e => ({ ...e, fy: fyStartOf(e.startDate), price: Number(e.price) || 0 })), [engagements]);
 
   /* ── Proposal status by month (current FY) ── */
+  // Same rule as Monthly Proposal Status & Pace: each proposal once (latest version); commercial loss only for revised proposals that were Won
+  const curLatest = useMemo(() => salesPace.records.filter(p => p.fy === CURRENT_FY), [salesPace]);
+  const curRev = useMemo(() => salesPace.revised.filter(p => p.fy === CURRENT_FY), [salesPace]);
   const propStatus = useMemo(() => {
-    const rows = MONTHS.map(month => ({ month, n: 0, wonC: 0, lostC: 0, ipC: 0, wonV: 0, lostV: 0, ipV: 0, wonCl: new Set(), ipCl: new Set() }));
-    curProps.forEach(p => {
+    const rows = MONTHS.map(month => ({ month, n: 0, wonC: 0, lostC: 0, ipC: 0, wonV: 0, lostV: 0, ipV: 0, revV: 0, wonCl: new Set(), ipCl: new Set() }));
+    curRev.forEach(p => { rows[monthSlot(p)].revV += p.value; });
+    curLatest.forEach(p => {
       const r = rows[monthSlot(p)];
       r.n++;
       if (p.pipeline === 'closed') { r.wonC++; r.wonV += p.value; if (p.client) r.wonCl.add(p.client); }
@@ -72,10 +78,10 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
     });
     const nowIdx = monthIdx(todayISO);
     return rows.filter((r, i) => r.n > 0 || i <= nowIdx);
-  }, [curProps]);
+  }, [curLatest, curRev]);
   const tot = useMemo(() => propStatus.reduce((t, r) => ({
-    n: t.n + r.n, wonC: t.wonC + r.wonC, lostC: t.lostC + r.lostC, ipC: t.ipC + r.ipC, wonV: t.wonV + r.wonV, lostV: t.lostV + r.lostV, ipV: t.ipV + r.ipV,
-  }), { n: 0, wonC: 0, lostC: 0, ipC: 0, wonV: 0, lostV: 0, ipV: 0 }), [propStatus]);
+    n: t.n + r.n, wonC: t.wonC + r.wonC, lostC: t.lostC + r.lostC, ipC: t.ipC + r.ipC, wonV: t.wonV + r.wonV, lostV: t.lostV + r.lostV, ipV: t.ipV + r.ipV, revV: t.revV + r.revV,
+  }), { n: 0, wonC: 0, lostC: 0, ipC: 0, wonV: 0, lostV: 0, ipV: 0, revV: 0 }), [propStatus]);
 
   /* ── Revenue from the Engagement Calendar ── */
   const revenue = useMemo(() => {
@@ -177,43 +183,11 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
   const ceTot = clientYears.rows.reduce((t, r) => ({ newC: t.newC + r.newC, total: t.total + r.total }), { newC: 0, total: 0 });
 
   /* ── Chart configs ── */
-  /* Proposal pace (moved from Solutioning, 7 Nov 2026): running total this FY vs last FY — BD Tracker lines, else the fixed report */
-  const pace = useMemo(() => {
-    const prevFy = CURRENT_FY - 1, prevL = proposals.filter(p => p.fy === prevFy);
-    const prev = Array(12).fill(0); let fromReport = false;
-    if (prevL.length) prevL.forEach(p => { prev[monthSlot(p)] += 1; });
-    else if (SOL_BASELINE[prevFy]?.monthly) { SOL_BASELINE[prevFy].monthly.forEach((v, i) => { prev[i] = v; }); fromReport = true; }
-    const cur = Array(12).fill(0); curProps.forEach(p => { cur[monthSlot(p)] += 1; });
-    const cum = a => a.reduce((o, v, i) => { o.push((o[i - 1] || 0) + v); return o; }, []);
-    return { cur: cum(cur), prev: cum(prev), prevName: `${fyTiny(prevFy)}${fromReport ? ' (report)' : ''}`, any: prev.some(Boolean) };
-  }, [proposals, curProps]);
-
-  const propCfgs = useMemo(() => ['count', 'value'].map(m => ({ m, cfg: { type: 'bar',
-    data: { labels: propStatus.map(r => r.month), datasets: [
-      { label: 'Won', data: propStatus.map(r => (m === 'count' ? r.wonC : r.wonV)), backgroundColor: GN, borderRadius: 3 },
-      { label: 'Lost', data: propStatus.map(r => (m === 'count' ? r.lostC : r.lostV)), backgroundColor: RD, borderRadius: 3 },
-      { label: 'In Process', data: propStatus.map(r => (m === 'count' ? r.ipC : r.ipV)), backgroundColor: GD, borderRadius: 3 },
-    ] },
-    options: { ...(m === 'value' ? inrAxis(bOpts(true, false), 'y') : bOpts(true, false)), plugins: { legend: { position: 'top' }, datalabels: m === 'count' ? dlStack() : dlStackInr(),
-      tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${m === 'count' ? ctx.raw : fmtInr(ctx.raw)}` } } } },
-  } })).map(c => {
-    if (c.m !== 'count') return c;
-    const idx = propStatus.map(r => MONTHS.indexOf(r.month)), last = idx.length - 1;
-    const ln = (label, data, color, dash) => ({ type: 'line', label, data, yAxisID: 'y1', borderColor: color, backgroundColor: color, borderWidth: dash ? 2 : 2.5, borderDash: dash ? [6, 4] : undefined,
-      pointRadius: dash ? 0 : 3, tension: 0.25, cubicInterpolationMode: 'monotone', order: 0,
-      datalabels: { display: x => x.dataIndex === last, align: 'top', color, font: { size: 11, weight: '800' } } });
-    const ds = [...c.cfg.data.datasets, ln(`${fyTiny(CURRENT_FY)} running total`, idx.map(i => pace.cur[i]), TL)];
-    if (pace.any) ds.push(ln(`${pace.prevName} running total`, idx.map(i => pace.prev[i]), '#94A3B8', true));
-    const o = c.cfg.options;
-    return { m: c.m, cfg: { ...c.cfg, data: { ...c.cfg.data, datasets: ds }, options: { ...o, scales: { ...o.scales,
-      y1: { position: 'right', beginAtZero: true, stacked: false, grid: { display: false }, ticks: { precision: 0 }, title: { display: true, text: 'running total', font: { size: 11 } } } } } } };
-  }), [propStatus, pace]);
-
   const funnelCfg = useMemo(() => {
-    const colors = [GN, RD, GD];
+    const colors = [GN, RD, GD, '#A61B1B'];
     const pc = (v, all) => (all > 0 ? ((v / all) * 100).toFixed(1) : '0.0');
     return { type: 'doughnut',
-      data: { labels: ['Won', 'Lost', 'In Process'], datasets: [{ data: [tot.wonV, tot.lostV, tot.ipV], backgroundColor: colors, borderWidth: 2, borderColor: '#fff' }] },
+      data: { labels: ['Won', 'Lost', 'In Process', 'Commercial loss (revised)'], datasets: [{ data: [tot.wonV, tot.lostV, tot.ipV, tot.revV], backgroundColor: colors, borderWidth: 2, borderColor: '#fff' }] },
       options: { responsive: true, maintainAspectRatio: false, cutout: '52%', layout: { padding: { top: 28, bottom: 52, left: 40, right: 40 } },
         plugins: {
           legend: { position: 'top', labels: { padding: 12, font: { size: 12 }, generateLabels: chart => {
@@ -281,9 +255,9 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       {/* ═══════════ 1 · BD TRACKER ═══════════ */}
       <div className="s-band"><span className="s-band-tag bd">BD Tracker</span><span className="s-band-txt">Proposals, funnel &amp; open pipeline</span></div>
       <div className="kg g5">
-        <Kpi tone="tl" label="Total Proposals (YTD)" list={() => curProps.map(p => propItem(p))} value={tot.n} sub={`${uniqueProposals(curProps)} unique proposals${tot.n > uniqueProposals(curProps) ? ` · ${tot.n - uniqueProposals(curProps)} revisions` : ''}`} how="Proposal lines (Proposal ID + version) dated in this FY — month from Date of Discussion, else BD Month, else submission dates; each revision counts again." />
-        <Kpi tone="gn" label="Won Value (YTD)" list={() => curProps.filter(p => /won/i.test(p.status)).map(p => propItem(p))} value={fmtInr(tot.wonV)} sub={`${tot.wonC} proposals won`} tag="Closed" tagTone="up" how="Sum of BD Proposal Value of this FY's lines with BD Status = Won (BD value only — Solution values not used)." />
-        <Kpi tone="gd" label="In-Process Value" list={() => curProps.filter(p => /in.?process/i.test(p.status)).map(p => propItem(p))} value={fmtInr(tot.ipV)} sub={`${tot.ipC} proposals active`} tag="In negotiation" how="Sum of BD Proposal Value of this FY's lines still In Process in the BD Tracker." />
+        <Kpi tone="tl" label="Total Proposals (YTD)" list={() => curLatest.map(p => propItem(p))} value={tot.n} sub={`unique proposals${curProps.length > tot.n ? ` · ${curProps.length - tot.n} revised versions not counted again` : ''}`} how="Proposals dated in this FY, each counted once by its latest version — month from Date of Discussion, else BD Month, else submission dates." />
+        <Kpi tone="gn" label="Won Value (YTD)" list={() => curLatest.filter(p => p.pipeline === 'closed').map(p => propItem(p))} value={fmtInr(tot.wonV)} sub={`${tot.wonC} proposals won`} tag="Closed" tagTone="up" how="Sum of BD Proposal Value of this FY's lines with BD Status = Won (BD value only — Solution values not used)." />
+        <Kpi tone="gd" label="In-Process Value" list={() => curLatest.filter(p => p.pipeline === 'process').map(p => propItem(p))} value={fmtInr(tot.ipV)} sub={`${tot.ipC} proposals active`} tag="In negotiation" how="Sum of BD Proposal Value of this FY's lines still In Process in the BD Tracker." />
         <Kpi tone="nv" label={`${curTarget?.q || `Q${curQ + 1}`} Target Achieved`} list={() => sessions.filter(e => e.fy === CURRENT_FY && Math.floor(((+e.startDate.slice(5, 7) + 8) % 12) / 3) === curQ).map(e => egItem(e))} value={curTarget?.target ? `${curTarget.pct.toFixed(1)}%` : '--'}
              sub={curTarget?.target ? `of ${fmtInr(curTarget.target)} ${curTarget.q} target` : 'no target set for this quarter'} how="Engagement Calendar Price (INR) of sessions starting this quarter (cancelled / lost / on hold excluded) ÷ the quarter's revenue target." />
         <Kpi tone="pu" label={`${fyTiny(CURRENT_FY)} Target Achieved`} list={() => sessions.filter(e => e.fy === CURRENT_FY).map(e => egItem(e))} value={fyTarget ? `${((fyAchieved / fyTarget) * 100).toFixed(1)}%` : '--'}
@@ -291,18 +265,12 @@ export default function SalesLiveDashboard({ solutions, engagements, refreshing 
       </div>
 
       <div className="cg c1">
-        <div className="card"><h3>Monthly Proposal Status &amp; Pace — {curName}</h3><div className="cs">Won vs Lost vs In-Process, stacked per month — Count and Value · Count lines = running total of proposals, this FY vs last FY (same months)</div>
-          <div className="cv-pair">
-            {propCfgs.map(c => (
-              <div className="cv-col" key={c.m}><div className="cv-col-title">{c.m === 'count' ? '📊 Count' : '₹ Value'}</div><ChartBox config={c.cfg} title="Proposal status" how="Proposal lines (ID + version) of this FY in that month, by BD Status: Won / Closed / Confirmed = Won; Lost / Dropped / Rejected (or replaced by a later version) = Lost; else In Process. Value = BD Proposal Value." listFor={(lb, ds) => curProps.filter(p => MONTHS[monthSlot(p)] === lb && p.pipeline === stOf(ds)).sort((a, b) => b.value - a.value).map(p => propItem(p))} className="ch-wrap tall" /></div>
-            ))}
-          </div>
-        </div>
+        <ProposalStatusPace {...salesPace} valueName="BD Proposal Value" itemOf={p => propItem(p)} />
       </div>
 
       <div className="cg c12">
-        <div className="card flex-card"><h3>Proposal Funnel (YTD)</h3><div className="cs">Won vs Lost vs In-Process by value</div>
-          {tot.wonV + tot.lostV + tot.ipV > 0 ? <ChartBox config={funnelCfg} title="Proposal funnel" how="BD Proposal Value of this FY's proposal lines by status." listFor={lb => curProps.filter(p => p.pipeline === stOf(lb)).sort((a, b) => b.value - a.value).map(p => propItem(p))} className="ch-wrap s-fill" /> : <div className="erd-empty">No proposal values in {curName} yet</div>}
+        <div className="card flex-card"><h3>Proposal Funnel (YTD)</h3><div className="cs">Won vs Lost vs In-Process by value · each proposal once</div>
+          {tot.wonV + tot.lostV + tot.ipV + tot.revV > 0 ? <ChartBox config={funnelCfg} title="Proposal funnel" how="BD Proposal Value of this FY's proposals (latest version of each, counted once) by status. A single-version lost proposal = Lost at full value. Commercial loss (revised) = only for revised proposals that were Won: first version sent − won version." listFor={lb => (/commercial/i.test(lb) ? curRev : curLatest.filter(p => p.pipeline === stOf(lb))).slice().sort((a, b) => b.value - a.value).map(p => propItem(p))} className="ch-wrap s-fill" /> : <div className="erd-empty">No proposal values in {curName} yet</div>}
         </div>
         <div className="card flex-card"><h3>Expected Major Pipeline</h3>
           <div className="cs">All {pipelineAll.length} proposals In Process in the BD Tracker (latest version) · {fmtInr(pipeline.reduce((s, p) => s + p.value, 0))} open value{pipeNoValue.length ? ` · ${pipeNoValue.length} without a value` : ''}</div>
