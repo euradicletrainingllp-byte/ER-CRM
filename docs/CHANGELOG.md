@@ -358,3 +358,61 @@
 - 2026-11-19 (finance): FIN_REVENUE_L / FIN_INVOICES / FIN_BILLING_DAYS extended to Apr→Mar — Nov–Mar and FY24-25 Oct (was 0) filled from ER_Engagement_Master_CLEAN by Invoice date; earlier-year Oct/Nov bars now show. Labels updated.
 - 2026-11-19 (finance): FY × month charts show April → last month with data in any year (full Apr–Mar when present), min April → current month; FY totals add every month shown.
 - 2026-11-19 (client dir): Not in directory → new "Fix spelling" button (admin): one click + confirm rewrites the client-name cell of every tracker row under that name to the chosen directory name (EC, BD/Solution, Ops, Content Dev, Leads, Vendors, PO; tasks skipped). Reuses DirectoryCleanup fix path (new export fixNameRows). Link (alias) kept as secondary.
+
+## 2026-11-22 — Generic Admin CRUD flow
+- New `src/services/adminApi.js`: one flow for every table in Admin Panel.xlsx (`{action, table, keyColumn, keyValue, row}`), table registry `ADMIN_TABLES` (permissions + planned departments/features/notifications/settings).
+- `permissionsApi.js`: uses ADMIN_CRUD when configured; save sends only diffs (update changed users, create new, delete removed; skips columns missing in Excel). Falls back to old Get/Save Permissions flows while ADMIN_CRUD is "".
+- `config/powerAutomate.js`: new `ADMIN_CRUD` key (empty).
+- Test: `test/adminApi.test.js`.
+- Pending: build flow per project doc `flow-admin-crud-generic.md`, paste URL into ADMIN_CRUD, test with live data.
+
+## 2026-11-22 — Departments (Admin Panel)
+- Admin Panel.xlsx: new DepartmentTable (DeptID, Department, Description, Head Email, Active) and DeptMemberTable (MemberID, Email, Name, DeptID, Department, Is Primary, Added On) — one row per user × department.
+- New `src/services/departmentsApi.js`, `src/components/admin/DepartmentsTab.jsx`; AdminPage gets a "Departments" tab (add/rename/deactivate/delete departments, tick members, ★ primary). Saves instantly via ADMIN_CRUD. CSS in admin.css (ad-dp-*).
+- Tests: `test/departmentsApi.test.js`.
+- Pending: add the two tables to the live workbook, paste ADMIN_CRUD URL.
+
+## 2026-11-22 — Ops Checklist v2: flow wiring
+- `adminApi.js`: shared `crudPost(flowKey, body)` + exported `clean` (generic CRUD contract for any workbook flow).
+- New `src/services/opsV2Api.js` (StepTable/StepID, EngagementTable/EC Index, OpsTaskTable/TaskID; skips Excel-calculated columns on write). `powerAutomate.js`: `OPS_V2_CRUD` key (empty).
+- Test: `test/opsV2Api.test.js`. Migration paste file: `Claude outputs/ops-checklist-v2/Tasks_import.xlsx` (512 rows).
+- Pending: "Ops Checklist v2 CRUD" flow (Save As of Admin CRUD, File changed) → paste URL; EngagementTable calc formulas; keep old sheet until new Ops page is live.
+
+## 2026-11-22 — Flow test script
+- New `scripts/test-crud-flow.mjs` + `npm run test:flow -- ops|admin`: live check of OPS_V2_CRUD / ADMIN_CRUD (get each table + key column, unknown table/action → 400, ops: one write + read-back + restore on first task's Comments).
+
+## 2026-11-22 — Ops Checklist v2 page (/ops-v2)
+- New page: header + 5 KPI tiles (programs in prep, open, overdue, due in 7 days, at-risk), program list (left), timeline table (right) with Applies/NA toggle, phase groups, "+ Add step here" (CUS-###, Seq between neighbours), expandable step details (owners, waiting on, TAT, evidence, comments), "My tasks" tab.
+- Timeline: Seq order; due = previous applicable step's due (or Completed On) + TAT; first step from Checklist Created On; End-anchored steps not before End Date; NA removes TAT. At-risk = open pre-program step due after Start Date. Recalculated dates are written back to OpsTaskTable.
+- "+ New checklist": pick an upcoming EC engagement → EngagementTable row + tasks from Step Library (non-matching Mode/Offering → NA). Owners = all members of Owner Dept (DeptMemberTable).
+- Emails via CRM Notify: on checklist/custom step create (per owner) and on Done (next step owners + Ops Owner Emails).
+- Files: pages/OpsChecklistV2.jsx, services/opsV2Engine.js, services/opsV2Notify.js, styles/opsV2.css, test/opsV2Engine.test.js, docs/ops-checklist-v2.md; App.jsx, Sidebar.jsx, TopBar.jsx (route + nav). Old /ops untouched. Backup: backups/ops-v2-page-*.tgz.
+- Pending: run `npm run test:flow -- ops`; build "Ops Nudges" PA flow (docs/ops-checklist-v2.md); visual check at 1440px.
+- Fix (16:16): v2 passed a Date object to TopBar's last-refreshed label → now a time string like other pages.
+
+## 2026-11-22 — Ops Checklist v2: Step Library + Lists editors
+- New "Step Library" tab (Ops edit access): inline edit of steps (Seq, name, dept, TAT, anchor, mode, offering, required, active), details drawer (what to do, done when, default owners, remind/escalate), "+ Add step here" (OPS-###), "Also update open checklists" toggle (pushes name/phase/Seq/TAT/owners to not-done tasks of active programs + recalculates dates; new steps added to fitting programs).
+- Lists sub-tab: Phase, Offering, Mode, Waiting On — edit, reorder, deactivate, add (ListTable). Waiting On picker in the timeline now uses the list.
+- Owner rule: Step Library default owners first, else all Owner Dept members.
+- Files: components/ops/StepLibrary.jsx, components/ops/OwnerChips.jsx (new); pages/OpsChecklistV2.jsx, services/opsV2Engine.js, services/opsV2Api.js (lists), styles/opsV2.css, test/opsV2Engine.test.js, scripts/test-crud-flow.mjs. Backup: backups/ops-v2-library-*.tgz.
+- Manual: paste `Claude outputs/ops-checklist-v2/ListTable_import.xlsx` into Operations Checklist.xlsx as table ListTable; add ListTable to OPS_V2_CRUD valid tables; `npm run test:flow -- ops`.
+- Fix (16:32): ListTable read tried once per page load, no retry (502 from OPS_V2_CRUD until ListTable exists).
+
+## 2026-11-22 16:39 — Ops v2: TAT counted from program start, multiple departments
+- TAT = days before Start Date (pre-program) / after End Date (End anchor); replaces chaining from the previous step. At risk = open pre-program step overdue before start; new "short lead" flag. Saved dates resynced once on load for active programs.
+- Owner Dept holds several departments ("A; B") — chips picker in Step Library table, step drawer and "+ Add step here"; owners = members of all listed depts unless default owners are set.
+- Files: services/opsV2Engine.js, components/ops/OwnerChips.jsx (DeptChips), components/ops/StepLibrary.jsx, pages/OpsChecklistV2.jsx, styles/opsV2.css, test/opsV2Engine.test.js. Backup: backups/ops-v2-tat-depts-*.tgz.
+- Manual: Step Library TAT values were durations (1–5 days) — re-enter as days before start (Offset Days column now unused). If Owner Dept has an Excel data-validation list, allow multiple values or remove the validation.
+- Fix (16:49): Ops v2 compact layout — KPI tiles one slim row (kpi-compact, 5 cols), smaller inputs/rows, .ov2-prefixed overrides (index.css loads after page CSS); visible "+ Add step" button in Step Library toolbar; "+ Add step here" rows always faintly visible.
+
+## 2026-11-22 17:30 — Old Ops Checklist removed; v2 is /ops
+- Removed: old page (moved to backups/old-ops-checklist/OpsChecklist.jsx), api.js ops functions (get/add/update/deleteOpsRow, rawOpsRowFor), OPS_CHECKLIST_CRUD URL + table name, OPS_RULES, Ops→EC finance sync (syncOpsFinanceToEC, ecToOcFinance, ecPaymentStatus, suggestEcIndex) and the Finance save's Ops copy/rollback, BD checklist copy to Ops rows.
+- New services/opsV2Data.js (program summaries). Switched to v2: Dashboard readiness, Founder's Desk, actionItems (open/completed steps, upcoming deliveries), Client/Consultant 360, Directory Cleanup, Finance (invoice owner from "Invoice raised" step, read-only), EC "Add to Ops Checklist" (creates v2 checklist + emails owners), tour text.
+- Routes: /ops = v2 page, /ops-v2 → /ops; one sidebar entry. BD "Ops Checklist" ticks (Solution/EC columns) kept.
+- Tests: test/opsV2Data.test.js. Backup: backups/remove-old-ops-*.tgz.
+- Manual: delete the OPS_CHECKLIST_CRUD flow; sheet "Operations checklist" (Table2) can be archived/removed from Operations Checklist.xlsx.
+
+## 2026-11-22 17:15 — Ops v2: signed TAT
+- TAT "2" (or "-2") = 2 days before the anchor date (Start; End for End-anchored steps), "+2" = 2 days after, "0" = on the day. Stored as text "2" / "+2". Inputs accept the sign and show "2d before start" / "+2d after start"; invalid values rejected.
+- Files: services/opsV2Engine.js (parseTat, tatOffset, fmtTat, tatLabel, isValidTat), pages/OpsChecklistV2.jsx, components/ops/StepLibrary.jsx, tests. .gitignore: backups/, Feedback 17th November/.
+- Manual: format the "TAT (days)" column as Text in StepTable and OpsTaskTable (otherwise Excel turns "+2" into 2). Post-program steps need "+N" (e.g. invoice "+1" with Anchor End).

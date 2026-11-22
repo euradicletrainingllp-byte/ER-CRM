@@ -10,3 +10,7 @@ Claude outputs/
 Thumbs.db
 .vscode/
 *.log
+
+# Local code backups and feedback notes (kept on disk, not in git)
+backups/
+Feedback 17th November/

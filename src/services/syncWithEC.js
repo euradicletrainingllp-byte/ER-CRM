@@ -1,43 +1,11 @@
 /**
- * EURADICLE CRM — Ops Checklist finance → Engagement Calendar
- *
- * When Invoice / Payment fields are edited in the Ops Checklist, the matching
- * Engagement Calendar row (same Index) gets the Invoice date, Payment status
- * and Received date. This is the only automatic link left — the bulk
- * "Sync with EC" was removed on 2026-10-07 (see addToTrackers.js).
+ * EURADICLE CRM — Finance Tracker → Engagement Calendar writes (per Index, one at a time).
+ * The old Ops Checklist finance copy was removed with the old checklist on 2026-11-22.
  */
 
-import { getEngagements, updateEngagementRow, patchEngagementCaches, isoToExcelSerial, ecContractFields, updateOpsRow, readTrackerFresh, EC_EXTRA_COLS, ecExtraFields } from './api.js';
+import { getEngagements, updateEngagementRow, patchEngagementCaches, isoToExcelSerial, ecContractFields, EC_EXTRA_COLS, ecExtraFields } from './api.js';
 import { gstForExcel } from './gstRule.js';
 
-// ─── Ops Checklist Finance → Engagement Calendar (live, per edit) ────────────
-
-/**
- * Ops Checklist finance field → Engagement Calendar field.
- * Only fields that have a matching EC column are synced.
- * (Invoice Status, Invoice POC and Invoice Comments have no EC column.)
- */
-export const OPS_FINANCE_TO_EC = {
-  invoiceActualDate: 'invoice',       // OC 'Actual Gen. Date'   → EC 'Invoice' (Invoice Date)
-  invoiceGenerated:  'payment',       // OC 'Invoice Status'     → EC 'Payment' (Payment Status) — see ecPaymentStatus
-  paymentReceived:   'payment',       // OC 'Payment Received'   → EC 'Payment' (Payment Status) — see ecPaymentStatus
-  paymentActualDate: 'receivedDate',  // OC 'Actual Payout Date' → EC 'Received Date'
-};
-
-/**
- * EC Payment Status derived from the OC finance state (priority order):
- *   1. Payout date entered          → 'Received'
- *   2. Invoice Status Raised        → 'Invoice Raised'
- *      Invoice Status Not Raised    → 'Invoice Not Raised'
- *   3. otherwise                    → OC 'Payment Received' value as-is
- */
-export function ecPaymentStatus(oc) {
-  if (String(oc.paymentActualDate ?? '').trim()) return 'Received';
-  const inv = String(oc.invoiceGenerated ?? '').trim();
-  if (inv === 'Raised')     return 'Invoice Raised';
-  if (inv === 'Not Raised') return 'Invoice Not Raised';
-  return oc.paymentReceived ?? '';
-}
 
 /**
  * Builds the complete EC row body the UPDATE_ENGAGEMENT flow expects.
@@ -85,7 +53,6 @@ function ecUpdateBody(e) {
 // So writes for one Index are queued, and each one is built from the latest
 // finance values known at the moment it actually runs.
 const _ecQueue = new Map();     // Index → promise of the last queued job
-const _latestOc = new Map();    // Index → latest OC finance values (click order)
 
 function runForIndex(key, job) {
   const prev = _ecQueue.get(key) || Promise.resolve();
@@ -111,11 +78,11 @@ const sameVal = (k, a, b) =>
   : ['travelExpenses', 'gst', 'price', 'creditNoteTotal'].includes(k) ? (Number(a) || 0) === (Number(b) || 0)
   : String(a ?? '').trim() === String(b ?? '').trim();
 
-// ─── Is this EC row really the same engagement as the Ops Checklist row? ────
+// ─── Is this EC row really the same engagement as the one shown? ───────────
 const normTxt = v => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 const fmtShort = iso => { const d = isoDate(iso); return d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(2, 4)}` : '—'; };
 
-/** True when the EC row and the Ops Checklist row describe the same engagement. */
+/** True when two engagement rows (fresh EC row vs the row on screen) describe the same engagement. */
 export function ecMatchesOps(ec, oc) {
   if (!ec || !oc) return false;
   const a = normTxt(ec.company), b = normTxt(oc.company);
@@ -125,12 +92,6 @@ export function ecMatchesOps(ec, oc) {
   return sameCompany && (sameDate || sameEg);
 }
 
-/** The EC Index this Ops Checklist row should carry (same company + start date, EG ID preferred), or ''. */
-export function suggestEcIndex(oc, ecRows) {
-  const c = (ecRows || []).filter(e => ecMatchesOps(e, oc) && isoDate(e.startDate) === isoDate(oc.startDate));
-  const best = c.find(e => normTxt(e.egId) === normTxt(oc.egId)) || (c.length === 1 ? c[0] : null);
-  return best ? String(best.engagementKey ?? '').trim() : '';
-}
 
 const describeEc = ec => `"${ec.company}" (${ec.egId}, ${fmtShort(ec.startDate)})`;
 
@@ -196,36 +157,6 @@ async function writeEcAndVerify(key, ecChanges, hintDate, expect) {
   return { synced: true, row };
 }
 
-/**
- * Pushes finance changes (made in the Finance Tracker) to the matching
- * Engagement Calendar row (rows are linked by Index).
- *
- * @param {string|number} sno      S No of the Ops Checklist row (display only)
- * @param {object}        changes  OC camelCase changes just saved
- * @param {object}        fullRow  the OC row before the edit (carries engagementKey)
- * @returns {{ synced: boolean, reason?: string }}
- */
-export async function syncOpsFinanceToEC(sno, changes, fullRow) {
-  if (!Object.keys(OPS_FINANCE_TO_EC).some(k => k in changes)) {
-    return { synced: false, reason: 'no finance fields' };
-  }
-  const key = String(fullRow?.engagementKey ?? '').trim();
-  if (!key) return { synced: false, reason: 'this Ops Checklist row has no Index' };
-
-  // Merge in click order, so a later job always sees every earlier change
-  _latestOc.set(key, { ...(fullRow || {}), ...(_latestOc.get(key) || {}), ...changes });
-
-  return runForIndex(key, async () => {
-    const oc = _latestOc.get(key);
-    const ecChanges = {
-      invoice:      oc.invoiceActualDate ?? '',
-      receivedDate: oc.paymentActualDate ?? '',
-      payment:      ecPaymentStatus(oc),
-    };
-    const res = await writeEcAndVerify(key, ecChanges, oc.startDate, oc);
-    return { synced: res.synced, reason: res.reason };
-  });
-}
 
 
 // ─── Finance Tracker → Engagement Calendar (Travel, Stay & Misc / GST) ───────
@@ -237,7 +168,7 @@ export const FINANCE_EC_FIELDS = ['travelExpenses', 'gst'];
  * Saves Travel, Stay & Misc and/or GST on the Engagement Calendar row with this Index.
  * Queued with the other EC writes for the same Index, and checked against Excel.
  *
- * @param {string} engagementKey  Index shared by the Ops Checklist and EC rows
+ * @param {string} engagementKey  Engagement Calendar Index
  * @param {object} amounts        { travelExpenses?, gst? }
  * @returns {Promise<object>}     the EC row after the change
  */
@@ -279,23 +210,6 @@ export function normPayment(v) {
   return '';
 }
 
-/** EC finance values → Ops Checklist finance columns (only the ones that exist there). */
-export function ecToOcFinance(ec, changedKeys) {
-  const out = {};
-  const ch = new Set(changedKeys || EC_FINANCE_FIELDS);
-  if (ch.has('invoice'))      out.invoiceActualDate = isoDate(ec.invoice);
-  if (ch.has('receivedDate')) out.paymentActualDate = isoDate(ec.receivedDate);
-  if (ch.has('payment')) {
-    const p = normPayment(ec.payment);
-    out.invoiceGenerated = p === 'Invoice Not Raised' ? 'Not Raised'
-                         : (p === 'NA' || p === 'Pro Bono') ? 'NA'
-                         : p ? 'Raised' : '';
-    out.paymentReceived  = p === 'Received' ? 'Yes'
-                         : (p === 'NA' || p === 'Pro Bono') ? 'NA'
-                         : (p === 'Invoice Raised' || p === 'Partly Received') ? 'No' : '';
-  }
-  return out;
-}
 
 const sameFin = (k, a, b) => {
   if (['invoice', 'receivedDate', 'invoiceActualDate', 'paymentActualDate', 'travelInvoiceDate', 'travelReceivedDate'].includes(k)) return isoDate(a) === isoDate(b);
@@ -331,14 +245,11 @@ async function retryBusy(fn) {
  * Saves finance changes on one engagement.
  *  1. Reads the EC row fresh (so other people's latest edits are kept) and checks it is the same engagement.
  *  2. Writes EC = fresh row + only the changed finance fields, then confirms Excel kept them.
- *  3. Copies the matching values to the Ops Checklist row (same Index, same engagement) and confirms.
- *  4. If the Ops Checklist copy fails, the EC change is put back — both files always agree.
- * Ops Checklist rows that don't exist (or belong to another engagement) are skipped.
  *
- * @param {object} p  { ec: EC row as shown, changes: { field: value }, oc: linked Ops row or null }
- * @returns {Promise<{ ok: boolean, row?: object, reason?: string, opsCopied?: boolean, rolledBack?: boolean }>}
+ * @param {object} p  { ec: EC row as shown, changes: { field: value } }
+ * @returns {Promise<{ ok: boolean, row?: object, reason?: string }>}
  */
-export function saveEcFinance({ ec: shown, changes, oc }) {
+export function saveEcFinance({ ec: shown, changes }) {
   const key = String(shown?.engagementKey ?? '').trim();
   if (!key) return Promise.resolve({ ok: false, reason: 'this engagement has no Index' });
   return runForIndex(key, async () => {
@@ -349,7 +260,6 @@ export function saveEcFinance({ ec: shown, changes, oc }) {
       return { ok: false, reason: `Index ${key} in Excel is now ${describeEc(fresh)} — refresh the page` };
     }
     const toWrite = Object.fromEntries(Object.entries(changes).filter(([k, v]) => !sameFin(k, fresh[k], v)));
-    const before  = Object.fromEntries(Object.keys(toWrite).map(k => [k, fresh[k] ?? '']));
     let row = { ...fresh, ...toWrite };
 
     // 2 — EC write + confirm
@@ -368,46 +278,10 @@ export function saveEcFinance({ ec: shown, changes, oc }) {
       }
     }
 
-    // 3 — Ops Checklist copy (only for a row that really is this engagement)
-    const linked = oc && String(oc.engagementKey ?? '').trim() === key && ecMatchesOps(fresh, oc);
-    const ocWanted = linked ? ecToOcFinance(row, Object.keys(changes)) : {};
-    const ocChanges = linked ? Object.fromEntries(Object.entries(ocWanted).filter(([k, v]) => !sameFin(k, oc[k], v))) : {};
-    let opsCopied = false;
-    if (Object.keys(ocChanges).length) {
-      let ocError = '';
-      try {
-        await retryBusy(() => updateOpsRow(oc.sno, ocChanges, oc.engagementKey));
-        let missed = Object.keys(ocChanges);
-        for (const ms of [2500, 4000]) {
-          await wait(ms);
-          let fresh2;
-          try { fresh2 = (await readTrackerFresh('ops')).find(r => String(r.engagementKey ?? '').trim() === key); } catch { continue; }
-          missed = fresh2 ? Object.keys(ocChanges).filter(k => !sameFin(k, fresh2[k], ocChanges[k])) : missed;
-          if (!missed.length) break;
-        }
-        if (missed.length) ocError = `the Ops Checklist did not keep ${missed.join(', ')}`;
-      } catch (e) { ocError = String(e?.message || e); }
-
-      // 4 — copy failed → undo the EC change so both files agree
-      if (ocError) {
-        let rolledBack = false;
-        if (Object.keys(before).length) {
-          try {
-            const { ec: now } = await findEcRow(key, fresh.startDate);
-            await retryBusy(() => updateEngagementRow(fresh.egId, fresh.sno, ecUpdateBody({ ...(now || fresh), ...before }), key));
-            rolledBack = true;
-          } catch { /* reported below */ }
-        }
-        return { ok: false, rolledBack, reason: `could not copy to the Ops Checklist (${ocError})` +
-          (rolledBack ? ' — the Engagement Calendar change was undone' : ' — and undoing the Engagement Calendar change also failed, please check this row') };
-      }
-      opsCopied = true;
-    }
-
     try { patchEngagementCaches(rows => rows.map(r => (String(r.engagementKey).trim() === key ? { ...r, ...toWrite } : r))); } catch { /* cache only */ }
-    return { ok: true, row, opsCopied, ocChanges };
+    return { ok: true, row };
   });
 }
 
-// Used by bdChecklistSync.js (BD checklist → Engagement Calendar / Ops Checklist)
+// Used by bdChecklistSync.js (BD checklist → Engagement Calendar)
 export { ecUpdateBody, runForIndex };

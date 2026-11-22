@@ -17,8 +17,9 @@ import { LinkButton, LinkInput } from '../components/LinkButton.jsx';
 import { ChecklistChips } from '../components/ChecklistPicker.jsx';
 import { parseChecklist } from '../config/opsChecklistItems.js';
 import { addEngagementToOps, addEngagementToCDT, isInTracker } from '../services/addToTrackers.js';
+import { getOpsChecklist, onOpsProgramsChange } from '../services/opsV2Data.js';   // Ops Checklist v2 programs
 import { checklistForEngagement } from '../services/bdChecklistSync.js';
-import { onListChange, getOpsChecklist, getContentDevTracker, ecContractFields, ecExtraFields, ecHasExtraCols } from '../services/api.js';
+import { onListChange, getContentDevTracker, ecContractFields, ecExtraFields, ecHasExtraCols } from '../services/api.js';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, EC_RULES } from '../config/pendingFields.js';
 import CalendarView from './ERCalendar.jsx';
@@ -950,7 +951,8 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
   // Re-render when the Ops Checklist / CDT lists change (add, delete, reload),
   // so a row deleted from a tracker shows "Add" again on its card.
   const [, setListTick] = useState(0);
-  useEffect(() => onListChange(n => { if (n === 'ops' || n === 'cdt') setListTick(t => t + 1); }), []);
+  useEffect(() => onListChange(n => { if (n === 'cdt') setListTick(t => t + 1); }), []);
+  useEffect(() => onOpsProgramsChange(() => setListTick(t => t + 1)), []);
   // Fresh copy of both trackers on opening the calendar (catches rows deleted
   // in the tracker pages or directly in Excel). Quiet — failures are ignored.
   useEffect(() => {
@@ -966,7 +968,7 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
     try {
       const res = target === 'ops' ? await addEngagementToOps(eng) : await addEngagementToCDT(eng);
       showToast(res.added
-        ? `✓ Added to ${trackerLabel(target)} (Index ${res.index})`
+        ? `✓ Added to ${trackerLabel(target)} (Index ${res.index})${res.failed ? ` — ${res.failed} step(s) failed, check Ops Checklist` : ''}`
         : `ℹ Already in ${trackerLabel(target)} (Index ${res.index}) — nothing added`);
     } catch (e) {
       showToast(`❌ Could not add to ${trackerLabel(target)}: ${e.message}`);

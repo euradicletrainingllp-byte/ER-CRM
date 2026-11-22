@@ -15,7 +15,7 @@ import {
 import { Section, Empty, Table, Tile, Pill, Bar } from './Client360.jsx';
 import { peekConsultantWorld, loadConsultantWorld, buildConsultantIndex, consultantAlerts, fyLabel } from '../services/consultant360.js';
 import { todayIso } from '../services/client360.js';
-import { clScore } from '../pages/OpsChecklist.jsx';
+import { clScore } from '../services/opsV2Data.js';
 import { money, fmtInrShort } from '../services/money.js';
 import '../styles/client360.css';
 

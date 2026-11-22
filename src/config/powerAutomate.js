@@ -25,11 +25,6 @@ const FLOW_URLS = {
   // Payload: { action, egId, sno, ...fields }
   ENGAGEMENT_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/02/workflows/c4f9f9c1048b43d7838e6348eba4a132/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=HcGyJqHpsXrf7lniAh-t63Zr3Oi6E0qSKBOZkxSvLOc",
 
-  // ── OPERATIONS CHECKLIST ──────────────────────────────────────────────────
-  // Excel: "Operations Checklist.xlsx" → Sheet: "Operations checklist"
-  // Payload: { action, sno, ...fields }
-  OPS_CHECKLIST_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/26/workflows/296a358d06c1454daa905a9b7a9295e9/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Nhxc9n3Ge8eiHJMLHUMNWwlbGz73Qj1w9x_zTs0k7EU",
-
   // ── CONTENT DEVELOPMENT TRACKER ───────────────────────────────────────────
   // Excel: "Content_Development_Tracker.xlsx" → Sheet: "Sheet1"
   // Payload: { action, sno, Client, Program Start Date, End Date, Program Type,
@@ -83,6 +78,18 @@ const FLOW_URLS = {
   // Paste the flow's HTTP POST URL between the quotes. Leave "" to switch logging off.
   AUDIT_LOG: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/15/workflows/f53e8afec01e4ca487ed4081d2e9505d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=qxJNgzrAmUg_KGqXdnMoElKgxwHKRC3Xyb5PP_6J7bo",
 
+  // ── ADMIN CRUD (generic) ──────────────────────────────────────────────────
+  // Excel: "Admin Panel.xlsx" → any table (PermissionsTable, DepartmentTable, …)
+  // Payload: { action: get|create|update|delete, table, keyColumn, keyValue, row:{…} }
+  // One flow for every admin table — new tables/columns need no flow change.
+  // Leave "" to keep using the old Get/Save Permissions flows.
+  ADMIN_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/31/workflows/e158dfe66c644978bd32e8efb4c1c124/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-L6xgN7Ougg7t1k3G6glQ6zdIiGzXl62BwphA07duC8",
+
+  // ── OPS CHECKLIST v2 (generic) ────────────────────────────────────────────
+  // Excel: "Operations Checklist.xlsx" → StepTable | EngagementTable | OpsTaskTable | ListTable
+  // Same contract as ADMIN_CRUD (copy of that flow with the File changed).
+  OPS_V2_CRUD: "https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/28/workflows/99ba3592e71e42ca9e2fb650185bf724/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=INvecnH0A_e15SjZj_1euTgvppbxJ_ta782ZL7q7Y7w",
+
   // ── EMAIL NOTIFICATIONS ───────────────────────────────────────────────────
   // Flow: "CRM Notify"  ·  emails everyone with View access to the tracker
   // Payload: { to, subject, html, tracker, trackerName, actorEmail, actorName, recordCount }
@@ -112,7 +119,6 @@ export const EXCEL_FILES = {
  */
 export const TABLE_NAMES = {
   BD_TRACKER:       "BDTrackerTable",
-  OPS_CHECKLIST:    "OpsChecklistTable",
   ENGAGEMENT:       "EngagementMasterTable",
   CONTENT_DEV:      "ContentDevTable",
   SOLUTION_TRACKER: "Table1",

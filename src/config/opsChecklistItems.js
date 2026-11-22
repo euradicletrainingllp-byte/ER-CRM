@@ -7,10 +7,8 @@
  *                       Tracker column "Ops Checklist")
  *   • Engagement Cal. – carried over when the engagement is added
  *                       (column "Ops Checklist")
- *   • Ops Checklist   – shown as "Required by BD" tags (column "BD Checklist")
+ *   (the old Ops Checklist page that showed these as "Required by BD" tags was removed 2026-11-22)
  *
- * When a `key` matches an item key in OpsChecklist.jsx (CL_ITEMS), that Ops row
- * also gets a "Required by BD" tag; every ticked item shows in the Ops banner.
  * Values are stored in Excel as readable labels joined by "; ".
  */
 

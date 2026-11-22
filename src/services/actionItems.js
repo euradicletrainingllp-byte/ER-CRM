@@ -6,9 +6,8 @@
  * count per tracker, and the money / pipeline figures the founder needs.
  * Pure functions — no fetching, no saving. Same TAT and finance rules as the tracker pages.
  */
-import { CL_ITEMS } from '../pages/OpsChecklist.jsx';
 import { financeDates, financeStage, totalOf } from '../pages/FinanceTracker.jsx';
-import { pendingItems, OPS_RULES, EC_RULES, CDT_RULES, FIN_RULES, BD_RULES, SOL_RULES, LEAD_RULES, VENDOR_RULES, CONSULTANT_RULES, CLIENT_RULES, toIso } from '../config/pendingFields.js';
+import { pendingItems, EC_RULES, CDT_RULES, FIN_RULES, BD_RULES, SOL_RULES, LEAD_RULES, VENDOR_RULES, CONSULTANT_RULES, CLIENT_RULES, toIso } from '../config/pendingFields.js';
 import { taskIsOpen } from '../config/taskOptions.js';
 import { contractAlert, noticeDays } from './consultantsApi.js';
 import { CONTRACT_WARN_DAYS } from '../config/clientOptions.js';
@@ -128,19 +127,16 @@ export function openTasks({ sol = [], eng = [], ops = [], cdt = [], leads = [], 
   const out = [];
   const opsByKey = new Map(ops.map(o => [s(o.engagementKey), o]));
 
-  // Ops Checklist — every item not Yes / NA, due on its TAT
+  // Ops Checklist v2 — every applicable step not Done, due on its timeline date (services/opsV2Data.js)
   ops.filter(r => !cancelled(r)).forEach(r => {
     const st = toIso(r.startDate), en = toIso(r.endDate);
-    CL_ITEMS.forEach(it => {
-      if (['Yes', 'NA'].includes(s(r[it.key]))) return;
-      const due = it.tatFn(st, en);
-      if (!due) return;
+    (r.tasks || []).forEach(t => {
+      if (t.done || !t.due) return;
       out.push({
-        id: `ops|${r.sno}|${it.key}`, tracker: 'ops', record: s(r.company) || '(no company)', serial: r.sno,
-        sub: [s(r.topic), st].filter(Boolean).join(' · '), label: it.label, due, owner: owner(r[it.pocKey] || r.internalPoc),
+        id: `ops|${t.taskId}`, tracker: 'ops', record: s(r.company) || '(no company)', serial: r.sno,
+        sub: [s(r.topic), st].filter(Boolean).join(' · '), label: t.step, due: t.due, owner: owner(t.ownerNames || r.internalPoc),
         details: [['Session', `${s(r.company)} — ${s(r.topic)}`], ['Dates', [st, en].filter(Boolean).join(' → ')], ['EG.ID', s(r.egId)],
-          ['Item POC', s(r[it.pocKey])], ['Internal POC', s(r.internalPoc)], ['Lead consultant', s(r.consultant1)], ['Comment', s(r[it.commentKey])],
-          ['Required by BD', parseChecklist(r.bdChecklist).includes(it.key) ? 'Yes' : '']],
+          ['Phase', t.phase], ['Owners', t.ownerNames], ['Status', t.status], ['Lead consultant', s(r.consultant1)], ['Comment', t.comments]],
       });
     });
   });
@@ -310,10 +306,8 @@ export function openTasks({ sol = [], eng = [], ops = [], cdt = [], leads = [], 
 // { id, tracker, record, label, date, amount? }
 export function completedWork({ sol = [], eng = [], ops = [], cdt = [], leads = [], vendors = [], tasks = [], consultants = [], clients = null }) {
   const out = [];
-  ops.forEach(r => CL_ITEMS.forEach(it => {
-    if (s(r[it.key]) !== 'Yes') return;
-    const d = toIso(r[it.doneKey]);
-    if (d) out.push({ id: `ops|${r.sno}|${it.key}`, tracker: 'ops', record: s(r.company), sub: s(r.topic), label: it.label, date: d, who: s(r[it.pocKey]) });
+  ops.forEach(r => (r.tasks || []).forEach(t => {
+    if (t.done && t.completed) out.push({ id: `ops|${t.taskId}`, tracker: 'ops', record: s(r.company), sub: s(r.topic), label: t.step, date: t.completed, who: t.ownerNames });
   }));
   cdt.forEach(r => {
     [['contentAssets', 'Content Assets'], ['preWorkItems', 'Pre-Work'], ['postWorkItems', 'Post-Work']].forEach(([k, lbl]) =>
@@ -384,7 +378,6 @@ export function missingByTracker({ sol = [], eng = [], ops = [], cdt = [], leads
     make('bd', lines, BD_RULES, r => `${s(r.proposalId)} · ${s(r.clientName)}`),
     make('solution', sols, SOL_RULES, r => `${s(r.proposalId)} · ${s(r.solutionTopic)}`),
     make('engagement', eng, EC_RULES, r => s(r.company)),
-    make('ops', ops, OPS_RULES, r => s(r.company)),
     make('finance', eng.filter(e => s(e.engagementKey)), FIN_RULES, r => s(r.company)),
     make('content-dev', cdt, CDT_RULES, r => s(r.client)),
     make('leads', leads, LEAD_RULES, r => `${s(r.leadId)} · ${s(r.company)}`),
@@ -469,18 +462,8 @@ export function upcomingDeliveries(eng, ops, days) {
     return st && en >= t && st <= until;
   }).map(e => {
     const oc = opsByKey.get(s(e.engagementKey));
-    let ready = null, openItems = 0, lateItems = 0;
-    if (oc) {
-      const st = toIso(oc.startDate), en = toIso(oc.endDate);
-      const done = CL_ITEMS.filter(it => ['Yes', 'NA'].includes(s(oc[it.key]))).length;
-      ready = Math.round((done / CL_ITEMS.length) * 100);
-      CL_ITEMS.forEach(it => {
-        if (['Yes', 'NA'].includes(s(oc[it.key]))) return;
-        openItems++;
-        const due = it.tatFn(st, en);
-        if (due && due < t) lateItems++;
-      });
-    }
+    // Ops Checklist v2 program summary (services/opsV2Data.js)
+    const ready = oc ? oc.ready : null, openItems = oc ? oc.openItems : 0, lateItems = oc ? oc.lateItems : 0;
     return { ...e, _start: toIso(e.startDate), _end: toIso(e.endDate) || toIso(e.startDate), _ops: oc || null, ready, openItems, lateItems };
   }).sort((a, b) => a._start.localeCompare(b._start));
 }

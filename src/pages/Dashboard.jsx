@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import KPICard from '../components/KPICard.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { LoadingState, ErrorState } from '../components/LoadingState.jsx';
-import { getAllEngagementsResilient, peekAllEngagements, peekList, onListChange, getOpsChecklist, getSolutionTracker } from '../services/api.js';
-import { clScore } from './OpsChecklist.jsx';                         // same readiness score as the Ops Checklist page
+import { getAllEngagementsResilient, peekAllEngagements, peekList, onListChange, getSolutionTracker } from '../services/api.js';
+import { getOpsChecklist, peekOpsPrograms, onOpsProgramsChange, clScore } from '../services/opsV2Data.js';   // Ops Checklist v2 programs (% steps done)
 import { buildProposalLines, uniqueProposals } from '../components/proposalData.js';   // same proposal rule as the BD Tracker
 import { refreshToday } from '../components/erdCharts.jsx';
 import { DrillContext, egItem, propItem } from '../components/KpiListModal.jsx';
@@ -64,7 +64,7 @@ const COLORS = ['#1a3a5c','#2563eb','#16a34a','#7c3aed','#e8760a','#dc2626','#08
 export default function Dashboard({ onRefreshed }) {
   // Show the last loaded data straight away; fresh data replaces it when it arrives
   const [engData,  setEngData]  = useState(() => peekAllEngagements() || []);
-  const [opsData,  setOpsData]  = useState(() => peekList('ops') || []);
+  const [opsData,  setOpsData]  = useState(() => peekOpsPrograms() || []);
   const [solData,  setSolData]  = useState(() => peekList('solution'));   // null until first load
   const [loading,  setLoading]  = useState(() => !peekAllEngagements());
   const [refreshing, setRefreshing] = useState(false);
@@ -115,8 +115,8 @@ export default function Dashboard({ onRefreshed }) {
     let timer = null;
     const soon = () => { clearTimeout(timer); timer = setTimeout(load, 2500); };
     const onEc = () => { const p = peekAllEngagements(); if (p) setEngData(p); soon(); };
+    const offOps = onOpsProgramsChange(setOpsData);
     const offList = onListChange(name => {
-      if (name === 'ops') { const p = peekList('ops'); if (p) setOpsData(p); }
       if (name === 'solution') { const p = peekList('solution'); if (p) setSolData(p); }
     });
     const checkDay = () => { if (refreshToday()) setDayKey(localToday()); };
@@ -133,7 +133,7 @@ export default function Dashboard({ onRefreshed }) {
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
     return () => {
-      clearTimeout(timer); clearInterval(tick); offList();
+      clearTimeout(timer); clearInterval(tick); offList(); offOps();
       window.removeEventListener('ercrm:ec-changed', onEc);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
@@ -332,7 +332,7 @@ export default function Dashboard({ onRefreshed }) {
             <span style={{ fontSize: 12, color: 'var(--muted)' }}>{opsReady.ahead ? `${opsReady.ahead} upcoming / ongoing` : 'No upcoming sessions — latest shown'} · {opsData.length} total</span>
           </div>
           <div style={{ padding: 0 }}>
-            {opsReady.rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>No sessions in the Ops Checklist</div>}
+            {opsReady.rows.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>No programs in the Ops Checklist</div>}
             {opsReady.rows.map((e, i) => {
               const score = clScore(e);
               const color = score === 100 ? 'var(--green)' : score > 60 ? 'var(--accent)' : 'var(--red)';

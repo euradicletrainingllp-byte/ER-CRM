@@ -1,12 +1,11 @@
 /**
- * EURADICLE CRM — BD checklist → Engagement Calendar → Ops Checklist
+ * EURADICLE CRM — BD checklist → Engagement Calendar
  *
  * The Operations checklist the BD person ticks (In Process or Won) travels with the
  * program, whatever its BD Status:
  *   • BD Tracker save        → copied to every Engagement Calendar row of that proposal
- *                              and to their Ops Checklist rows ("BD Checklist")
+ *                              (the old Ops Checklist copy was removed with that checklist, 2026-11-22)
  *   • Engagement added       → if the form has no checklist, it is looked up from the proposal
- *   • "Add to Ops Checklist" → same lookup when the EC row has none
  *
  * An EC row belongs to a proposal when it carries the proposal's link, or when its
  * Company and Topic match the proposal's client and one of its topics exactly
@@ -14,7 +13,6 @@
  */
 import {
   getSolutionTracker, peekList, getAllEngagementsCached, updateEngagementRow, patchEngagementCaches,
-  getOpsChecklist, updateOpsRow,
 } from './api.js';
 import { ecUpdateBody, runForIndex } from './syncWithEC.js';
 
@@ -60,7 +58,7 @@ export async function checklistForEngagement(ec) {
 }
 
 /**
- * Copies a proposal's checklist to its Engagement Calendar rows and their Ops Checklist rows.
+ * Copies a proposal's checklist to its Engagement Calendar rows.
  * @returns {{ ec: number, ops: number, failed: string[] }}
  */
 export async function pushBdChecklist(proposalId, checklist, solRows) {
@@ -80,14 +78,5 @@ export async function pushBdChecklist(proposalId, checklist, solRows) {
   }
   try { patchEngagementCaches(rows => rows.map(r => (mine.some(m => clean(m.engagementKey) === clean(r.engagementKey)) ? { ...r, opsChecklist: list } : r))); } catch { /* cache only */ }
 
-  let ops = 0;
-  const keys = new Set(mine.map(e => clean(e.engagementKey)));
-  if (keys.size) {
-    const ocRows = await getOpsChecklist();
-    for (const oc of ocRows.filter(o => keys.has(clean(o.engagementKey)) && clean(o.bdChecklist) !== list)) {
-      try { await updateOpsRow(oc.sno, { bdChecklist: list }, oc.engagementKey); ops++; }
-      catch (err) { failed.push(`Ops ${clean(oc.engagementKey)}: ${err.message}`); }
-    }
-  }
-  return { ec, ops, failed };
+  return { ec, ops: 0, failed };
 }

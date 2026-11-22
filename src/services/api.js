@@ -14,7 +14,6 @@ import { logEvent, withAuditContext, normKey, normVal, AUDIT_OPTIONS } from './a
 const AUDIT_MODULE = {
   BD_TRACKER_CRUD:    'bd',
   ENGAGEMENT_CRUD:    'engagement',
-  OPS_CHECKLIST_CRUD: 'ops',
   CONTENT_DEV_CRUD:   'content-dev',
   SOLUTION_CRUD:      'solution',
   LEADS_CRUD:         'leads',
@@ -756,212 +755,7 @@ export async function deleteEngagementRow(egId, sno, engagementKey) {
   return callEngagementFlow('delete', { egId, sno, [ENGAGEMENT_KEY_COL]: key }).then(notifyEcChanged);
 }
 
-// ─── OPS CHECKLIST ───────────────────────────────────────────────────────────
-async function callOpsFlow(action, payload = {}) {
-  return callFlow('OPS_CHECKLIST_CRUD', { action, ...payload });
-}
-
-const fmtDtField = d => {
-  if (!d) return '';
-  const s = String(d).trim();
-  const num = Number(s);
-  if (!isNaN(num) && num > 25000) {
-    const dt = new Date(Math.round((num - 25569) * 86400 * 1000));
-    return isNaN(dt) ? s : dt.toISOString().slice(0, 10);
-  }
-  // Text typed as a date (26/10/2026, 26-Oct-2026 …) → YYYY-MM-DD so date filters / dashboards can use it
-  const f = formatDate(s);
-  return /^\d{4}-\d{2}-\d{2}$/.test(f) && !/^\d{4}-\d{2}-\d{2}/.test(s) ? f : s;
-};
-
-// Raw rows from the last Ops Checklist read — used only to explain a failed save
-let _lastOpsRaw = [];
-/** Raw Excel row (column names exactly as Power Automate returns them) for this Index, or null. */
-export function rawOpsRowFor(index) {
-  const k = String(index ?? '').trim();
-  return _lastOpsRaw.find(r => String(r?.Index ?? r?.index ?? '').trim() === k) || null;
-}
-
-async function fetchOpsChecklist() {
-  const data = await callOpsFlow('get');
-  const rows = (Array.isArray(data?.value) ? data.value : Array.isArray(data) ? data : []).map(withDecodedKeys);
-  _lastOpsRaw = rows;
-  return rows.map((r, i) => ({
-    sno:             getField(r,'S No','S.No','S_No','sno') ?? i + 1,
-    engagementKey:   readKey(r),
-    egId:            getField(r,'EG.ID','EG_ID','EG_x002e_ID') ?? '',
-    company:         getField(r,'Company') ?? '',
-    clientSpoc:      getField(r,'Client SPOC','Client_SPOC') ?? '',
-    startDate:       fmtDtField(getField(r,'Engagement\nStart Date','Engagement_x000a_Start_Date','Engagement Start Date')),
-    endDate:         fmtDtField(getField(r,'Engagement\nEnd Date','Engagement_x000a_End_Date','Engagement End Date')),
-    topic:           getField(r,'Topic') ?? '',
-    sector:          getField(r,'Sector') ?? '',
-    serviceType:     getField(r,'Service Type','Service_Type') ?? '',
-    offering:        getField(r,'Offering') ?? '',
-    internalPoc:     getField(r,'Internal POC','Internal_POC') ?? '',
-    contractType:    getField(r,'Contract Type','Contract_Type') ?? '',
-    contractStatus:  getField(r,'Contract Status','Contract_Status') ?? '',
-    paxListReceived: getField(r,'Pax List\nReceived','Pax_List_Received') ?? '',
-    noOfParticipants:Number(getField(r,'No of\nParticipants','No_of_Participants','No of Participants') ?? 0) || 0,
-    day:             getField(r,'Day') ?? '',
-    programType:     getField(r,'Program Type','Program_Type') ?? '',
-    location:        getField(r,'Location') ?? '',
-    consultant1:     getField(r,'Consultant 1','Consultant_1') ?? '',
-    consultant2:     getField(r,'Consultant 2','Consultant_2') ?? '',
-    consultant3:     getField(r,'Consultant 3','Consultant_3') ?? '',
-    status:          getField(r,'Status') ?? '',
-    calendarBlock:           getField(r,'Facilitator Calendar Block','Facilitator_Calendar_Block') ?? '',
-    calendarBlockPoc:        getField(r,'SPOC / POC','SPOC___POC') ?? '',
-    calendarBlockDone:       fmtDtField(getField(r,'Date of Completion','Date_of_Completion')),
-    calendarBlockComment:    getField(r,'Comments - Facilitator Calendar Block','Comments___Facilitator_Calendar_Block') ?? '',
-    travelDetails:           getField(r,'Travel Details Finalised','Travel_Details_Finalised') ?? '',
-    travelDetailsPoc:        getField(r,'SPOC / POC2','SPOC___POC2') ?? '',
-    travelDetailsDone:       fmtDtField(getField(r,'Date of Completion4','Date_of_Completion4')),
-    travelDetailsComment:    getField(r,'Comments - Travel Details Finalised','Comments___Travel_Details_Finalised') ?? '',
-    welcomeEmail:            getField(r,'Welcome Email + Pre-Work','Welcome_Email___Pre_Work') ?? '',
-    welcomeEmailPoc:         getField(r,'SPOC / POC5','SPOC___POC5') ?? '',
-    welcomeEmailDone:        fmtDtField(getField(r,'Date of Completion7','Date_of_Completion7')),
-    welcomeEmailComment:     getField(r,'Comments - Welcome Email + Pre-Work','Comments___Welcome_Email___Pre_Work') ?? '',
-    preWork:                 getField(r,'Pre-Work Details','Pre_Work_Details') ?? '',
-    preWorkPoc:              getField(r,'SPOC / POC8','SPOC___POC8') ?? '',
-    preWorkDone:             fmtDtField(getField(r,'Date of Completion10','Date_of_Completion10')),
-    preWorkComment:          getField(r,'Comments - Pre-Work Details','Comments___Pre_Work_Details') ?? '',
-    evAndPm:                 getField(r,'EV & PM Shared with Consultant','EV___PM_Shared_with_Consultant','EV & PM Shared w/ Consultant') ?? '',
-    evAndPmPoc:              getField(r,'SPOC / POC11','SPOC___POC11') ?? '',
-    evAndPmDone:             fmtDtField(getField(r,'Date of Completion13','Date_of_Completion13')),
-    evAndPmComment:          getField(r,'Comments - EV & PM Shared with Consultant','Comments___EV___PM_Shared_with_Consultant') ?? '',
-    bootcamp:                getField(r,'Bootcamp Finalised','Bootcamp_Finalised') ?? '',
-    bootcampPoc:             getField(r,'SPOC / POC14','SPOC___POC14') ?? '',
-    bootcampDone:            fmtDtField(getField(r,'Date of Completion16','Date_of_Completion16')),
-    bootcampComment:         getField(r,'Comments - Bootcamp Finalised','Comments___Bootcamp_Finalised') ?? '',
-    teachback:               getField(r,'Teachback Finalised','Teachback_Finalised') ?? '',
-    teachbackPoc:            getField(r,'SPOC / POC17','SPOC___POC17') ?? '',
-    teachbackDone:           fmtDtField(getField(r,'Date of Completion19','Date_of_Completion19')),
-    teachbackComment:        getField(r,'Comments - Teachback Finalised','Comments___Teachback_Finalised') ?? '',
-    electronicVisuals:       getField(r,'Electronic Visuals + QR','Electronic_Visuals___QR') ?? '',
-    electronicVisualsPoc:    getField(r,'SPOC / POC20','SPOC___POC20') ?? '',
-    electronicVisualsDone:   fmtDtField(getField(r,'Date of Completion22','Date_of_Completion22')),
-    electronicVisualsComment:getField(r,'Comments - Electronic Visuals + QR','Comments___Electronic_Visuals___QR') ?? '',
-    participantManual:       getField(r,'Participant Manual','Participant_Manual') ?? '',
-    participantManualPoc:    getField(r,'SPOC / POC23','SPOC___POC23') ?? '',
-    participantManualDone:   fmtDtField(getField(r,'Date of Completion25','Date_of_Completion25')),
-    participantManualComment:getField(r,'Comments - Participant Manual','Comments___Participant_Manual') ?? '',
-    materialPrinting:        getField(r,'Material Printing Required','Material_Printing_Required') ?? '',
-    materialPrintingPoc:     getField(r,'SPOC / POC26','SPOC___POC26') ?? '',
-    materialPrintingDone:    fmtDtField(getField(r,'Date of Completion28','Date_of_Completion28')),
-    materialPrintingComment: getField(r,'Comments - Material Printing Required','Comments___Material_Printing_Required') ?? '',
-    materialOrdering:        getField(r,'Material Ordering & Delivery Status','Material_Ordering___Delivery_Status') ?? '',
-    materialOrderingPoc:     getField(r,'SPOC / POC29','SPOC___POC29') ?? '',
-    materialOrderingDone:    fmtDtField(getField(r,'Date of Completion31','Date_of_Completion31')),
-    materialOrderingComment: getField(r,'Comments - Material Ordering & Delivery Status','Comments___Material_Ordering___Delivery_Status') ?? '',
-    materialConversion:      getField(r,'Material Conversion to Editable Form','Material_Conversion_to_Editable_Form') ?? '',
-    materialConversionPoc:   getField(r,'SPOC / POC32','SPOC___POC32') ?? '',
-    materialConversionDone:  fmtDtField(getField(r,'Date of Completion34','Date_of_Completion34')),
-    materialConversionComment:getField(r,'Comments - Material Conversion to Editable Form','Comments___Material_Conversion_to_Editable_Form') ?? '',
-    attendanceSheet:         getField(r,'Attendance Sheet & Photos','Attendance_Sheet___Photos') ?? '',
-    attendanceSheetPoc:      getField(r,'SPOC / POC35','SPOC___POC35') ?? '',
-    attendanceSheetDone:     fmtDtField(getField(r,'Date of Completion37','Date_of_Completion37')),
-    attendanceSheetComment:  getField(r,'Comments - Attendance Sheet & Photos','Comments___Attendance_Sheet___Photos') ?? '',
-    feedbackReport:          getField(r,'Feedback Report','Feedback_Report') ?? '',
-    feedbackReportPoc:       getField(r,'SPOC / POC38','SPOC___POC38') ?? '',
-    feedbackReportDone:      fmtDtField(getField(r,'Date of Completion40','Date_of_Completion40')),
-    feedbackReportComment:   getField(r,'Comments - Feedback Report','Comments___Feedback_Report') ?? '',
-    impactReport:            getField(r,'Impact Report','Impact_Report') ?? '',
-    impactReportPoc:         getField(r,'SPOC / POC41','SPOC___POC41') ?? '',
-    impactReportDone:        fmtDtField(getField(r,'Date of Completion43','Date_of_Completion43')),
-    impactReportComment:     getField(r,'Comments - Impact Report','Comments___Impact_Report') ?? '',
-    socialMedia:             getField(r,'Social Media Post','Social_Media_Post') ?? '',
-    socialMediaPoc:          getField(r,'SPOC / POC44','SPOC___POC44') ?? '',
-    socialMediaDone:         fmtDtField(getField(r,'Date of Completion46','Date_of_Completion46')),
-    socialMediaComment:      getField(r,'Comments - Social Media Post','Comments___Social_Media_Post') ?? '',
-    invoiceGenerated:        getField(r,'Invoice Generated','Invoice_Generated') ?? '',
-    invoicePoc:              getField(r,'Internal POC47','Internal_POC47') ?? '',
-    invoiceActualDate:       fmtDtField(getField(r,'Actual Gen. Date','Actual_Gen__Date')),
-    invoiceComment:          getField(r,'Comments - Invoice Generated','Comments___Invoice_Generated') ?? '',
-    paymentReceived:         getField(r,'Payment Received','Payment_Received') ?? '',
-    paymentActualDate:       fmtDtField(getField(r,'Actual Payout Date','Actual_Payout_Date')),
-    // Items the BD person ticked when the proposal was won (carried via the Engagement Calendar)
-    bdChecklist:             getField(r,'BD Checklist','BD_Checklist','bdChecklist') ?? '',
-  })).filter(r => r.company);
-}
-
-const OPS_FIELD_MAP = {
-  sno:'S No', engagementKey:'Index',
-  egId:'EG ID', company:'company', clientSpoc:'Client SPOC',
-  startDate:'Engagement Start Date', endDate:'Engagement End Date',
-  topic:'Topic', sector:'Sector', serviceType:'Service Type', offering:'Offering',
-  internalPoc:'Internal POC', contractType:'Contract Type', contractStatus:'Contract Status',
-  paxListReceived:'Pax List\nReceived', noOfParticipants:'No of\nParticipants',
-  day:'Day', programType:'Program Type', location:'Location',
-  consultant1:'Consultant 1', consultant2:'Consultant 2', consultant3:'Consultant 3', status:'Status',
-  calendarBlock:'Facilitator Calendar Block', calendarBlockPoc:'SPOC / POC', calendarBlockDone:'Date of Completion', calendarBlockComment:'Comments - Facilitator Calendar Block',
-  travelDetails:'Travel Details Finalised', travelDetailsPoc:'SPOC / POC2', travelDetailsDone:'Date of Completion4', travelDetailsComment:'Comments - Travel Details Finalised',
-  welcomeEmail:'Welcome Email + Pre-Work', welcomeEmailPoc:'SPOC / POC5', welcomeEmailDone:'Date of Completion7', welcomeEmailComment:'Comments - Welcome Email + Pre-Work',
-  preWork:'Pre-Work Details', preWorkPoc:'SPOC / POC8', preWorkDone:'Date of Completion10', preWorkComment:'Comments - Pre-Work Details',
-  evAndPm:'EV & PM Shared with Consultant', evAndPmPoc:'SPOC / POC11', evAndPmDone:'Date of Completion13', evAndPmComment:'Comments - EV & PM Shared with Consultant',
-  bootcamp:'Bootcamp Finalised', bootcampPoc:'SPOC / POC14', bootcampDone:'Date of Completion16', bootcampComment:'Comments - Bootcamp Finalised',
-  teachback:'Teachback Finalised', teachbackPoc:'SPOC / POC17', teachbackDone:'Date of Completion19', teachbackComment:'Comments - Teachback Finalised',
-  electronicVisuals:'Electronic Visuals + QR', electronicVisualsPoc:'SPOC / POC20', electronicVisualsDone:'Date of Completion22', electronicVisualsComment:'Comments - Electronic Visuals + QR',
-  participantManual:'Participant Manual', participantManualPoc:'SPOC / POC23', participantManualDone:'Date of Completion25', participantManualComment:'Comments - Participant Manual',
-  materialPrinting:'Material Printing Required', materialPrintingPoc:'SPOC / POC26', materialPrintingDone:'Date of Completion28', materialPrintingComment:'Comments - Material Printing Required',
-  materialOrdering:'Material Ordering & Delivery Status', materialOrderingPoc:'SPOC / POC29', materialOrderingDone:'Date of Completion31', materialOrderingComment:'Comments - Material Ordering & Delivery Status',
-  materialConversion:'Material Conversion to Editable Form', materialConversionPoc:'SPOC / POC32', materialConversionDone:'Date of Completion34', materialConversionComment:'Comments - Material Conversion to Editable Form',
-  attendanceSheet:'Attendance Sheet & Photos', attendanceSheetPoc:'SPOC / POC35', attendanceSheetDone:'Date of Completion37', attendanceSheetComment:'Comments - Attendance Sheet & Photos',
-  feedbackReport:'Feedback Report', feedbackReportPoc:'SPOC / POC38', feedbackReportDone:'Date of Completion40', feedbackReportComment:'Comments - Feedback Report',
-  impactReport:'Impact Report', impactReportPoc:'SPOC / POC41', impactReportDone:'Date of Completion43', impactReportComment:'Comments - Impact Report',
-  socialMedia:'Social Media Post', socialMediaPoc:'SPOC / POC44', socialMediaDone:'Date of Completion46', socialMediaComment:'Comments - Social Media Post',
-  invoiceGenerated:'Invoice Generated', invoicePoc:'Internal POC47',
-  invoiceActualDate:'Actual Gen. Date', invoiceComment:'Comments - Invoice Generated',
-  paymentReceived:'Payment Received', paymentActualDate:'Actual Payout Date',
-  bdChecklist:'BD Checklist',
-};
-
-export async function updateOpsRow(sno, changes, engagementKey) {
-  const key = requireKey(engagementKey ?? changes?.engagementKey, `Ops Checklist row ${sno ?? ''}`.trim());
-  const excelFields = {};
-  for (const [k, v] of Object.entries(changes)) {
-    // S No is a =ROW()-1 formula and the key is permanent — never write either
-    if (k === 'sno' || k === 'engagementKey' || k === 'id' || k === 'S No' || k === ENGAGEMENT_KEY_COL) continue;
-    excelFields[OPS_FIELD_MAP[k] || k] = v;
-  }
-  // Belt-and-suspenders: send ambiguous fields under every possible key name so
-  // PA picks up whichever spelling its expression references (dot vs space for
-  // EG ID, newline vs space for date columns — PA can't type newlines in formulas).
-  const egVal = excelFields['EG ID'] ?? excelFields['EG.ID'];
-  if (egVal !== undefined) { excelFields['EG ID'] = egVal; excelFields['EG.ID'] = egVal; }
-  const sdVal = excelFields['Engagement Start Date'];
-  if (sdVal !== undefined) excelFields['Engagement\nStart Date'] = sdVal;
-  const edVal = excelFields['Engagement End Date'];
-  if (edVal !== undefined) excelFields['Engagement\nEnd Date'] = edVal;
-  return callOpsFlow('update', { ...excelFields, rowId: key, [ENGAGEMENT_KEY_COL]: key });
-}
-
-export async function addOpsRow(form) {
-  const key = String(form.engagementKey || '').trim() || newLocalKey('OC');
-  const excelFields = {};
-  for (const [k, v] of Object.entries(form)) {
-    if (k === 'sno' || k === 'engagementKey' || k === 'id' || k === 'S No' || k === ENGAGEMENT_KEY_COL) continue;
-    if (v !== undefined && v !== '') excelFields[OPS_FIELD_MAP[k] || k] = v;
-  }
-  excelFields[ENGAGEMENT_KEY_COL] = keyCell(key);
-  // Belt-and-suspenders: same alias logic as updateOpsRow — covers both create
-  // and update paths so EG ID and dates land regardless of PA expression spelling.
-  const egVal = excelFields['EG ID'] ?? excelFields['EG.ID'];
-  if (egVal !== undefined) { excelFields['EG ID'] = egVal; excelFields['EG.ID'] = egVal; }
-  const sdVal = excelFields['Engagement Start Date'];
-  if (sdVal !== undefined) excelFields['Engagement\nStart Date'] = sdVal;
-  const edVal = excelFields['Engagement End Date'];
-  if (edVal !== undefined) excelFields['Engagement\nEnd Date'] = edVal;
-  return callOpsFlow('create', excelFields);
-}
-
-export async function deleteOpsRow(sno, engagementKey) {
-  const key = requireKey(engagementKey, `Ops Checklist row ${sno ?? ''}`.trim());
-  const res = await callOpsFlow('delete', { rowId: key, [ENGAGEMENT_KEY_COL]: key });
-  forgetListRow('ops', key);
-  return res;
-}
-
+// Old Ops Checklist (OPS_CHECKLIST_CRUD) removed 2026-11-22 — Ops Checklist v2: services/opsV2Api.js / opsV2Data.js
 
 // ─── CONTENT DEVELOPMENT TRACKER ─────────────────────────────────────────────
 async function callContentDevFlow(action, payload = {}) {
@@ -1460,7 +1254,7 @@ function rememberList(name, rows) {
   return rows;
 }
 
-/** Last loaded rows for 'ops' | 'cdt' | 'solution' | 'bd' — or null. Never hits the network. */
+/** Last loaded rows for 'cdt' | 'solution' | 'bd' | … — or null. Never hits the network. */
 export function peekList(name) {
   if (_listMem.has(name)) return _listMem.get(name);
   try {
@@ -1473,10 +1267,9 @@ export function peekList(name) {
   return null;
 }
 
-export async function getOpsChecklist()      { return rememberList('ops',      await withReadRetry(fetchOpsChecklist)); }
 /** Straight read from Excel — no remembered copy, no recent-write patching. Used to confirm a write landed. */
-export async function readTrackerFresh(name) {
-  return name === 'ops' ? fetchOpsChecklist() : fetchContentDevTracker();
+export async function readTrackerFresh(name) {   // 'cdt' (the old 'ops' list was removed 2026-11-22)
+  return fetchContentDevTracker();
 }
 export async function getContentDevTracker() { return rememberList('cdt',      await withReadRetry(fetchContentDevTracker)); }
 export async function getSolutionTracker()   { return rememberList('solution', await withReadRetry(fetchSolutionTracker)); }

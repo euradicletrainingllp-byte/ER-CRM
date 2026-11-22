@@ -1,0 +1,161 @@
+/* Ops Checklist v2 — brand palette from index.css (navy / purple / mauve, CTA orange only for save) */
+.ov2 { padding: 20px 24px; gap: 14px; }
+.ov2-muted { color: var(--muted); font-size: 12px; }
+.ov2-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; flex-shrink: 0; }
+.ov2-head-act { margin-left: auto; display: flex; gap: 8px; }
+.ov2-v2 { font-size: 11px; background: var(--mauve); color: #fff; border-radius: 6px; padding: 1px 6px; vertical-align: middle; }
+.ov2-tabs { display: flex; background: var(--white); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
+.ov2-tabs button { border: 0; background: none; padding: 6px 14px; border-radius: 6px; font-weight: 600; color: var(--text-body); cursor: pointer; }
+.ov2-tabs button.on { background: var(--navy); color: #fff; }
+.ov2-tabs button span { font-size: 11px; background: var(--bg); color: var(--navy); border-radius: 10px; padding: 0 6px; margin-left: 4px; }
+.ov2-kpis { grid-template-columns: repeat(5, 1fr); margin-bottom: 0; flex-shrink: 0; }
+.ov2-kpi-alert .kpi-value { color: var(--error); }
+.ov2-msg { background: var(--info-lt); border: 1px solid var(--info); color: var(--navy); border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; flex-shrink: 0; }
+.ov2-msg span { float: right; }
+.ov2-empty { padding: 24px; text-align: center; color: var(--muted); }
+.ov2-card { margin-bottom: 0; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+
+.ov2-grid { display: grid; grid-template-columns: 300px 1fr; gap: 16px; flex: 1; min-height: 0; }
+.ov2-list-filters { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-bottom: 1px solid var(--border); }
+.ov2-list-body { overflow-y: auto; flex: 1; }
+.ov2-prog { display: block; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; padding: 10px 12px; cursor: pointer; }
+.ov2-prog:hover { background: var(--bg); }
+.ov2-prog.sel { background: #F3EAF2; border-left-color: var(--mauve); }
+.ov2-prog-top { display: flex; justify-content: space-between; gap: 8px; color: var(--navy); }
+.ov2-prog-top span { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.ov2-prog-sub { font-size: 12px; color: var(--text-body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 2px 0 6px; }
+.ov2-bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.ov2-bar i { display: block; height: 100%; background: var(--success); }
+.ov2-prog-meta { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+.ov2-detail-head { display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.ov2-detail-act { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.ov2-tl { flex: 1; overflow: auto; }
+.ov2-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ov2-table th { position: sticky; top: 0; background: var(--navy); color: #fff; text-align: left; padding: 8px; font-weight: 600; font-size: 12px; z-index: 1; }
+.ov2-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.ov2-row.na td { opacity: .5; }
+.ov2-row.late td:first-child, .ov2-table tr.late td:first-child { box-shadow: inset 3px 0 0 var(--error); }
+.ov2-row.open td { background: #FAF7FB; }
+.ov2-phase td { background: var(--bg); color: var(--purple); font-weight: 700; font-size: 12px; padding: 5px 8px; }
+.ov2-step { cursor: pointer; color: var(--navy); min-width: 200px; }
+.ov2-step:hover { color: var(--purple); text-decoration: underline; }
+.ov2-own { font-size: 12px; max-width: 160px; }
+.ov2-tag { font-size: 10px; background: #F3EAF2; color: #7A3F76; border-radius: 4px; padding: 0 5px; margin-left: 6px; }
+.ov2-due small { color: var(--muted); }
+.ov2-due.soon { color: #6b4a00; }
+.ov2-due.late, .ov2-due.late small { color: #b4422f; font-weight: 600; }
+.ov2-flag { display: inline-block; font-size: 10px; background: #FFF0E6; color: #8b3200; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.ov2-status { padding: 3px 6px; font-size: 12px; min-width: 110px; }
+.ov2-status.green { background: var(--success-lt); }
+.ov2-status.red { background: var(--error-lt); }
+.ov2-status.yellow { background: var(--warning-lt); }
+.ov2-status.info { background: var(--info-lt); }
+.ov2-mini { padding: 3px 6px; font-size: 12px; width: auto; }
+.ov2-num { width: 60px; display: inline-block; }
+.ov2-link { background: none; border: 0; padding: 0; color: var(--purple); font-weight: 600; cursor: pointer; }
+
+.ov2-switch { position: relative; display: inline-block; width: 30px; height: 16px; }
+.ov2-switch input { opacity: 0; width: 0; height: 0; }
+.ov2-switch span { position: absolute; inset: 0; background: var(--border); border-radius: 16px; cursor: pointer; transition: .15s; }
+.ov2-switch span::before { content: ''; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: .15s; }
+.ov2-switch input:checked + span { background: var(--mauve); }
+.ov2-switch input:checked + span::before { transform: translateX(14px); }
+.ov2-switch input:disabled + span { cursor: default; }
+
+.ov2-insert td { padding: 0; border: 0; height: 6px; }
+.ov2-insert button { display: block; width: 100%; border: 0; background: none; color: var(--purple); font-size: 11px; font-weight: 600; opacity: 0; height: 14px; line-height: 14px; cursor: pointer; text-align: left; padding-left: 52px; }
+.ov2-insert:hover button, .ov2-insert button:focus { opacity: 1; background: #F3EAF2; }
+.ov2-addform td { background: #FAF7FB; }
+.ov2-addform-in { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ov2-addform-in .wide { flex: 1; min-width: 220px; }
+
+.ov2-more td { background: #FAF7FB; }
+.ov2-more-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 13px; }
+.ov2-more-grid p { margin: 0 0 6px; }
+.ov2-lbl { font-size: 12px; font-weight: 600; color: var(--navy); margin: 8px 0 4px; }
+.ov2-owners { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.ov2-chip { background: var(--white); border: 1px solid var(--border); border-radius: 12px; padding: 2px 8px; font-size: 12px; }
+.ov2-chip button { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0 0 0 4px; }
+.ov2-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ov2-fields label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.ov2-fields .wide { grid-column: 1 / -1; }
+
+.ov2-modal { width: min(640px, 94vw); }
+.ov2-modal-list { max-height: 55vh; overflow-y: auto; margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.ov2-ec { display: flex; flex-direction: column; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 9px 12px; cursor: pointer; gap: 1px; }
+.ov2-ec:hover { background: #F3EAF2; }
+.ov2-ec b { color: var(--navy); }
+.ov2-ec span { font-size: 13px; color: var(--text-body); }
+.ov2-ec small { font-size: 11px; color: var(--muted); }
+.ov2-modal-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 12px; }
+
+@media (max-width: 900px) {
+  .ov2 { padding: 12px; overflow-y: auto; }
+  .ov2-kpis { grid-template-columns: repeat(2, 1fr); }
+  .ov2-grid { grid-template-columns: 1fr; }
+  .ov2-list { max-height: 260px; }
+  .ov2-more-grid, .ov2-fields { grid-template-columns: 1fr; }
+}
+
+/* Step Library + Lists */
+.ov2-lib { flex: 1; }
+.ov2-lib-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.ov2-tabs.sm button { padding: 4px 10px; font-size: 12px; }
+.ov2-check { display: flex; gap: 5px; align-items: center; font-size: 12px; color: var(--text-body); cursor: pointer; }
+.ov2-check.strong { color: var(--purple); font-weight: 600; }
+.ov2-lib-main { display: grid; grid-template-columns: 1fr; flex: 1; min-height: 0; }
+.ov2-lib.with-drawer .ov2-lib-main { grid-template-columns: 1fr 360px; }
+.ov2-libt td { padding: 4px 6px; vertical-align: middle; }
+.ov2-cell { padding: 3px 6px; font-size: 12px; width: 100%; min-width: 0; background: transparent; border-color: transparent; }
+.ov2-cell:hover:not(:disabled), .ov2-cell:focus { border-color: var(--border); background: var(--white); }
+.ov2-cell.ov2-num { width: 58px; }
+.ov2-libt select.ov2-cell { min-width: 96px; }
+.ov2-step-cell { min-width: 240px; }
+.ov2-link.sm { font-size: 11px; font-weight: 500; padding-left: 6px; }
+
+.ov2-drawer { border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; background: var(--white); }
+.ov2-drawer-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--navy); color: #fff; }
+.ov2-x { border: 0; background: none; color: #fff; font-size: 18px; cursor: pointer; line-height: 1; }
+.ov2-drawer-body { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; }
+.ov2-drawer-body label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.ov2-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ov2-drawer-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+
+.ov2-setup { margin: 16px; padding: 14px; border: 1px dashed var(--mauve); border-radius: 8px; background: #FAF7FB; font-size: 13px; color: var(--text-body); line-height: 1.6; }
+.ov2-setup code { background: var(--white); padding: 1px 6px; border-radius: 4px; margin: 0 4px; }
+.ov2-lists { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 14px; overflow-y: auto; align-items: start; }
+.ov2-list-card { margin: 0; }
+.ov2-lv { display: flex; gap: 4px; align-items: center; padding: 3px 10px; border-bottom: 1px solid var(--border); }
+.ov2-lv.off .ov2-cell { opacity: .5; text-decoration: line-through; }
+.ov2-icon { border: 0; background: none; color: var(--purple); cursor: pointer; padding: 0 3px; }
+.ov2-icon:disabled { color: var(--border); cursor: default; }
+
+@media (max-width: 900px) {
+  .ov2-lib.with-drawer .ov2-lib-main { grid-template-columns: 1fr; }
+  .ov2-drawer { border-left: 0; border-top: 1px solid var(--border); }
+  .ov2-lists { grid-template-columns: 1fr; }
+}
+.ov2-chip.dept { background: #EEF0F6; border-color: transparent; color: var(--navy); }
+.ov2-dept-cell { min-width: 170px; }
+
+/* Compact overrides — prefixed with .ov2 so they win over index.css (loaded after this file) */
+.ov2.tracker-page { gap: 10px; padding-top: 14px; }
+.ov2 .page-title { font-size: 18px; margin: 0; }
+.ov2 .ov2-kpis { grid-template-columns: repeat(5, 1fr); margin-bottom: 0; }
+.ov2 .ov2-kpis .kpi-icon { display: none; }
+.ov2 .form-input { height: 32px; font-size: 13px; padding: 0 8px; }
+.ov2 textarea.form-input { height: auto; padding: 6px 8px; }
+.ov2 .ov2-cell, .ov2 .ov2-status, .ov2 .ov2-mini { height: 28px; font-size: 12px; padding: 0 6px; }
+.ov2 .ov2-mini { width: auto; min-width: 0; max-width: 130px; }
+.ov2 .ov2-libt select.ov2-cell { min-width: 88px; }
+.ov2 .ov2-libt td { padding: 3px 6px; }
+.ov2 .ov2-lib-bar { padding: 8px 12px; }
+.ov2 .ov2-lib-bar .form-input { width: 240px; flex: 0 0 240px; }
+.ov2 .ov2-push { margin-left: auto; }
+.ov2 .ov2-owners { flex-wrap: wrap; gap: 4px; }
+.ov2 .ov2-tabs button { padding: 5px 12px; }
+.ov2 .ov2-insert td { height: 16px; }
+.ov2 .ov2-insert button { opacity: .45; height: 16px; line-height: 16px; }
+.ov2 .ov2-insert:hover button { opacity: 1; }
+@media (max-width: 900px) { .ov2 .ov2-kpis { grid-template-columns: repeat(2, 1fr); } }

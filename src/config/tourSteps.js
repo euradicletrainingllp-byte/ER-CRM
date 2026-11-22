@@ -97,12 +97,12 @@ export const TOUR_PAGES = {
   },
   ops: {
     path: '/ops', label: 'Ops Checklist', icon: 'ClipboardCheck', group: 'journey',
-    tagline: 'Pre- and post-delivery readiness for every session, with due dates worked out from TAT.',
+    tagline: 'Pre- and post-delivery steps for every program, due a set number of days (TAT) before start or after end.',
     steps: [
-      { target: T.nav('ops'), title: 'Ops Checklist', body: 'One row per session with every pre- and post-delivery item and its turnaround time.' },
-      { target: T.kpis, optional: true, title: 'Readiness', body: 'How many sessions are fully ready, in progress or at risk.' },
-      { target: T.search, optional: true, title: 'Jump to a session', body: 'Search by company, topic or EG.ID.' },
-      { target: T.list, optional: true, title: 'Tick it off', body: 'Open a session and update each checklist item. The progress bar fills as items are done.', viewBody: 'Open a session to see each checklist item, its owner and status.' },
+      { target: T.nav('ops'), title: 'Ops Checklist', body: 'One checklist per program, built from the Step Library: each step has owners, a TAT and a due date.' },
+      { target: T.kpis, optional: true, title: 'At a glance', body: 'Programs in preparation, open and overdue steps, steps due this week and programs at risk.' },
+      { target: T.search, optional: true, title: 'Jump to a program', body: 'Search by company, topic or EG.ID.' },
+      { target: T.list, optional: true, title: 'Work the timeline', body: 'Pick a program, set each step\'s status, mark steps NA or add a step. "My tasks" lists the steps you own.', viewBody: 'Pick a program to see each step, its owners, due date and status.' },
     ],
   },
   'content-dev': {
@@ -217,7 +217,7 @@ export const QUICK = {
   bd:            { title: 'The sales pipeline', body: 'One line per proposal version, with value and BD status. A Won deal needs its Ops checklist ticked before it saves.', viewBody: 'One line per proposal version, with value and BD status, in BD-month order.' },
   solution:      { title: 'Where proposals get designed', body: 'Open any line to see its solution items. Solution values live here, kept apart from BD values.' },
   engagement:    { title: 'Every session, scheduled', body: 'Each engagement carries a permanent Index that links Ops, Content and Finance. Flip between List and Calendar any time.' },
-  ops:           { title: 'Ready before the room fills', body: 'Every pre- and post-delivery item per session, with due dates worked out from TAT. The bar fills as items get ticked.' },
+  ops:           { title: 'Ready before the room fills', body: 'Every pre- and post-delivery step per program, due TAT days before start (or after end). Owners get an email when a checklist opens and when the step before theirs is done.' },
   'content-dev': { title: 'Content, on deadline', body: 'Assets, pre-work and post-work for each engagement, each with its own deadline and link.' },
   finance:       { title: 'From session to cash', body: 'Each card is a filter: To Invoice, Awaiting Payment, Overdue. Edits save on their own and the status updates itself.', viewBody: 'Each card is a filter: To Invoice, Awaiting Payment, Overdue. Price, invoice and balance for every engagement.' },
   tasks:         { title: "Who's doing what, by when", body: 'Projects broken into tasks with owners and dates. The My Tasks panel follows along on every page.' },

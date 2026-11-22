@@ -7,7 +7,9 @@
  * Revenue: a session's Price (INR) is split equally between the consultants named on it, so the totals
  * of all consultants never add up to more than the session price.
  */
-import { getAllEngagementsCached, getOpsChecklist, peekList, peekAllEngagements } from './api.js';
+import { getAllEngagementsCached, peekAllEngagements } from './api.js';
+import { getOpsChecklist, peekOpsPrograms } from './opsV2Data.js';   // Ops Checklist v2 programs
+import { isOpsV2Ready } from './opsV2Api.js';
 import { nameKey, findClient, getDirectory } from './directoryCache.js';
 import { ecState, feedbackOf, todayIso } from './client360.js';
 import { money } from './money.js';
@@ -47,15 +49,15 @@ export function consultantMatcher(consultants) {
 }
 
 export function peekConsultantWorld() {
-  const ec = peekAllEngagements(), ops = peekList('ops');
+  const ec = peekAllEngagements(), ops = peekOpsPrograms();
   return Array.isArray(ec) ? { ec, ops: Array.isArray(ops) ? ops : [], failed: [], partial: !Array.isArray(ops) } : null;
 }
 export async function loadConsultantWorld({ force = false } = {}) {
-  const opsOn = !!FLOW_URLS.OPS_CHECKLIST_CRUD;
-  const res = await Promise.allSettled([getAllEngagementsCached({ force }), opsOn ? (!force && peekList('ops')) || getOpsChecklist() : []]);
+  const opsOn = isOpsV2Ready();
+  const res = await Promise.allSettled([getAllEngagementsCached({ force }), opsOn ? (!force && peekOpsPrograms()) || getOpsChecklist() : []]);
   const failed = [];
   const pick = (r, label, saved) => { if (r.status === 'fulfilled' && Array.isArray(r.value)) return r.value; failed.push(`${label}: ${r.reason?.message || r.reason || 'no data'}`); return Array.isArray(saved) ? saved : []; };
-  return { ec: pick(res[0], 'Engagement Calendar', peekAllEngagements()), ops: pick(res[1], 'Ops Checklist', peekList('ops')), failed, partial: false };
+  return { ec: pick(res[0], 'Engagement Calendar', peekAllEngagements()), ops: pick(res[1], 'Ops Checklist', peekOpsPrograms()), failed, partial: false };
 }
 
 /** Sorts Engagement Calendar and Ops rows under each consultant. */

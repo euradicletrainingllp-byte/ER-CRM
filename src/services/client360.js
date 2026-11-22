@@ -9,7 +9,7 @@
  * A name is matched by Client Name, Legal entity, the client's "Also Known As" list, or the fixed
  * list in config/clientAliases.js — compared ignoring case, spaces and punctuation.
  */
-import { getAllEngagementsCached, getOpsChecklist, getContentDevTracker, getSolutionTracker, peekList, peekAllEngagements } from './api.js';
+import { getAllEngagementsCached, getContentDevTracker, getSolutionTracker, peekList, peekAllEngagements } from './api.js';
 import { getLeads, getVendorServices } from './leadsVendorsApi.js';
 import { getPOs, poConfigured } from './poApi.js';
 import { getTasks, tasksConfigured } from './tasksApi.js';
@@ -19,7 +19,8 @@ import { leadIsOpen } from '../config/leadVendorOptions.js';
 import { taskIsOpen } from '../config/taskOptions.js';
 import { buildProposalLines } from '../components/proposalData.js';
 import { financeStage, totalOf, overdueDays } from '../pages/FinanceTracker.jsx';
-import { clScore } from '../pages/OpsChecklist.jsx';
+import { getOpsChecklist, peekOpsPrograms, clScore } from './opsV2Data.js';   // Ops Checklist v2 programs
+import { isOpsV2Ready } from './opsV2Api.js';
 import { money, collectedOf } from './money.js';
 
 const txt = v => String(v ?? '').trim();
@@ -35,8 +36,8 @@ export const SOURCES = [
     load: () => getSolutionTracker(), peek: () => peekList('solution'), get: r => r.clientName, date: r => iso(r.dateOfDiscussion) },
   { id: 'leads', label: 'Lead Tracker', short: 'Leads', page: 'leads', route: '/leads', on: () => !!FLOW_URLS.LEADS_CRUD,
     load: () => getLeads(), peek: () => peekList('leads'), get: r => r.company, date: r => iso(r.dateReceived) },
-  { id: 'ops', label: 'Ops Checklist', short: 'Ops', page: 'ops', route: '/ops', on: () => !!FLOW_URLS.OPS_CHECKLIST_CRUD,
-    load: () => getOpsChecklist(), peek: () => peekList('ops'), get: r => r.company, date: r => iso(r.startDate) },
+  { id: 'ops', label: 'Ops Checklist', short: 'Ops', page: 'ops', route: '/ops', on: () => isOpsV2Ready(),
+    load: () => getOpsChecklist(), peek: () => peekOpsPrograms(), get: r => r.company, date: r => iso(r.startDate) },
   { id: 'cdt', label: 'Content Dev Tracker', short: 'Content', page: 'content-dev', route: '/content-dev', on: () => !!FLOW_URLS.CONTENT_DEV_CRUD,
     load: () => getContentDevTracker(), peek: () => peekList('cdt'), get: r => r.client, date: r => iso(r.startDate) },
   { id: 'vendors', label: 'Vendor Services', short: 'Vendors', page: 'vendors', route: '/vendors', on: () => !!FLOW_URLS.VENDOR_CRUD,

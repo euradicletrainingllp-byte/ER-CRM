@@ -19,7 +19,8 @@ import {
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { applyCreditShares } from '../services/money.js';
-import { peekList, peekAllEngagements, getSolutionTracker, getAllEngagementsCached, getOpsChecklist, getContentDevTracker } from '../services/api.js';
+import { peekList, peekAllEngagements, getSolutionTracker, getAllEngagementsCached, getContentDevTracker } from '../services/api.js';
+import { getOpsChecklist, peekOpsPrograms } from '../services/opsV2Data.js';   // Ops Checklist v2 programs
 import { getLeads, getVendorServices } from '../services/leadsVendorsApi.js';
 import { getTasks, tasksConfigured } from '../services/tasksApi.js';
 import { getConsultants, consultantsConfigured } from '../services/consultantsApi.js';
@@ -178,14 +179,14 @@ export default function FounderDashboard({ onRefreshed }) {
   const navigate = useNavigate();
   const [sol, setSol] = useState(() => peekList('solution') || []);
   const [eng, setEng] = useState(() => peekAllEngagements() || []);
-  const [ops, setOps] = useState(() => peekList('ops') || []);
+  const [ops, setOps] = useState(() => peekOpsPrograms() || []);
   const [cdt, setCdt] = useState(() => peekList('cdt') || []);
   const [leads, setLeads] = useState(() => peekList('leads') || []);
   const [vendors, setVendors] = useState(() => peekList('vendors') || []);
   const [projTasks, setProjTasks] = useState(() => peekList('tasks') || []);
   const [consultants, setConsultants] = useState(() => peekList('consultants') || []);
   const [clients, setClients] = useState(() => peekClientDirectory());
-  const [loading, setLoading] = useState(() => !(peekList('solution') && peekAllEngagements() && peekList('ops') && peekList('cdt')));
+  const [loading, setLoading] = useState(() => !(peekList('solution') && peekAllEngagements() && peekOpsPrograms() && peekList('cdt')));
   const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState({});
   const [layout, setLayoutState] = useState(readLayout);
@@ -524,15 +525,15 @@ export default function FounderDashboard({ onRefreshed }) {
         <Section id="ops" {...sp} count={list.length}>
           <div className="fd-stats fd-stats-3">
             <Stat label="Sessions · next 30 days" value={upcoming30.length} how="Engagement Calendar sessions starting today to 30 days ahead, cancelled excluded." />
-            <Stat label="Average readiness" value={avg == null ? '—' : avg + '%'} tone={avg == null ? '' : avg >= 80 ? 'green' : avg >= 50 ? 'gold' : 'coral'} how="Average Ops Checklist completion (items Yes / NA ÷ all items) of those sessions that have an Ops row." />
-            <Stat label="Not in Ops Checklist" value={upcoming30.filter(e => !e._ops).length} tone={upcoming30.some(e => !e._ops) ? 'coral' : 'green'} how="Sessions in the next 30 days with no Ops Checklist row of the same Index." />
+            <Stat label="Average readiness" value={avg == null ? '—' : avg + '%'} tone={avg == null ? '' : avg >= 80 ? 'green' : avg >= 50 ? 'gold' : 'coral'} how="Average Ops Checklist v2 completion (steps Done ÷ applicable steps) of the sessions that have a checklist." />
+            <Stat label="Not in Ops Checklist" value={upcoming30.filter(e => !e._ops).length} tone={upcoming30.some(e => !e._ops) ? 'coral' : 'green'} how="Sessions in the next 30 days with no Ops Checklist v2 program of the same Index." />
           </div>
           {list.length ? (
             <ExpandList rows={list.slice(0, 12).map(e => ({
               id: `${e.egId}|${e.sno}`, main: e.company, sub: `${fmtDay(e._start)} · ${e.topic || '—'}`,
               meter: e.ready, right: e._ops ? `${e.openItems} open${e.lateItems ? ` · ${e.lateItems} late` : ''}` : 'Not added', tone: e.lateItems || !e._ops ? 'coral' : '',
               details: [['Dates', `${e._start}${e._end !== e._start ? ' → ' + e._end : ''}`], ['Lead consultant', e.consultant1], ['Co-consultant', e.consultant2], ['Location', e.location],
-                ['Internal POC', e._ops?.internalPoc], ['Participants', e._ops?.noOfParticipants], ['Pax list received', e._ops?.paxListReceived],
+                ['Internal POC', e._ops?.internalPoc], ['Checklist status', e._ops?.checklistStatus], ['Next step due', e._ops?.nextDue],
                 ['Contract', [e.contract, e.poStatus].filter(Boolean).join(' · ')]],
             }))} onOpen={() => open('ops')} openLabel="Open in Ops Checklist" />
           ) : <Empty>Every session in the next 30 days is 100% ready</Empty>}
@@ -558,7 +559,7 @@ export default function FounderDashboard({ onRefreshed }) {
     done: () => {
       const inP = done.filter(d => inRange(d.date, range));
       const groups = {};
-      inP.forEach(d => { const k = d.tracker === 'ops' ? 'Ops checklist items' : d.label.split(':')[0]; groups[k] = groups[k] || { n: 0, amt: 0 }; groups[k].n++; groups[k].amt += d.amount || 0; });
+      inP.forEach(d => { const k = d.tracker === 'ops' ? 'Ops checklist steps' : d.label.split(':')[0]; groups[k] = groups[k] || { n: 0, amt: 0 }; groups[k].n++; groups[k].amt += d.amount || 0; });
       const order = ['Session delivered', 'Proposal submitted', 'Invoice raised', 'Payment received', 'Lead converted to BD', 'Lead action', 'Client interaction', 'Client action closed', 'Task completed', 'Vendor cost billed to client', 'Vendor paid', 'Ops checklist items', 'Content completed', 'Content Assets', 'Pre-Work', 'Post-Work', 'Consultant contract renewed'];
       return (
         <Section id="done" {...sp} right={<span className="fd-muted">{periodLabel}</span>} count={inP.length}>
@@ -915,7 +916,7 @@ function CalendarSection({ layout, setLayout, upcoming, open, flags }) {
                     ['EG.ID', e.egId], ['Dates', `${e._start}${e._end !== e._start ? ' → ' + e._end : ''}`], ['Days', e.day], ['Lead consultant', e.consultant1], ['Co-consultant', e.consultant2],
                     ['Location', e.location], ['Service', [e.serviceType, e.offering].filter(Boolean).join(' · ')], ['Contract', [e.contract, e.poStatus].filter(Boolean).join(' · ')],
                     ['Price', rupee(Number(e.price))], ['Ops readiness', e.ready != null ? `${e.ready}% · ${e.openItems} open · ${e.lateItems} late` : 'Not added to Ops Checklist'],
-                    ['Internal POC', e._ops?.internalPoc], ['Participants', e._ops?.noOfParticipants], ['Comments', e.comments], ['Proposal link', e.proposalLink],
+                    ['Internal POC', e._ops?.internalPoc], ['Checklist status', e._ops?.checklistStatus], ['Comments', e.comments], ['Proposal link', e.proposalLink],
                   ]} onOpen={() => open('engagement')} openLabel="Open in Engagement Calendar" />}
                 </div>
               );

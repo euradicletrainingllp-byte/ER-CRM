@@ -29,30 +29,6 @@ export const toIso = d => {
 /** Engagement already finished (end date, else start date, is before today) */
 const ended = r => { const e = toIso(r.endDate) || toIso(r.startDate); return !!e && e < todayIso(); };
 
-// ── Operations Checklist — "Edit Session" form ──────────────────────────────
-export const OPS_RULES = {
-  skip: r => cancelled(r),
-  fields: [
-    { key: 'egId',             label: 'EG.ID' },
-    { key: 'clientSpoc',       label: 'Client SPOC' },
-    { key: 'internalPoc',      label: 'Internal POC' },
-    { key: 'startDate',        label: 'Engagement Start Date' },
-    { key: 'endDate',          label: 'Engagement End Date' },
-    { key: 'topic',            label: 'Topic / Program' },
-    { key: 'sector',           label: 'Sector' },
-    { key: 'serviceType',      label: 'Service Type' },
-    { key: 'offering',         label: 'Offering' },
-    { key: 'programType',      label: 'Program Type' },
-    { key: 'location',         label: 'Location' },
-    { key: 'noOfParticipants', label: 'No. of Participants', test: blankOrZero },
-    { key: 'day',              label: 'Day(s)',              test: blankOrZero },
-    { key: 'consultant1',      label: 'Consultant 1' },
-    { key: 'contractType',     label: 'Contract Type' },
-    { key: 'contractStatus',   label: 'Contract Status' },
-    { key: 'paxListReceived',  label: 'Pax List Received' },
-  ],
-};
-
 // ── Engagement Calendar — "Edit Engagement" form (finance fields live in the Finance Tracker) ──
 export const EC_RULES = {
   skip: r => cancelled(r),

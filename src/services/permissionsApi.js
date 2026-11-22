@@ -20,7 +20,9 @@
  *  Values are the strings "true" or "false".
  */
 
-// ── Paste your Power Automate flow URLs here ────────────────────────────────
+import { isAdminCrudReady, adminList, adminCreate, adminUpdate, adminDelete, runLimited } from './adminApi';
+
+// ── Legacy flows (used only while FLOW_URLS.ADMIN_CRUD is empty) ──────────── ────────────────────────────────
 const GET_PERMISSIONS_URL  = 'https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/28/workflows/ed155099fdf7435a83d22fbafc48d847/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=uN77XTW7kkQgvgpCWidW7N0xCg9rMORHzaHPVFnnLss';
 const SAVE_PERMISSIONS_URL = 'https://default018223f9187e4f9091b8a53275307c.d9.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/01/workflows/db70b4afa0264a2e9048cfa65aa0448d/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=XAMFYLFLeUZpkh2jtN3zyNDyRJ8tgM9qWXZctdxWnwk';
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,19 +91,22 @@ async function fetchWithRetry(url, options, timeoutMs = 90_000, retries = 1) {
  * Fetch all permissions from Excel.
  * Returns: { [email]: { name, crud: { [page]: { create, read, update, delete } } } }
  */
-export async function fetchPermissions() {
+async function getPermissionRows() {
+  if (isAdminCrudReady()) return adminList('permissions');
   if (!GET_PERMISSIONS_URL.startsWith('http')) {
     throw new Error('GET_PERMISSIONS_URL not configured in permissionsApi.js');
   }
-
   const res = await fetchWithRetry(GET_PERMISSIONS_URL, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({}),
   });
   if (!res.ok) throw new Error(`GET permissions failed: ${res.status}`);
+  return res.json();
+}
 
-  const rows = await res.json();
+export async function fetchPermissions() {
+  const rows = await getPermissionRows();
   const perms = {};
   const list = Array.isArray(rows) ? rows : (rows.value || []);
   if (list.length) {
@@ -138,10 +143,6 @@ export async function fetchPermissions() {
  * permsObj: { [email]: { name, crud: { [page]: { create, read, update, delete } } } }
  */
 export async function savePermissions(permsObj) {
-  if (!SAVE_PERMISSIONS_URL.startsWith('http')) {
-    throw new Error('SAVE_PERMISSIONS_URL not configured in permissionsApi.js');
-  }
-
   const rows = Object.entries(permsObj).map(([email, cfg]) => {
     const row = { Email: email, Name: cfg.name || email.split('@')[0] };
     for (const page of PAGES) {
@@ -155,6 +156,11 @@ export async function savePermissions(permsObj) {
     return row;
   });
 
+  if (isAdminCrudReady()) return savePermissionsGeneric(rows);
+
+  if (!SAVE_PERMISSIONS_URL.startsWith('http')) {
+    throw new Error('SAVE_PERMISSIONS_URL not configured in permissionsApi.js');
+  }
   const res = await fetchWithRetry(SAVE_PERMISSIONS_URL, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -165,4 +171,33 @@ export async function savePermissions(permsObj) {
     if (res.status === 502) throw new Error('SAVE permissions failed: 502 — PA flow timed out. Open PA and check the flow run history for errors.');
     throw new Error(`SAVE permissions failed: ${res.status}`);
   }
+}
+
+/**
+ * Generic-flow save: compares with what Excel holds now and sends only
+ * changes — update changed users, create new users, delete removed users.
+ * Only columns that exist in the Excel table are sent (missing ones are skipped).
+ */
+async function savePermissionsGeneric(rows) {
+  const current = await adminList('permissions');
+  const norm = v => String(v ?? '').trim().toLowerCase();
+  const byEmail = new Map(current.map(r => [norm(r.Email), r]));
+  const cols = current.length ? new Set(Object.keys(current[0])) : null;
+  const fit = row => cols ? Object.fromEntries(Object.entries(row).filter(([k]) => cols.has(k))) : row;
+
+  const jobs = [];
+  const wanted = new Set();
+  for (const row of rows) {
+    const email = norm(row.Email);
+    wanted.add(email);
+    const prev = byEmail.get(email);
+    if (!prev) { jobs.push(() => adminCreate('permissions', fit(row))); continue; }
+    const diff = {};
+    for (const [k, v] of Object.entries(fit(row))) if (k !== 'Email' && norm(prev[k]) !== norm(v)) diff[k] = v;
+    if (Object.keys(diff).length) jobs.push(() => adminUpdate('permissions', prev.Email, diff));
+  }
+  for (const [email, prev] of byEmail) if (email && !wanted.has(email)) jobs.push(() => adminDelete('permissions', prev.Email));
+
+  await runLimited(jobs, 3);
+  return { changed: jobs.length };
 }

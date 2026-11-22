@@ -16,9 +16,11 @@ import { useMsal } from '@azure/msal-react';
 import { useNavigate } from 'react-router-dom';
 import { usePermissions } from '../hooks/usePermissions.js';
 import {
-  getAllEngagementsCached, getOpsChecklist, getContentDevTracker, getSolutionTracker,
-  updateEngagementRow, updateOpsRow, _callFlow as callFlow,
+  getAllEngagementsCached, getContentDevTracker, getSolutionTracker,
+  updateEngagementRow, _callFlow as callFlow,
 } from '../services/api.js';
+import { getOpsChecklist } from '../services/opsV2Data.js';
+import { opsUpdate, isOpsV2Ready } from '../services/opsV2Api.js';
 import { runForIndex } from '../services/syncWithEC.js';
 import { getLeads, getVendorServices } from '../services/leadsVendorsApi.js';
 import { getPOs, poConfigured } from '../services/poApi.js';
@@ -47,10 +49,10 @@ const SOURCES = [
     load: () => getSolutionTracker(), get: r => r.clientName,
     rowLabel: r => `${r.proposalId} ${r.proposalVersion || ''} · row ${r.sno}${r.solutionTopic ? ` · ${r.solutionTopic}` : ''}`,
     fix: (r, name) => callFlow('SOLUTION_CRUD', { action: 'update', sno: need(r.sno, 'S No'), 'Client Name': name }) },
-  { id: 'ops', label: 'Ops Checklist', field: 'Company', on: () => !!FLOW_URLS.OPS_CHECKLIST_CRUD,
-    load: () => getOpsChecklist(), get: r => r.company,
+  { id: 'ops', label: 'Ops Checklist', field: 'Company', on: () => isOpsV2Ready(),
+    load: () => getOpsChecklist({ force: true }), get: r => r.company,
     rowLabel: r => `Index ${r.engagementKey || '—'} · ${r.topic || ''}`,
-    fix: (r, name) => updateOpsRow(r.sno, { company: name }, need(r.engagementKey, 'Index')) },
+    fix: (r, name) => opsUpdate('engagements', need(r.engagementKey, 'Index'), { Company: name }) },
   { id: 'cdt', label: 'Content Development', field: 'Client', on: () => !!FLOW_URLS.CONTENT_DEV_CRUD,
     load: () => getContentDevTracker(), get: r => r.client,
     rowLabel: r => `Index ${r.engagementKey || '—'} · ${r.topic || ''}`,

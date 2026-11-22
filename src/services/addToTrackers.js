@@ -1,5 +1,5 @@
 /**
- * EURADICLE CRM — "Add to Ops Checklist" / "Add to Content Dev Tracker"
+ * EURADICLE CRM — "Add to Ops Checklist" (v2 checklist) / "Add to Content Dev Tracker"
  *
  * One engagement at a time, started by a button on the Engagement Calendar
  * card. The new tracker row carries the engagement's Index, so the two rows
@@ -10,37 +10,15 @@
  * (Replaces the old bulk "Sync with EC", which was removed on 2026-10-07.)
  */
 
-import { checklistForEngagement } from './bdChecklistSync.js';
-import { getOpsChecklist, addOpsRow, getContentDevTracker, addContentDevRow, peekList, rememberListRow, readTrackerFresh, getAllEngagementsCached } from './api.js';
+import { getContentDevTracker, addContentDevRow, peekList, rememberListRow, readTrackerFresh, getAllEngagementsCached } from './api.js';
+import { opsList, opsCreate } from './opsV2Api.js';
+import { normStep, engagementFromEC, generateTasks } from './opsV2Engine.js';
+import { notifyChecklistCreated } from './opsV2Notify.js';
+import { peekOpsPrograms, getOpsChecklist } from './opsV2Data.js';
+import { fetchDepartments } from './departmentsApi.js';
+import { getAuditUser } from './auditLogger.js';
 
 const norm = v => String(v ?? '').replace(/\s+/g, ' ').trim();
-
-/** EC row → Ops Checklist camelCase keys (only these columns are ever changed). */
-export function ecToOC(ec) {
-  const p = {
-    egId:           ec.egId        || '',
-    company:        ec.company     || '',
-    startDate:      ec.startDate   || '',
-    endDate:        ec.endDate     || '',
-    topic:          ec.topic       || '',
-    sector:         ec.sector      || '',
-    serviceType:    ec.serviceType || '',
-    offering:       ec.offering    || '',
-    location:       ec.location    || '',
-    consultant1:    ec.consultant1 || '',
-    consultant2:    ec.consultant2 || '',
-    consultant3:    ec.consultant3 || '',
-    status:         ec.status      || '',
-    contractType:   ec.contract    || '',   // EC 'Contract'  → OC 'Contract Type'
-    contractStatus: ec.poStatus    || '',   // EC 'PO Status' → OC 'Contract Status'
-  };
-  // Day: only when the EC value is a real number (e.g. "0.5+0.5" is left untouched)
-  if (ec.day > 0) p.day = String(ec.day);
-  // BD checklist (ticked by BD — In Process or Won) → OC 'BD Checklist'.
-  // Only sent when the EC row carries one, so OC values are never blanked.
-  if (String(ec.opsChecklist || '').trim()) p.bdChecklist = String(ec.opsChecklist).trim();
-  return p;
-}
 
 /** EC row → Content Dev Tracker keys (CDT has no End Date column). */
 export function ecToCDT(ec) {
@@ -62,26 +40,35 @@ function requireIndex(eng) {
 export function isInTracker(target, eng) {
   const key = norm(eng?.engagementKey);
   if (!key) return null;
-  const rows = peekList(target === 'ops' ? 'ops' : 'cdt');
+  const rows = target === 'ops' ? peekOpsPrograms() : peekList('cdt');
   if (!rows) return null;
   return rows.some(r => norm(r.engagementKey) === key);
 }
 
 /**
- * Adds the engagement to the Ops Checklist (only if it isn't there yet).
- * @returns {{ added: boolean, index: string }}
+ * Opens an Ops Checklist v2 for the engagement (only if it has none yet):
+ * EngagementTable row + one task per active Step Library step, owners emailed.
+ * @returns {{ added: boolean, index: string, failed?: number }}
  */
 export async function addEngagementToOps(eng) {
   const index = requireIndex(eng);
-  const rows = await getOpsChecklist();                       // fresh read — duplicate check
-  if (rows.some(r => norm(r.engagementKey) === index)) return { added: false, index };
-  const row = { ...ecToOC(eng), engagementKey: index };
-  // BD checklist (In Process or Won) — taken from the proposal when the EC row doesn't carry it
-  if (!row.bdChecklist) { const cl = await checklistForEngagement(eng).catch(() => ''); if (cl) row.bdChecklist = cl; }
-  await addOpsRow(row);
-  await confirmIndexSaved('ops', row, index);
-  rememberListRow('ops', row);
-  return { added: true, index };
+  const [steps, engs, tasks, dm] = await Promise.all([opsList('steps'), opsList('engagements'), opsList('tasks'), fetchDepartments()]);
+  if (engs.some(r => norm(r['EC Index']) === index)) return { added: false, index };
+  const u = getAuditUser();
+  const actor = { email: u.email, name: u.name };
+  const engRow = engagementFromEC(eng, { actorEmail: actor.email });
+  const rows = generateTasks({ steps: steps.map(normStep).filter(x => x.id), eng: engRow, departments: dm.departments, members: dm.members,
+    existingTaskIds: tasks.map(t => t.TaskID), actorEmail: actor.email });
+  await opsCreate('engagements', engRow);
+  const ok = [];
+  for (let i = 0; i < rows.length; i += 4) {
+    const part = rows.slice(i, i + 4);
+    const res = await Promise.allSettled(part.map(r => opsCreate('tasks', r)));
+    res.forEach((r, j) => { if (r.status === 'fulfilled') ok.push(part[j]); });
+  }
+  notifyChecklistCreated(engRow, ok, actor);
+  getOpsChecklist({ force: true }).catch(() => {});
+  return { added: true, index, failed: rows.length - ok.length };
 }
 
 /**
@@ -104,9 +91,9 @@ export async function addEngagementToCDT(eng) {
 // column — the row is created with an empty Index, can't be edited later
 // ("has no Index") and the duplicate check can't see it. So read the tracker
 // back and stop with a clear message if that happened.
-const FLOW_OF   = { ops: 'OPS_CHECKLIST_CRUD', cdt: 'CONTENT_DEV_CRUD' };
-const TABLE_OF  = { ops: 'Operations Checklist → Table2', cdt: 'Content_Development_Tracker → ContentDevTable' };
-const LABEL_OF  = { ops: 'Ops Checklist', cdt: 'Content Dev Tracker' };
+const FLOW_OF   = { cdt: 'CONTENT_DEV_CRUD' };
+const TABLE_OF  = { cdt: 'Content_Development_Tracker → ContentDevTable' };
+const LABEL_OF  = { cdt: 'Content Dev Tracker' };
 const low = v => norm(v).toLowerCase();
 const nameOf = r => low(r.client ?? r.company);
 

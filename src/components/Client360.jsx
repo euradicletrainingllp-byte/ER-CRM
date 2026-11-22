@@ -20,7 +20,7 @@ import {
   SOURCES, SOURCE_BY_ID, loadWorld, peekWorld, buildIndex, clientAlerts, ecState, feedbackOf, consultantsOf, todayIso,
 } from '../services/client360.js';
 import { financeStage, totalOf, overdueDays } from '../pages/FinanceTracker.jsx';
-import { clScore } from '../pages/OpsChecklist.jsx';
+import { clScore } from '../services/opsV2Data.js';
 import { money, collectedOf, fmtInrShort } from '../services/money.js';
 import { splitLinks } from '../services/poApi.js';
 import { leadIsOpen } from '../config/leadVendorOptions.js';

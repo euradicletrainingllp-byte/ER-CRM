@@ -1298,12 +1298,12 @@ export default function SolutionTracker({ onRefreshed, view }) {
         if (bad.length) alert(`Saved. ${bad.join('\n')}`);
       }
       await load();
-      // BD checklist (In Process or Won) → this proposal's Engagement Calendar rows + their Ops Checklist rows
+      // BD checklist (In Process or Won) → this proposal's Engagement Calendar rows
       if (String(form.opsChecklist || '').trim()) {
         const solNow = [...rows, { ...form, proposalV1Link: form.proposalV1Link || '' }];
         pushBdChecklist(form.proposalId, form.opsChecklist, solNow)
           .then(r => {
-            if (r.ec || r.ops) console.info(`[BD checklist] ${form.proposalId}: copied to ${r.ec} Engagement Calendar and ${r.ops} Ops Checklist row(s)`);
+            if (r.ec || r.ops) console.info(`[BD checklist] ${form.proposalId}: copied to ${r.ec} Engagement Calendar row(s)`);
             if (r.failed.length) alert(`Checklist saved, but it could not be copied to:\n${r.failed.join('\n')}`);
           })
           .catch(e => alert(`Checklist saved, but copying it to the Engagement Calendar failed: ${e.message}`));

@@ -18,7 +18,7 @@ import ClientDirectory from './pages/ClientDirectory.jsx';
 import TaskFloat          from './components/TaskFloat.jsx';
 import { TourProvider }   from './components/tour/TourProvider.jsx';
 import EngagementPage     from './pages/EngagementPage.jsx';
-import OpsChecklist          from './pages/OpsChecklist.jsx';
+import OpsChecklistV2        from './pages/OpsChecklistV2.jsx';
 import ContentDevelopmentTracker from './pages/ContentDevelopmentTracker.jsx';
 import FinanceTracker        from './pages/FinanceTracker.jsx';
 import SolutionTracker        from './pages/SolutionTracker.jsx';
@@ -161,9 +161,10 @@ function Shell() {
             } />
             <Route path="/ops" element={
               <PermissionRoute page="ops">
-                <OpsChecklist onRefreshed={setLastRefreshed} />
+                <OpsChecklistV2 onRefreshed={setLastRefreshed} />
               </PermissionRoute>
             } />
+            <Route path="/ops-v2" element={<Navigate to="/ops" replace />} />
             <Route path="/finance" element={
               <PermissionRoute page="finance">
                 <FinanceTracker onRefreshed={setLastRefreshed} />

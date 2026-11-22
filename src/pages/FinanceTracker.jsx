@@ -3,13 +3,14 @@ import { Link, useLocation } from 'react-router-dom';
 import StatusBadge from '../components/StatusBadge.jsx';
 import { ErrorState } from '../components/LoadingState.jsx';
 import {
-  peekList, getOpsChecklist, ecHasExtraCols, ecHasInvoiceNo, ecHasBillCols,
+  peekList, ecHasExtraCols, ecHasInvoiceNo, ecHasBillCols,
   getAllEngagementsCached, peekAllEngagements,
 } from '../services/api.js';
 import {
-  saveEcFinance, PAYMENT_OPTIONS, normPayment, ecMatchesOps,
+  saveEcFinance, PAYMENT_OPTIONS, normPayment,
 } from '../services/syncWithEC.js';
 import { usePermissions } from '../hooks/usePermissions.js';
+import { getOpsChecklist, peekOpsPrograms } from '../services/opsV2Data.js';   // invoice owner = Ops v2 "Invoice raised" step
 import ExportButton from '../components/ExportButton.jsx';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, FIN_RULES } from '../config/pendingFields.js';
@@ -424,20 +425,15 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
             </Field>
 
             <Section>Ops Checklist</Section>
-            {oc ? (
+            {oc?.invoicePoc || oc?.invoiceComment ? (
               <>
-                <Field label="Invoice POC 🔒"><Val>{oc.invoicePoc}</Val></Field>
-                <Field label="Ops Checklist row"><Val>S No {oc.sno} · copies kept in step</Val></Field>
-                <Field label="Invoice Comments 🔒" full><Val style={{ fontStyle: oc.invoiceComment ? 'italic' : 'normal' }}>{oc.invoiceComment}</Val></Field>
-                <div style={{ gridColumn: '1 / -1', fontSize: 10, color: 'var(--muted)' }}>🔒 Invoice POC and Invoice Comments are edited in the Ops Checklist → Finance tab.</div>
+                <Field label="Invoice owner 🔒"><Val>{oc.invoicePoc}</Val></Field>
+                <Field label="Invoice step comment 🔒" full><Val style={{ fontStyle: oc.invoiceComment ? 'italic' : 'normal' }}>{oc.invoiceComment}</Val></Field>
+                <div style={{ gridColumn: '1 / -1', fontSize: 10, color: 'var(--muted)' }}>🔒 From the "Invoice raised" step in Ops Checklist v2.</div>
               </>
-            ) : link.state === 'wrong' ? (
-              <div style={{ gridColumn: '1 / -1', fontSize: 12, color: '#7f1d1d', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px' }}>
-                ⚠ The Ops Checklist row linked to this engagement (S No {link.oc.sno}) is <strong>{link.oc.company}</strong> ({link.oc.egId}, {fmtDate(link.oc.startDate)}) — a different engagement, so nothing is copied to it. Correct the link on that Ops Checklist row.
-              </div>
             ) : (
               <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--muted)' }}>
-                {link.state === 'loading' ? '⏳ Loading the Ops Checklist…' : 'Not in the Ops Checklist — saved to the Engagement Calendar only.'}
+                {link.state === 'loading' ? '⏳ Loading the Ops Checklist…' : 'No Ops Checklist v2 invoice step for this engagement.'}
               </div>
             )}
           </div>
@@ -459,13 +455,12 @@ function FinancePanel({ ec, link, canEdit, onEdit, saving, focusN }) {
   );
 }
 
-/** Ops Checklist link for an EC row: same Index AND same engagement. */
+/** Ops Checklist v2 program for an EC row (same Index) — read-only, for the invoice owner. */
 function linkFor(ec, opsList) {
   if (opsList == null) return { state: 'loading' };
   const k = keyOf(ec);
-  const oc = k ? opsList.find(o => keyOf(o) === k) : null;
-  if (!oc) return { state: 'none' };
-  return ecMatchesOps(ec, oc) ? { state: 'ok', oc } : { state: 'wrong', oc };
+  const oc = k ? opsList.find(o => String(o.engagementKey) === String(k)) : null;
+  return oc ? { state: 'ok', oc } : { state: 'none' };
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -480,7 +475,7 @@ export default function FinanceTracker({ onRefreshed }) {
   const [rangeLoading, setRangeLoading] = useState(() => !peekAllEngagements());
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
-  const [ops, setOps] = useState(() => peekList('ops') || null);
+  const [ops, setOps] = useState(() => peekOpsPrograms() || null);
   const [search, setSearch] = useState('');
   const [stageF, setStageF] = useState('All');
   const [selected, setSelected] = useState(null);
@@ -532,10 +527,8 @@ export default function FinanceTracker({ onRefreshed }) {
   }, []);
   useEffect(() => { load(); }, []);
   useEffect(() => { getOpsChecklist().then(setOps).catch(() => setOps(o => o || [])); }, []);
-  // Ops Checklist link per engagement (same Index AND same engagement)
+  // Ops Checklist v2 program per engagement (same Index)
   const linkOf = ec => linkFor(ec, ops);
-  const opsRef = useRef(ops);
-  opsRef.current = ops;
 
   // FY / month options from the data (latest first)
   const fyOptions = useMemo(() => [...new Set(data.map(isoStart).filter(Boolean).map(fyOf))].sort((x, y) => y - x), [data]);
@@ -689,21 +682,10 @@ export default function FinanceTracker({ onRefreshed }) {
   const patchRow = (key, values) => setData(prev => prev.map(e => (keyOf(e) === key ? { ...e, ...values } : e)));
 
   const runSave = async (key, p) => {
-    // Make sure the Ops Checklist is loaded, so the copy is never skipped by accident
-    let opsNow = opsRef.current;
-    if (opsNow == null) {
-      opsNow = await getOpsChecklist().catch(() => null);
-      if (opsNow) setOps(opsNow);
-      else { patchRow(key, p.before); showToast(`❌ ${p.ec.company}: not saved — the Ops Checklist could not be loaded. Please try again.`); return; }
-    }
-    const l = linkFor(p.ec, opsNow);
-    const res = await saveEcFinance({ ec: p.ec, changes: p.changes, oc: l.state === 'ok' ? l.oc : null })
+    const res = await saveEcFinance({ ec: p.ec, changes: p.changes })
       .catch(e => ({ ok: false, reason: String(e?.message || e) }));
     if (res.ok) {
-      if (res.ocChanges && Object.keys(res.ocChanges).length) {
-        setOps(prev => (prev || []).map(o => (keyOf(o) === key ? { ...o, ...res.ocChanges } : o)));
-      }
-      showToast(`✓ ${p.ec.company} saved${res.opsCopied ? ' · Ops Checklist updated' : ''}`);
+      showToast(`✓ ${p.ec.company} saved`);
     } else {
       patchRow(key, p.before);   // screen goes back to what Excel holds
       showToast(`❌ ${p.ec.company}: not saved — ${res.reason}`);
@@ -743,7 +725,6 @@ export default function FinanceTracker({ onRefreshed }) {
     return () => { window.removeEventListener('beforeunload', warn); [...pendingRef.current.keys()].forEach(flush); };
   }, []);
 
-  const wrongLinks = ops == null ? 0 : rows.filter(r => linkOf(r).state === 'wrong').length;
 
   const exportCols = [
     { label: 'S No', get: r => snoOf(r) }, { label: 'EG ID', key: 'egId' }, { label: 'Company', key: 'company' },
@@ -758,8 +739,8 @@ export default function FinanceTracker({ onRefreshed }) {
     { label: 'Days Overdue', get: r => overdueDays(r) || '' },
     { label: 'Amount Received', key: 'amountReceived' }, { label: 'Received Date', get: r => (toIso(r.receivedDate) ? fmtDate(r.receivedDate) : '') },
     { label: 'Balance', get: r => (totalOf(r) ? totalOf(r) - num(r.amountReceived) : '') },
-    { label: 'Invoice POC (Ops)', get: r => linkOf(r).oc?.invoicePoc ?? '' },
-    { label: 'Invoice Comments (Ops)', get: r => linkOf(r).oc?.invoiceComment ?? '' },
+    { label: 'Invoice Owner (Ops v2)', get: r => linkOf(r).oc?.invoicePoc ?? '' },
+    { label: 'Invoice Step Comment (Ops v2)', get: r => linkOf(r).oc?.invoiceComment ?? '' },
     ...(ecHasExtraCols() ? [
       { label: 'Travel Invoice Raised', key: 'travelInvoiceRaised' },
       { label: 'Travel Invoice Date', get: r => (toIso(r.travelInvoiceDate) ? fmtDate(r.travelInvoiceDate) : '') }, { label: 'Travel Amount Received', key: 'travelReceived' },
@@ -825,11 +806,6 @@ export default function FinanceTracker({ onRefreshed }) {
         <PendingFieldsBar items={pendingBar} dueItems={dueBar} onPick={openPending} onPickDue={openDue} canEdit={canEditFin} storageKey="finance" noun="engagement" />
       )}
 
-      {wrongLinks > 0 && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '6px 12px', marginBottom: 8, fontSize: 12, color: '#7f1d1d' }}>
-          ⚠ {wrongLinks} engagement{wrongLinks > 1 ? 's' : ''} in this period are linked to a different engagement's Ops Checklist row — finance is saved to the Engagement Calendar, but nothing is copied to that Ops row. Open the engagement for details.
-        </div>
-      )}
 
       <div className="grid-sidebar" style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
         {/* LEFT — engagement list */}
@@ -867,7 +843,6 @@ export default function FinanceTracker({ onRefreshed }) {
                       const isSel = selected === key;
                       const { invDue, payDue } = financeDates(r);
                       const total = totalOf(r);
-                      const l = linkOf(r);
                       const late = overdueDays(r);
                       const tLate = travelOverdueDays(r), tDue = travelDue(r);
                       const isNext = key && key === nextUpKey;
@@ -889,7 +864,6 @@ export default function FinanceTracker({ onRefreshed }) {
                             </div>
                             <div style={{ textAlign: 'right', flexShrink: 0 }}>
                               {savingKeys.has(key) && <span title="Saving…" style={{ fontSize: 11, marginRight: 4 }}>⏳</span>}
-                              {l.state === 'wrong' && <span title="Linked Ops Checklist row is a different engagement" style={{ fontSize: 10, fontWeight: 800, color: '#b91c1c', marginRight: 4 }}>⚠ Ops link</span>}
                               <StageBadge stage={r._stage} />
                               {late > 0 && <div style={{ marginTop: 4 }}><OverdueTag days={late} /></div>}
                               {tDue > 0 && <div style={{ marginTop: 4 }}><TravelTag e={r} /></div>}

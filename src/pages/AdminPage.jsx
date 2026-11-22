@@ -17,8 +17,9 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck, Search, UserPlus, Users, Save, Undo2, CheckCircle2, AlertTriangle, LayoutDashboard, Compass, Magnet, Target,
   Lightbulb, Building2, CalendarDays, ClipboardCheck, BookOpen, ListChecks, UserCheck, Wallet, Receipt, Copy, Trash2, Grid3x3,
-  Settings2, Info, RefreshCw, X, Lock,
+  Settings2, Info, RefreshCw, X, Lock, Building,
 } from 'lucide-react';
+import DepartmentsTab from '../components/admin/DepartmentsTab.jsx';
 import { usePermissions } from '../hooks/usePermissions.js';
 import { ADMIN_EMAIL } from '../config/permissions.js';
 import { usePermissionsContext } from '../context/PermissionsContext.jsx';
@@ -252,7 +253,7 @@ export default function AdminPage() {
           if (!!u.crud[p.key][o.key] !== !!f.crud[p.key][o.key]) cols.add(`${PAGE_PREFIX[p.key]}${o.label}`);
         }));
       });
-      if (cols.size) issues.push(`These columns did not keep their values: ${[...cols].join(', ')}. Add them to PermissionsTable and map them in the "Save Permissions" flow (Excel setup tab).`);
+      if (cols.size) issues.push(`These columns did not keep their values: ${[...cols].join(', ')}. ${isAdminCrudReady() ? 'Check the column names in PermissionsTable match exactly, and the Admin CRUD flow run history.' : 'Fix: paste the Admin CRUD flow URL into ADMIN_CRUD (src/config/powerAutomate.js), or set the "Save Permissions" flow\'s row to the whole item instead of mapped columns.'}`);
       setBase(fresh); setUsers(fresh);
     } catch {
       setBase(intended);
@@ -322,7 +323,7 @@ export default function AdminPage() {
       </div>
 
       <div className="lv-tabs ad-tabs">
-        {[['people', 'By person', Users], ['matrix', 'Access matrix', Grid3x3], ['setup', 'Excel setup', Settings2]].map(([k, l, I]) => (
+        {[['people', 'By person', Users], ['matrix', 'Access matrix', Grid3x3], ['departments', 'Departments', Building], ['setup', 'Excel setup', Settings2]].map(([k, l, I]) => (
           <button key={k} type="button" className={tab === k ? 'on' : ''} onClick={() => setTab(k)}><I size={13} />{l}</button>
         ))}
       </div>
@@ -466,6 +467,9 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* ── Departments ── */}
+      {tab === 'departments' && <DepartmentsTab users={users} />}
 
       {/* ── Excel setup ── */}
       {tab === 'setup' && (
