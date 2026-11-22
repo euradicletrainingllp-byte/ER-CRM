@@ -71,13 +71,14 @@ function StepDrawer({ draft, isNew, lists, departments, members, onClose, onSave
   );
 }
 
-function ListsPanel({ rows, onSave, onAdd, canEdit }) {
+function ListsPanel({ rows, onSave, onAdd, canEdit, onCheck }) {
   const [adding, setAdding] = useState({});
   if (!rows) return (
     <div className="ov2-setup">
       <b>Lists can't be edited yet.</b> In Operations Checklist.xlsx, convert the <b>Lists</b> sheet into a table named <b>ListTable</b> with columns
       <code>ListID · List · Value · Order · Active</code> (one row per value, e.g. LST-001 · Phase · 1. Setup · 1 · Yes), then allow ListTable in the OPS_V2_CRUD flow's valid tables.
       Until then the editors use the values already in the Step Library.
+      {onCheck && <div style={{ marginTop: 8 }}><button type="button" className="btn btn-outline btn-sm" onClick={onCheck}>Check again</button></div>}
     </div>
   );
   return (
@@ -109,7 +110,7 @@ function ListsPanel({ rows, onSave, onAdd, canEdit }) {
   );
 }
 
-export default function StepLibrary({ steps, departments, members, lists, listRows, canEdit, propagate, setPropagate, onSaveStep, onAddStep, onSaveList, onAddList, busy }) {
+export default function StepLibrary({ steps, departments, members, lists, listRows, canEdit, propagate, setPropagate, onSaveStep, onAddStep, onSaveList, onAddList, onCheckLists, busy }) {
   const [sub, setSub] = useState('steps');
   const [q, setQ] = useState('');
   const [showOff, setShowOff] = useState(false);
@@ -141,7 +142,7 @@ export default function StepLibrary({ steps, departments, members, lists, listRo
         </>}
       </div>
 
-      {sub === 'lists' ? <ListsPanel rows={listRows} onSave={onSaveList} onAdd={onAddList} canEdit={canEdit} /> : (
+      {sub === 'lists' ? <ListsPanel rows={listRows} onSave={onSaveList} onAdd={onAddList} canEdit={canEdit} onCheck={onCheckLists} /> : (
         <div className="ov2-lib-main">
           <div className="table-wrap ov2-tl">
             <table className="ov2-table ov2-libt">

@@ -101,13 +101,21 @@ export const VENDOR_COLS = {
   vendorInvoiceLink: 'Vendor Invoice Link', paymentStatus: 'Vendor Payment Status', paidAmount: 'Paid Amount', paidDate: 'Paid Date',
   comments: 'Comments', createdBy: 'Created By',
 };
+// Link columns (2026-11-22): sent only once a read shows them in VendorServiceTable, so saves keep
+// working before the Excel change. Source = Manual | Ops Checklist | Travel Desk.
+export const VENDOR_LINK_COLS = { source: 'Source', opsTaskId: 'Ops Task ID', tripId: 'Trip ID' };
+let _vendorHasLinkCols = false;
+export const vendorHasLinkCols = () => _vendorHasLinkCols;
+const vendorCols = () => (_vendorHasLinkCols ? { ...VENDOR_COLS, ...VENDOR_LINK_COLS } : VENDOR_COLS);
 const VENDOR_DATES = new Set(['serviceDate', 'clientInvoiceDate', 'vendorInvoiceDate', 'paidDate']);
 const VENDOR_NUMS = new Set(['quantity', 'rate', 'amount', 'gst', 'total', 'paidAmount']);
 
 async function fetchVendorServices() {
   const data = await callFlow('VENDOR_CRUD', { action: 'get' });
-  return rowsOf(data).map(raw => {
-    const r = readRow(raw, VENDOR_COLS, VENDOR_DATES, VENDOR_NUMS);
+  const rows = rowsOf(data);
+  if (rows.length) _vendorHasLinkCols = rows.some(raw => 'Source' in raw || 'Trip_ID' in raw || 'Trip ID' in raw);
+  return rows.map(raw => {
+    const r = readRow(raw, vendorCols(), VENDOR_DATES, VENDOR_NUMS);
     return { ...r, sno: r.serviceId };
   }).filter(r => r.serviceId || r.vendorName);
 }
@@ -124,13 +132,13 @@ export function vendorTotals(v) {
 
 export async function addVendorService(v) {
   const { amount, total } = vendorTotals(v);
-  const body = toBody({ ...v, amount, total }, VENDOR_COLS, VENDOR_DATES, { create: true });
+  const body = toBody({ ...v, amount, total }, vendorCols(), VENDOR_DATES, { create: true });
   return callFlow('VENDOR_CRUD', { action: 'create', sno: v.serviceId, ...body });
 }
 export async function updateVendorService(v) {
   if (!txt(v.serviceId)) throw new Error('This service has no Service ID in Excel, so it cannot be saved. Type an ID (e.g. VS-0042) in its Service ID cell, then Refresh.');
   const { amount, total } = vendorTotals(v);
-  const body = toBody({ ...v, amount, total }, VENDOR_COLS, VENDOR_DATES, { create: false });
+  const body = toBody({ ...v, amount, total }, vendorCols(), VENDOR_DATES, { create: false });
   return callFlow('VENDOR_CRUD', { action: 'update', sno: v.serviceId, ...body });
 }
 export async function deleteVendorService(serviceId) {

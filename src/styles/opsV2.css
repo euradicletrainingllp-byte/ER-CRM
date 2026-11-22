@@ -159,3 +159,26 @@
 .ov2 .ov2-insert button { opacity: .45; height: 16px; line-height: 16px; }
 .ov2 .ov2-insert:hover button { opacity: 1; }
 @media (max-width: 900px) { .ov2 .ov2-kpis { grid-template-columns: repeat(2, 1fr); } }
+
+/* Travel Desk */
+.ov2 .ov2-cal { padding: 10px 12px; overflow: auto; }
+.ov2-cal-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.ov2-cal-bar b { color: var(--navy); min-width: 130px; text-align: center; }
+.ov2-cal-legend { margin-left: auto; display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); }
+.ov2-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
+.ov2-cal-dow { background: var(--navy); color: #fff; font-size: 11px; font-weight: 700; padding: 5px 8px; border-right: 1px solid var(--border); }
+.ov2-cal-day { min-height: 96px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 4px; display: flex; flex-direction: column; gap: 3px; background: var(--white); }
+.ov2-cal-day.out { background: var(--bg); }
+.ov2-cal-day.out .ov2-cal-num { color: var(--muted); }
+.ov2-cal-day.today { box-shadow: inset 0 0 0 2px var(--mauve); }
+.ov2-cal-num { font-size: 12px; font-weight: 700; color: var(--navy); }
+.ov2-tripchip { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--warning-lt); color: #6b4a00; }
+.ov2-cal-legend .ov2-tripchip { display: inline-block; width: auto; cursor: default; }
+.ov2-tripchip.info { background: var(--info-lt); color: #006b6e; }
+.ov2-tripchip.green { background: var(--success-lt); color: #065f46; }
+.ov2-tripchip.gray { background: #F1F5F9; color: #475569; }
+.ov2-tripchip.red { background: var(--error-lt); color: #8b2e20; text-decoration: line-through; }
+.ov2-vendor-links { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.ov2 .ov2-doneon { display: flex; flex-direction: column; gap: 1px; min-width: 128px; }
+.ov2 .ov2-doneon .ov2-cell { border-color: var(--border); background: var(--white); }
+.ov2 .ov2-doneon small { font-size: 11px; }

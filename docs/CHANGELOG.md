@@ -416,3 +416,21 @@
 - TAT "2" (or "-2") = 2 days before the anchor date (Start; End for End-anchored steps), "+2" = 2 days after, "0" = on the day. Stored as text "2" / "+2". Inputs accept the sign and show "2d before start" / "+2d after start"; invalid values rejected.
 - Files: services/opsV2Engine.js (parseTat, tatOffset, fmtTat, tatLabel, isValidTat), pages/OpsChecklistV2.jsx, components/ops/StepLibrary.jsx, tests. .gitignore: backups/, Feedback 17th November/.
 - Manual: format the "TAT (days)" column as Text in StepTable and OpsTaskTable (otherwise Excel turns "+2" into 2). Post-program steps need "+N" (e.g. invoice "+1" with Anchor End).
+
+## 2026-11-22 18:39 — Fix: "Add to Ops Checklist" / "+ New checklist" failing (502)
+- Cause: the Excel connector names the "EG.ID" column "EG_x002e_ID"; every program/step create sent "EG.ID" → flow 502 (confirmed live: same update with EG.ID → 502, with EG_x002e_ID → 200). Reads also returned EG_x002e_ID, so EG.ID showed blank.
+- Fix: services/opsV2Api.js decodes column names on read and encodes dotted names on write (one place). Test added in test/opsV2Api.test.js.
+
+## 2026-11-22 18:51 — Ops v2: no repeated 502 for missing ListTable
+- Confirmed live: OPS_V2_CRUD answers 502 for any table it doesn't have (ListTable not created yet; unknown table also 502, not 400).
+- The "ListTable missing" result is remembered per browser for 24 h, so normal page loads make no call; Step Library → Lists → "Check again" re-tests. Files: pages/OpsChecklistV2.jsx, components/ops/StepLibrary.jsx.
+- Manual: create ListTable (seed in Claude outputs/ops-checklist-v2/ListTable_import.xlsx) + add it to the flow's valid tables; add a 400 Response for unknown tables in the flow.
+
+## 2026-11-22 19:04 — Ops v2: Travel Desk (list + calendar) and vendor requests
+- New "Travel desk" tab: trips per program (TravelTable), list grouped by program + month calendar; trip panel with all fields; auto trips for in-person consultants on checklist open; Booked → vendor rows; Shared → itinerary email; travel steps auto-Done; push billable total to EC.
+- "Raise vendor request" on steps with a Vendor Category → Vendor Service row linked by Ops Task ID / "Vendor Service IDs".
+- Files: services/opsV2Travel.js, components/ops/TravelDesk.jsx (new); pages/OpsChecklistV2.jsx, services/opsV2Api.js (travel table, opsListOptional), opsV2Engine.js (vendorCategory), opsV2Notify.js (notifyItinerary), leadsVendorsApi.js (link columns), addToTrackers.js, EngagementCalendar.jsx (toast), styles/opsV2.css; test/opsV2Travel.test.js. Backup: backups/travel-desk-*.tgz.
+- Live check 19:04: TravelTable, ListTable, StepTable "Vendor Category", OpsTaskTable "Vendor Service IDs" and vendor Source/Ops Task ID/Trip ID were NOT yet in the files the flows read — features switch on once they are.
+
+## 2026-11-22 19:14 — Ops v2: edit "Done on" in the timeline
+- Done steps show a date picker in the Done on column (people with Ops edit access); no future dates; saving recalculates the delay. Files: pages/OpsChecklistV2.jsx, styles/opsV2.css.

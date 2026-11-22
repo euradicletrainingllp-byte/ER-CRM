@@ -50,3 +50,20 @@ export function notifyStepDone(eng, doneRow, nextRow, actor = {}) {
   }
   return to.size;
 }
+
+/** Itinerary for one trip → the traveller (if an email is on the trip) + the program's Ops Owner Emails. */
+export function notifyItinerary(eng, trip, actor = {}) {
+  const row = (k, v) => (String(v ?? '').trim() ? `<tr><td style="color:#6B7280;padding:3px 10px 3px 0">${esc(k)}</td><td>${esc(v)}</td></tr>` : '');
+  const d = v => (v ? fmt(toISO(v)) : '');
+  const body = `<p>Travel plan for <b>${esc(trip.Traveller)}</b></p><table style="font:13px Arial">`
+    + row('Route', [trip['From City'], trip['To City']].filter(Boolean).join(' → '))
+    + row('Onward', [d(trip['Onward Date']), trip['Onward Time'], trip['Travel Mode'], trip['Onward Carrier / No'], trip['Onward PNR'] && `PNR ${trip['Onward PNR']}`].filter(Boolean).join(' · '))
+    + row('Return', [d(trip['Return Date']), trip['Return Time'], trip['Return Carrier / No'], trip['Return PNR'] && `PNR ${trip['Return PNR']}`].filter(Boolean).join(' · '))
+    + row('Hotel', [trip['Hotel Name'], trip['Hotel Address']].filter(Boolean).join(', '))
+    + row('Check-in / out', [d(trip['Check-in']), d(trip['Check-out'])].filter(Boolean).join(' → '))
+    + row('Local transport', trip['Local Transport']) + row('Tickets', trip['Ticket Link']) + row('Notes', trip.Notes)
+    + '</table>';
+  const to = new Set([...splitEmails(trip['Traveller Email']), ...splitEmails(eng?.['Ops Owner Emails'])]);
+  for (const e of to) emailPerson({ to: e, ...TRACKER, actor, subject: `Itinerary: ${trip.Traveller} — ${eng?.Company || trip.Company} (${fmt(toISO(eng?.['Start Date'] || trip['Program Start']))})`, html: wrap(eng || { Company: trip.Company, Topic: trip.Program, 'Start Date': trip['Program Start'] }, body) });
+  return to.size;
+}

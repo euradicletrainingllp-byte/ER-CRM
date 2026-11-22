@@ -35,3 +35,14 @@ Pending: create the flow; confirm Step Library "Escalate After (days)" values if
 
 ## Other pages reading v2 (services/opsV2Data.js)
 `getOpsChecklist()` / `peekOpsPrograms()` / `clScore()` return one summary per program (ready %, open / overdue steps, at risk, invoice owner, tasks). Used by Dashboard readiness card, Founder's Desk delivery risks, action items (open / completed steps), Client & Consultant 360, Directory Cleanup (fixes EngagementTable Company), Finance Tracker (read-only invoice owner from the "Invoice raised" step), Engagement Calendar "Add to Ops Checklist" (opens a v2 checklist).
+
+## Travel Desk + vendor requests (2026-11-22)
+- **TravelTable** (Operations Checklist.xlsx, sheet "Travel Desk", key TripID, Total Cost = formula). Read via `opsListOptional('travel')` (missing table remembered 24 h; "Check again").
+- Trips: created per consultant (Consultant 1–3) of an **in-person** program when a checklist opens (Ops page or EC "Add to Ops Checklist"), or with "+ Trips for consultants" / "+ Blank trip". Defaults: onward = start − 1, return = end + 1, check-in = start − 1, check-out = end, Billable to client, Requested.
+- Status Booked/Shared/Completed → Vendor Service rows from Travel / Stay / Local cost (Source = Travel Desk, Trip ID) unless the trip already has some; Shared → itinerary email (traveller email + Ops Owner Emails).
+- All active trips Booked → steps "travel booked" + "stay … arranged" (or Vendor Category Travel/Stay) Done; all Shared → "itinerary" step Done.
+- Program header in the list: "Update Engagement Calendar travel total" = sum of billable trip totals → EC "Travel, Stay and Misc Expenses" (asks first, replaces the value).
+- Calendar view: month grid, chips per trip day (✈ onward, 🛏 hotel night, ↩ return), coloured by status.
+- **Raise vendor request**: steps whose Step Library "Vendor Category" is set → one Vendor Service row (Source = Ops Checklist, Ops Task ID, qty = pax for printing); ID kept in OpsTaskTable "Vendor Service IDs". Needs Vendor Services Create access.
+- Vendor link columns (Source, Ops Task ID, Trip ID) are sent only after a read shows them in VendorServiceTable.
+- Rules: services/opsV2Travel.js (tests: test/opsV2Travel.test.js). UI: components/ops/TravelDesk.jsx.

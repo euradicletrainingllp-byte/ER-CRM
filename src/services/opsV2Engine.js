@@ -68,6 +68,7 @@ export function normStep(r) {
     required: s(r['Required/Optional'] ?? r.Required) || 'Required',
     remindBefore: num(r['Remind Before (days)']), escalateAfter: num(r['Escalate After (days)']),
     escalateTo: s(r['Escalate To']), active: !/^(no|false|0)$/i.test(s(r.Active)),
+    vendorCategory: s(r['Vendor Category']),
   };
 }
 
@@ -97,6 +98,7 @@ const STEP_COLS = {
   dept: ['Owner Dept'], ownerEmails: ['Owner Emails', 'Default Owner Email'], anchor: ['Anchor'], offset: ['Offset Days'],
   tat: ['TAT (days)'], mode: ['Applies To Mode'], offering: ['Applies To Offering'], required: ['Required/Optional', 'Required'],
   remindBefore: ['Remind Before (days)'], escalateAfter: ['Escalate After (days)'], escalateTo: ['Escalate To'], active: ['Active'],
+  vendorCategory: ['Vendor Category'],
 };
 export const stepColumns = sample => Object.fromEntries(Object.entries(STEP_COLS).map(([k, c]) => [k, (sample && c.find(x => x in sample)) || c[0]]));
 export function stepPatch(fields, cols) {

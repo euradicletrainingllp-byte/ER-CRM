@@ -9,14 +9,19 @@ import KPICard from '../components/KPICard.jsx';
 import { usePermissions } from '../hooks/usePermissions.js';
 import { getAuditUser } from '../services/auditLogger.js';
 import { getAllEngagementsCached } from '../services/api.js';
+import { engMode } from '../services/opsV2Engine.js';
 import { fetchDepartments } from '../services/departmentsApi.js';
-import { opsList, opsCreate, opsUpdate, opsDelete, isOpsV2Ready } from '../services/opsV2Api.js';
+import { opsList, opsCreate, opsUpdate, opsDelete, isOpsV2Ready, opsListOptional } from '../services/opsV2Api.js';
 import {
   STATUSES, CHECKLIST_STATUSES, WAITING_ON, normStep, buildTimeline, datePatches, summarise, engagementFromEC,
   generateTasks, nextOpenAfter, ownersForDept, nextNumberId, seqBetween, splitEmails, joinEmails, todayISO, toISO, addDays, daysBetween,
   fmtTat, tatLabel, isValidTat, resolveOwners, stepColumns, stepPatch, STEP_SYNC_FIELDS, taskPatchFromStep, diffRow, listValues, stepFits, taskFromStep, isDone,
 } from '../services/opsV2Engine.js';
-import { notifyChecklistCreated, notifyStepDone } from '../services/opsV2Notify.js';
+import { notifyChecklistCreated, notifyStepDone, notifyItinerary } from '../services/opsV2Notify.js';
+import TravelDesk from '../components/ops/TravelDesk.jsx';
+import { tripsForProgram, vendorRowsForTrip, vendorRowForStep, travelStepsToComplete } from '../services/opsV2Travel.js';
+import { getVendorServices, addVendorService, nextServiceId } from '../services/leadsVendorsApi.js';
+import { updateECFinanceAmounts } from '../services/syncWithEC.js';
 import { programsFrom, setOpsPrograms } from '../services/opsV2Data.js';
 import OwnerChips, { DeptChips } from '../components/ops/OwnerChips.jsx';
 import StepLibrary from '../components/ops/StepLibrary.jsx';
@@ -25,9 +30,7 @@ import '../styles/opsV2.css';
 const s = v => String(v ?? '').trim();
 const fmtD = iso => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—');
 const keyOf = e => s(e['EC Index']);
-// ListTable is optional until it is created in Excel: tried once per page load (no retry), then skipped.
-let listsProbe = null;
-const loadLists = () => (listsProbe ||= opsList('lists', { retries: 0 }).catch(() => null));
+const loadLists = ({ force = false } = {}) => opsListOptional('lists', { force });   // null until ListTable exists
 const STATUS_CLS = { 'Not Started': 'gray', 'In Progress': 'info', Waiting: 'yellow', Blocked: 'red', Done: 'green', NA: 'gray' };
 
 async function pool(items, fn, n = 4) {
@@ -120,6 +123,7 @@ export default function OpsChecklistV2({ onRefreshed }) {
   const [msg, setMsg] = useState('');
   const [propagate, setPropagate] = useState(false);
   const tasksRef = useRef([]);
+  const tripsRef = useRef([]);
   const today = todayISO();
   const actor = () => { const u = getAuditUser(); return { email: u.email || myEmail, name: u.name || '' }; };
 
@@ -128,10 +132,11 @@ export default function OpsChecklistV2({ onRefreshed }) {
     try {
       const [steps, engagements, tasks, dm] = await Promise.all([opsList('steps'), opsList('engagements'), opsList('tasks'), fetchDepartments()]);
       tasksRef.current = tasks;
-      const listRows = await loadLists();                            // null until ListTable exists
+      const [listRows, travel] = await Promise.all([loadLists(), opsListOptional('travel')]);   // null until the tables exist
+      tripsRef.current = travel || [];
       setOpsPrograms(programsFrom(steps, engagements, tasks));   // Dashboard / Founder's Desk / 360 copy
       setData({ stepRows: steps, steps: steps.map(normStep).filter(x => x.id), engagements: engagements.filter(keyOf), tasks,
-        departments: dm.departments, members: dm.members, listRows });
+        departments: dm.departments, members: dm.members, listRows, travel });
       onRefreshed?.(new Date().toLocaleTimeString());
     } catch (e) { setError(e); } finally { setLoading(false); }
   }
@@ -216,7 +221,7 @@ export default function OpsChecklistV2({ onRefreshed }) {
     if (status === 'In Progress' && !toISO(row['Started On'])) patch['Started On'] = today;
     if (status === 'NA') patch.Applicable = 'NA';
     else if (s(row.Applicable) === 'NA') patch.Applicable = 'Yes';
-    patchTask(row, patch, { doneNotify: status === 'Done' && s(row.Status) !== 'Done' });
+    return patchTask(row, patch, { doneNotify: status === 'Done' && s(row.Status) !== 'Done' });
   }
   const toggleNA = row => patchTask(row, s(row.Applicable) === 'NA' || s(row.Status) === 'NA'
     ? { Applicable: 'Yes', Status: 'Not Started' } : { Applicable: 'NA', Status: 'NA', 'Completed On': '' });
@@ -264,7 +269,14 @@ export default function OpsChecklistV2({ onRefreshed }) {
       const ok = rows.filter((_, i) => !(res[i] instanceof Error));
       commitTasks([...tasksRef.current, ...ok]);
       const sent = notifyChecklistCreated(eng, ok, a);
-      setMsg(`${eng.Company}: ${ok.length} steps created${ok.length < rows.length ? `, ${rows.length - ok.length} failed — press ↺ to check` : ''} · ${sent} owner${sent === 1 ? '' : 's'} notified.`);
+      let tripsMade = 0;
+      if (data.travel) {                                   // Travel Desk: one trip per consultant (in-person)
+        const tr = tripsForProgram(eng, { existing: tripsRef.current, existingIds: tripsRef.current.map(t => t.TripID), actorEmail: a.email, today });
+        const tres = await pool(tr, r => opsCreate('travel', r));
+        const tok = tr.filter((_, i) => !(tres[i] instanceof Error)); tripsMade = tok.length;
+        if (tok.length) commitTrips([...tripsRef.current, ...tok]);
+      }
+      setMsg(`${eng.Company}: ${ok.length} steps created${ok.length < rows.length ? `, ${rows.length - ok.length} failed — press ↺ to check` : ''} · ${sent} owner${sent === 1 ? '' : 's'} notified${tripsMade ? ` · ${tripsMade} trip(s) added to the Travel Desk` : ''}.`);
       setSel(keyOf(eng)); setTab('programs'); setShowNew(false); setStatusF('Active'); setQ('');
     } catch (e) { setMsg(`Checklist not created: ${e.message || e}`); } finally { setBusy(''); }
   }
@@ -282,6 +294,105 @@ export default function OpsChecklistV2({ onRefreshed }) {
     datesChecked.current = true;
     (async () => { for (const k of openKeys()) await syncDates(k); })().catch(() => {});
   }, [data]);
+
+  // ── Vendor requests + Travel Desk ───────────────────────────────────────────
+  const commitTrips = next => { tripsRef.current = next; setData(d => ({ ...d, travel: next })); };
+  const idsOf = v => s(v).split(/[;,]/).map(x => x.trim()).filter(Boolean);
+  /** Next Vendor Service IDs from a fresh read, so two people never get the same ID. */
+  async function vendorIdMaker() {
+    const ids = (await getVendorServices()).map(r => r.serviceId);
+    return () => { const id = nextServiceId(ids.map(serviceId => ({ serviceId }))); ids.push(id); return id; };
+  }
+
+  async function raiseVendorRequest(t) {
+    if (!canCreate('vendors')) return setMsg('Creating vendor rows needs Create access to Vendor Services (Admin Panel).');
+    const eng = engByKey[s(t.row['EC Index'])];
+    setBusy('Creating vendor request…');
+    try {
+      const next = await vendorIdMaker();
+      const v = vendorRowForStep(t.step, t.row, eng, { serviceId: next(), actorEmail: actor().email, due: t.due });
+      await addVendorService(v);
+      const linked = tasksRef.current.some(x => 'Vendor Service IDs' in x);
+      if (linked) await patchTask(t.row, { 'Vendor Service IDs': [...idsOf(t.row['Vendor Service IDs']), v.serviceId].join('; ') });
+      setMsg(`${v.serviceId} created in Vendor Services (${v.category}) — add the vendor, quantity and rate there.${linked ? '' : ' (Add the "Vendor Service IDs" column to OpsTaskTable to keep this link on the step.)'}`);
+    } catch (e) { setMsg(`Vendor request not created: ${e.message || e}`); } finally { setBusy(''); }
+  }
+
+  async function saveTrip(trip, patch) {
+    const id = s(trip.TripID); const before = tripsRef.current;
+    const full = { ...patch, 'Updated On': today };
+    commitTrips(before.map(t => (s(t.TripID) === id ? { ...t, ...full } : t)));
+    try { await opsUpdate('travel', id, full); return true; }
+    catch (e) { commitTrips(before); setMsg(`Trip not saved: ${e.message || e}`); return false; }
+  }
+  async function addTripsFromConsultants(k) {
+    const eng = engByKey[k];
+    const rows = tripsForProgram(eng, { existing: tripsRef.current, existingIds: tripsRef.current.map(t => t.TripID), actorEmail: actor().email, today });
+    if (!rows.length) return setMsg(engMode(eng) !== 'In-person' ? `${eng.Company} is virtual — no travel needed.` : 'Every consultant already has a trip (or the program has no consultants in the Engagement Calendar). Use “+ Blank trip”.');
+    setBusy('Adding trips…');
+    const res = await pool(rows, r => opsCreate('travel', r));
+    const ok = rows.filter((_, i) => !(res[i] instanceof Error));
+    commitTrips([...tripsRef.current, ...ok]);
+    setBusy(''); setMsg(`${ok.length} trip(s) added for ${eng.Company}${ok.length < rows.length ? ` · ${rows.length - ok.length} failed` : ''}.`);
+  }
+  async function addBlankTrip(k) {
+    const eng = engByKey[k];
+    const row = {
+      TripID: nextNumberId('TR', tripsRef.current.map(t => t.TripID), 4), 'EC Index': k, 'EG.ID': s(eng['EG.ID']), Company: s(eng.Company), Program: s(eng.Topic),
+      'Program Start': toISO(eng['Start Date']), 'Program End': toISO(eng['End Date']) || toISO(eng['Start Date']), Location: s(eng.Location),
+      'To City': s(eng.Location), 'Traveller Role': 'Other', 'Travel Mode': 'Flight', 'Billable to Client': 'Billable to client', 'Booking Status': 'Requested',
+      'Created By': actor().email, 'Updated On': today,
+    };
+    setBusy('Adding trip…');
+    try { await opsCreate('travel', row); commitTrips([...tripsRef.current, row]); setMsg(`${row.TripID} added — open it to fill in the traveller.`); }
+    catch (e) { setMsg(`Trip not added: ${e.message || e}`); } finally { setBusy(''); }
+  }
+  async function deleteTrip(trip) {
+    if (!window.confirm(`Delete trip ${trip.TripID} (${trip.Traveller || 'no traveller'})? This cannot be undone. Vendor rows already created stay in Vendor Services.`)) return false;
+    const before = tripsRef.current;
+    commitTrips(before.filter(t => t.TripID !== trip.TripID));
+    try { await opsDelete('travel', trip.TripID); return true; } catch (e) { commitTrips(before); setMsg(`Not deleted: ${e.message || e}`); return false; }
+  }
+  async function raiseTripVendors(trip) {
+    if (!canCreate('vendors')) { setMsg('Creating vendor rows needs Create access to Vendor Services (Admin Panel).'); return; }
+    const next = await vendorIdMaker();
+    const rows = vendorRowsForTrip(trip, { nextId: next, actorEmail: actor().email });
+    if (!rows.length) { setMsg(`${trip.TripID}: enter the Travel / Stay / Local cost, then use “Create vendor rows”.`); return; }
+    const res = await pool(rows, r => addVendorService(r), 1);
+    const ok = rows.filter((_, i) => !(res[i] instanceof Error)).map(r => r.serviceId);
+    if (ok.length) await saveTrip(trip, { 'Vendor Service IDs': [...idsOf(trip['Vendor Service IDs']), ...ok].join('; ') });
+    setMsg(`${trip.TripID}: ${ok.length} vendor row(s) created (${ok.join(', ') || '—'})${ok.length < rows.length ? ` · ${rows.length - ok.length} failed` : ''}.`);
+  }
+  async function setTripStatus(trip, status) {
+    const patch = { 'Booking Status': status };
+    if (status === 'Booked' && !s(trip['Booked On'])) Object.assign(patch, { 'Booked By': actor().email, 'Booked On': today });
+    if (status === 'Shared') patch['Shared With Traveller On'] = today;
+    setBusy('Saving trip…');
+    try {
+      if (!(await saveTrip(trip, patch))) return;
+      const now = { ...trip, ...patch };
+      const k = s(trip['EC Index']);
+      if (['Booked', 'Shared', 'Completed'].includes(status) && !s(trip['Vendor Service IDs'])) await raiseTripVendors(now);
+      if (status === 'Shared') {
+        const n = notifyItinerary(engByKey[k], now, actor());
+        if (!s(now['Traveller Email'])) setMsg(`${trip.TripID} shared · itinerary sent to ${n} Ops owner(s) — add the traveller's email on the trip to send it to them too.`);
+      }
+      const finish = travelStepsToComplete(tasksRef.current.filter(t => s(t['EC Index']) === k), tripsRef.current.filter(t => s(t['EC Index']) === k), stepsById);
+      for (const t of finish) await setStatus(t, 'Done');
+      if (finish.length) setMsg(`Travel updated · ${finish.map(t => `“${t.Step}”`).join(', ')} marked Done in the checklist.`);
+    } finally { setBusy(''); }
+  }
+  async function pushTravelToEC(k, total) {
+    const eng = engByKey[k];
+    if (!window.confirm(`Set the Engagement Calendar "Travel, Stay and Misc Expenses" for ${eng?.Company || k} to ₹${Math.round(total).toLocaleString('en-IN')} (billable trips)? This replaces the current value.`)) return;
+    setBusy('Updating Engagement Calendar…');
+    try {
+      const ec = (await getAllEngagementsCached()).find(r => s(r.engagementKey) === k);
+      if (!ec) throw new Error(`Index ${k} not found in the Engagement Calendar`);
+      await updateECFinanceAmounts(k, { travelExpenses: Math.round(total) }, ec.startDate, ec);
+      setMsg(`Engagement Calendar updated · ${ec.company}: Travel, Stay and Misc Expenses ₹${Math.round(total).toLocaleString('en-IN')}.`);
+    } catch (e) { setMsg(`Engagement Calendar not updated: ${e.message || e}`); } finally { setBusy(''); }
+  }
 
   // ── Step Library / Lists ────────────────────────────────────────────────────
   const openKeys = () => new Set(data.engagements.filter(e => !['Closed', 'Delivered'].includes(s(e['Checklist Status']))).map(keyOf));
@@ -380,6 +491,7 @@ export default function OpsChecklistV2({ onRefreshed }) {
         <div className="ov2-tabs">
           <button className={tab === 'programs' ? 'on' : ''} onClick={() => setTab('programs')}>Programs</button>
           <button className={tab === 'my' ? 'on' : ''} onClick={() => setTab('my')}>My tasks <span>{mine.length}</span></button>
+          <button className={tab === 'travel' ? 'on' : ''} onClick={() => setTab('travel')}>Travel desk{data?.travel ? <span>{data.travel.filter(t => !['Completed', 'Cancelled'].includes(s(t['Booking Status']))).length}</span> : null}</button>
           {canEdit && <button className={tab === 'library' ? 'on' : ''} onClick={() => setTab('library')}>Step Library</button>}
         </div>
         <div className="ov2-head-act">
@@ -399,10 +511,16 @@ export default function OpsChecklistV2({ onRefreshed }) {
 
       {msg && <div className="ov2-msg" onClick={() => setMsg('')}>{msg} <span>×</span></div>}
 
-      {tab === 'library' ? (
+      {tab === 'travel' ? (
+        <TravelDesk trips={data.travel} engagements={data.engagements} canEdit={canEdit} canDelete={canDelete('ops')} busy={busy}
+          onSave={saveTrip} onStatus={setTripStatus} onAddFromConsultants={addTripsFromConsultants} onAddBlank={addBlankTrip}
+          onDelete={deleteTrip} onRaiseVendors={raiseTripVendors} onPushEC={pushTravelToEC}
+          onCheck={async () => { const rows = await opsListOptional('travel', { force: true }); tripsRef.current = rows || []; setData(d => ({ ...d, travel: rows })); setMsg(rows ? `TravelTable found · ${rows.length} trip(s).` : 'TravelTable still not found in Operations Checklist.xlsx.'); }} />
+      ) : tab === 'library' ? (
         <StepLibrary steps={data.steps} departments={data.departments} members={data.members} lists={lists} listRows={data.listRows}
           canEdit={canEdit} propagate={propagate} setPropagate={setPropagate} busy={busy}
-          onSaveStep={saveLibraryStep} onAddStep={addLibraryStep} onSaveList={saveListValue} onAddList={addListValue} />
+          onSaveStep={saveLibraryStep} onAddStep={addLibraryStep} onSaveList={saveListValue} onAddList={addListValue}
+          onCheckLists={async () => { const rows = await loadLists({ force: true }); setData(d => ({ ...d, listRows: rows })); setMsg(rows ? `ListTable found · ${rows.length} values.` : 'ListTable still not found in Operations Checklist.xlsx.'); }} />
       ) : tab === 'my' ? (
         <div className="card ov2-card">
           <div className="card-header"><span className="card-title">My tasks</span><span className="ov2-muted">{mine.length} open · {myEmail}</span></div>
@@ -493,7 +611,14 @@ export default function OpsChecklistV2({ onRefreshed }) {
                             <td>{canEdit && t.applicable
                               ? <select className={`form-input ov2-status ${STATUS_CLS[s(r.Status)] || ''}`} value={s(r.Status) || 'Not Started'} onChange={e => setStatus(r, e.target.value)}>{STATUSES.filter(x => x !== 'NA').map(x => <option key={x}>{x}</option>)}</select>
                               : <span className={`badge badge-${STATUS_CLS[s(r.Status)] || 'gray'}`}>{s(r.Status) || '—'}</span>}</td>
-                            <td>{t.done ? <span className={t.delay ? 'ov2-due late' : ''}>{fmtD(t.completed)}{t.delay ? <small> · +{t.delay}d</small> : ''}</span> : <span className="ov2-muted">—</span>}</td>
+                            <td>{!t.done ? <span className="ov2-muted">—</span>
+                              : canEdit ? (
+                                <div className="ov2-doneon">
+                                  <input key={t.completed} className="form-input ov2-cell" type="date" max={today} defaultValue={t.completed} title="Date this step was done"
+                                    onChange={e => { const v = e.target.value; if (v && v !== t.completed && v <= today) patchTask(r, { 'Completed On': v }); }} />
+                                  {t.delay ? <small className="ov2-due late">+{t.delay}d late</small> : null}
+                                </div>
+                              ) : <span className={t.delay ? 'ov2-due late' : ''}>{fmtD(t.completed)}{t.delay ? <small> · +{t.delay}d</small> : ''}</span>}</td>
                           </tr>
                           {expanded === id && (
                             <tr className="ov2-more"><td colSpan={9}>
@@ -501,6 +626,14 @@ export default function OpsChecklistV2({ onRefreshed }) {
                                 <div>
                                   {t.step?.what && <p><b>What to do:</b> {t.step.what}</p>}
                                   {t.step?.doneWhen && <p><b>Done when:</b> {t.step.doneWhen}</p>}
+                                  {t.step?.vendorCategory && (
+                                    <div className="ov2-vendor-links">
+                                      <span className="badge badge-mauve">Vendor: {t.step.vendorCategory}</span>
+                                      {s(r['Vendor Service IDs']) && <span className="ov2-muted">Vendor rows: {s(r['Vendor Service IDs'])}</span>}
+                                      {canEdit && canCreate('vendors') && <button type="button" className="btn btn-outline btn-sm" disabled={!!busy} onClick={() => raiseVendorRequest(t)}>Raise vendor request</button>}
+                                      <a className="ov2-link sm" href="/vendors">Open Vendor Services</a>
+                                    </div>
+                                  )}
                                   <div className="ov2-lbl">Owners</div>
                                   <OwnersEditor row={r} departments={data.departments} members={data.members} disabled={!canEdit} onSave={p => patchTask(r, p)} />
                                 </div>

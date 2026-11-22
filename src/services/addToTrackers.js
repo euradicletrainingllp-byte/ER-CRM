@@ -11,7 +11,8 @@
  */
 
 import { getContentDevTracker, addContentDevRow, peekList, rememberListRow, readTrackerFresh, getAllEngagementsCached } from './api.js';
-import { opsList, opsCreate } from './opsV2Api.js';
+import { opsList, opsCreate, opsListOptional } from './opsV2Api.js';
+import { tripsForProgram } from './opsV2Travel.js';
 import { normStep, engagementFromEC, generateTasks } from './opsV2Engine.js';
 import { notifyChecklistCreated } from './opsV2Notify.js';
 import { peekOpsPrograms, getOpsChecklist } from './opsV2Data.js';
@@ -67,8 +68,15 @@ export async function addEngagementToOps(eng) {
     res.forEach((r, j) => { if (r.status === 'fulfilled') ok.push(part[j]); });
   }
   notifyChecklistCreated(engRow, ok, actor);
+  // Travel Desk (when TravelTable exists): one trip per consultant of an in-person program
+  let trips = 0;
+  const travel = await opsListOptional('travel').catch(() => null);
+  if (travel) {
+    const tr = tripsForProgram(engRow, { existing: travel, existingIds: travel.map(t => t.TripID), actorEmail: actor.email });
+    for (const r of tr) { try { await opsCreate('travel', r); trips++; } catch { /* reported as fewer trips */ } }
+  }
   getOpsChecklist({ force: true }).catch(() => {});
-  return { added: true, index, failed: rows.length - ok.length };
+  return { added: true, index, failed: rows.length - ok.length, trips };
 }
 
 /**

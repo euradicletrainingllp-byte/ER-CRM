@@ -968,7 +968,7 @@ export default function EngagementCalendar({ onRefreshed, view = 'list', viewSwi
     try {
       const res = target === 'ops' ? await addEngagementToOps(eng) : await addEngagementToCDT(eng);
       showToast(res.added
-        ? `✓ Added to ${trackerLabel(target)} (Index ${res.index})${res.failed ? ` — ${res.failed} step(s) failed, check Ops Checklist` : ''}`
+        ? `✓ Added to ${trackerLabel(target)} (Index ${res.index})${res.failed ? ` — ${res.failed} step(s) failed, check Ops Checklist` : ''}${res.trips ? ` · ${res.trips} trip(s) in the Travel Desk` : ''}`
         : `ℹ Already in ${trackerLabel(target)} (Index ${res.index}) — nothing added`);
     } catch (e) {
       showToast(`❌ Could not add to ${trackerLabel(target)}: ${e.message}`);
