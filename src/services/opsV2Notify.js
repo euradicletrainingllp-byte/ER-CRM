@@ -27,7 +27,7 @@ ${body}
 export function notifyChecklistCreated(eng, tasks, actor = {}) {
   const byOwner = new Map();
   for (const t of tasks) {
-    if (t.Applicable === 'NA') continue;
+    if (t.Applicable === 'NA' || t.Status === 'Done') continue;   // auto-filled from the EC
     for (const e of splitEmails(t['Owner Emails'])) byOwner.set(e, [...(byOwner.get(e) || []), t]);
   }
   for (const [to, rows] of byOwner) {

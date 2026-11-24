@@ -14,6 +14,7 @@ import { getContentDevTracker, addContentDevRow, peekList, rememberListRow, read
 import { opsList, opsCreate, opsListOptional } from './opsV2Api.js';
 import { tripsForProgram } from './opsV2Travel.js';
 import { normStep, engagementFromEC, generateTasks } from './opsV2Engine.js';
+import { autoFillNewTasks } from './opsEcSync.js';
 import { notifyChecklistCreated } from './opsV2Notify.js';
 import { peekOpsPrograms, getOpsChecklist } from './opsV2Data.js';
 import { fetchDepartments } from './departmentsApi.js';
@@ -58,8 +59,8 @@ export async function addEngagementToOps(eng) {
   const u = getAuditUser();
   const actor = { email: u.email, name: u.name };
   const engRow = engagementFromEC(eng, { actorEmail: actor.email });
-  const rows = generateTasks({ steps: steps.map(normStep).filter(x => x.id), eng: engRow, departments: dm.departments, members: dm.members,
-    existingTaskIds: tasks.map(t => t.TaskID), actorEmail: actor.email });
+  const rows = autoFillNewTasks(generateTasks({ steps: steps.map(normStep).filter(x => x.id), eng: engRow, departments: dm.departments, members: dm.members,
+    existingTaskIds: tasks.map(t => t.TaskID), actorEmail: actor.email }), eng, engRow['Checklist Created On']);
   await opsCreate('engagements', engRow);
   const ok = [];
   for (let i = 0; i < rows.length; i += 4) {

@@ -472,3 +472,12 @@
 - Files: pages/OpsChecklistV2.jsx, components/ops/OpsOverview.jsx. Backup: backups/pre-dup-taskid-*.tgz. Manual: rename duplicates in OpsTaskTable.
 - Sections 4–6 fix: cards grow (no inner scroll), max 5 rows per group + "+ N more"; on-track rows show "Next: <step> · date" and a count (amber when due this week); KPI row forced to 6 across. Files: components/ops/OpsOverview.jsx, styles/opsV2.css.
 - Sections: all 6 categories in one row (3 below 1350px), misses strip removed (card headers carry it), each card always shows "⚠ TAT missed" + "Open tasks" boxes (no fold). Duplicate-TaskID notice shortened; rename list → console.table. Files: components/ops/OpsOverview.jsx, pages/OpsChecklistV2.jsx, styles/opsV2.css.
+
+## 2026-11-24 — Ops Checklist ⇄ Engagement Calendar sync
+- New services/opsEcSync.js (+ test/opsEcSync.test.js, 8 tests): link check (company + start date/topic; same-day twins need matching topic), field sync (EG.ID, Company, dates, Topic, Sector, Service Type, Offering, Location, Days, Consultants 1–3, EC Status, Contract Type/Status), EC Cancelled → Closed / Delivered → Delivered, auto-fill steps: OPS-001 (EC live), OPS-002 (PO received/SOW/email…), OPS-004 (consultant in EC), OPS-026 (feedback score), OPS-030 (invoice date/payment), OPS-031/032 (paid). Completed On = Checklist Created On (EC invoice/received date for finance). Never undoes; skips NA and duplicate TaskIDs; ignores status words in EC consultant columns.
+- Ops page: silent sync after load (edit rights) + "⇅ Sync from EC" button; due dates recalculated when dates change; "EC link wrong → EC n" pill; wrong links never synced.
+- New checklists (page + EC "Add to Ops Checklist") are created with answered steps already Done (completed = opening day); those steps are left out of owner emails.
+- Dry run on uploaded files: 12 of 24 checklists wrongly linked (585→584, 586→?, 591→588, 624→595, 595→597, 596→599, 597→600, 598→601, 599→602, 600→603, 601→606, 602→639).
+- Files: services/opsEcSync.js (new), pages/OpsChecklistV2.jsx, services/addToTrackers.js, services/opsV2Notify.js, test/opsEcSync.test.js. Backups: backups/pre-ec-sync*.tgz.
+- Revoked auto-fill for OPS-004 Facilitator calendar block and OPS-026 Feedback report shared (manual only).
+- My tasks drill-down title: Company · Topic, start–end, EG.ID, EC Index, location, phase; wrong EC link shown there and as "⚠ EC" tag on section rows.

@@ -26,6 +26,7 @@ import { programsFrom, setOpsPrograms } from '../services/opsV2Data.js';
 import OwnerChips, { DeptChips } from '../components/ops/OwnerChips.jsx';
 import StepLibrary from '../components/ops/StepLibrary.jsx';
 import OpsOverview from '../components/ops/OpsOverview.jsx';
+import { planEcSync, autoFillNewTasks } from '../services/opsEcSync.js';
 import { useLocation } from 'react-router-dom';
 import { getTasks, peekTasks, cacheTasks, addTask, nextTaskId, nextProjectId, tasksConfigured } from '../services/tasksApi.js';
 import { useTaskUser, groupProjects, norm } from '../components/tasksShared.jsx';
@@ -134,7 +135,8 @@ export default function OpsChecklistV2({ onRefreshed }) {
   const [msg, setMsg] = useState('');
   const [propagate, setPropagate] = useState(false);
   const [scopeAll, setScopeAll] = useState(false);
-  const [phaseOpen, setPhaseOpen] = useState({});      // `${EC Index}|${phase}` → open/closed (user toggled)       // My tasks overview: my steps / all programs
+  const [phaseOpen, setPhaseOpen] = useState({});
+  const [ecIssues, setEcIssues] = useState({});       // EC Index → wrong / missing EC link (from the EC sync)      // `${EC Index}|${phase}` → open/closed (user toggled)       // My tasks overview: my steps / all programs
   const [todoIds, setTodoIds] = useState(() => todoIdsFrom(peekTasks() || []));
   const taskUser = useTaskUser();
   const { search } = useLocation();
@@ -208,8 +210,8 @@ export default function OpsChecklistV2({ onRefreshed }) {
   const commitTasks = next => { tasksRef.current = next; setData(d => ({ ...d, tasks: next })); };
 
   /** Recalculate dates for one program, keep them in state and save the changed ones. */
-  async function syncDates(ecIndex, byId = stepsById) {
-    const eng = engByKey[ecIndex] || data.engagements.find(e => keyOf(e) === ecIndex);
+  async function syncDates(ecIndex, byId = stepsById, engOverride = null) {
+    const eng = engOverride || engByKey[ecIndex] || data.engagements.find(e => keyOf(e) === ecIndex);
     const tl = buildTimeline(tasksRef.current.filter(t => s(t['EC Index']) === ecIndex), eng, byId, today);
     const patches = datePatches(tl);
     if (patches.length) {
@@ -319,7 +321,7 @@ export default function OpsChecklistV2({ onRefreshed }) {
     const eng = engagementFromEC(ec, { actorEmail: a.email, today });
     let ids;
     try { ids = await liveTaskIds(); } catch (e) { setMsg(`Checklist not created — OpsTaskTable could not be read: ${e.message || e}`); return; }
-    const rows = generateTasks({ steps: data.steps, eng, departments: data.departments, members: data.members, existingTaskIds: ids, actorEmail: a.email, today });
+    const rows = autoFillNewTasks(generateTasks({ steps: data.steps, eng, departments: data.departments, members: data.members, existingTaskIds: ids, actorEmail: a.email, today }), ec, today);
     try {
       setBusy('Saving program…');
       await opsCreate('engagements', eng);
@@ -340,6 +342,57 @@ export default function OpsChecklistV2({ onRefreshed }) {
       setSel(keyOf(eng)); setTab('programs'); setShowNew(false); setStatusF('Active'); setQ('');
     } catch (e) { setMsg(`Checklist not created: ${e.message || e}`); } finally { setBusy(''); }
   }
+
+  /**
+   * Engagement Calendar → checklist sync (rules: services/opsEcSync.js).
+   * Program fields + checklist status, due dates after date changes, auto-filled steps.
+   * Wrong / missing EC links are listed, never synced. auto = silent run after the page loads.
+   */
+  async function syncFromEc({ auto = false } = {}) {
+    if (!canEdit || !data) return;
+    if (!auto) setBusy('Syncing from the Engagement Calendar…');
+    try {
+      const ecRows = await getAllEngagementsCached({ force: !auto });
+      const plan = planEcSync({ engagements: data.engagements, tasks: tasksRef.current, ecRows, dupTaskIds: duplicateKeys('tasks', tasksRef.current), today });
+      let progs = 0, fields = 0, filled = 0, failed = 0;
+      for (const p of plan.programs) {
+        const engNow = { ...p.eng, ...p.patch };
+        if (Object.keys(p.patch).length) {
+          const full = { ...p.patch, 'Synced From EC On': today };
+          try {
+            await opsUpdate('engagements', p.k, full);
+            setData(d => ({ ...d, engagements: d.engagements.map(e => (keyOf(e) === p.k ? { ...e, ...full } : e)) }));
+            progs++; fields += p.changes.length;
+          } catch { failed++; }
+        }
+        if (p.fills.length) {
+          const res = await pool(p.fills, f => opsUpdate('tasks', f.id, { ...f.patch, 'Updated On': today }));
+          const ok = Object.fromEntries(p.fills.filter((_, i) => !(res[i] instanceof Error)).map(f => [f.id, f.patch]));
+          filled += Object.keys(ok).length; failed += p.fills.length - Object.keys(ok).length;
+          commitTasks(tasksRef.current.map(x => (ok[s(x.TaskID)] ? { ...x, ...ok[s(x.TaskID)], 'Updated On': today } : x)));
+        }
+        if (p.datesChanged || p.fills.length) await syncDates(p.k, stepsById, engNow);
+      }
+      const issues = Object.fromEntries([...plan.mismatches, ...plan.missing].map(x => [x.k, x]));
+      setEcIssues(issues);
+      const bad = Object.values(issues);
+      const parts = [];
+      if (progs) parts.push(`${progs} program${progs > 1 ? 's' : ''} updated (${fields} field${fields > 1 ? 's' : ''})`);
+      if (filled) parts.push(`${filled} step${filled > 1 ? 's' : ''} auto-completed`);
+      if (failed) parts.push(`${failed} save${failed > 1 ? 's' : ''} failed — press ⇅ again`);
+      if (bad.length) parts.push(`${bad.length} checklist${bad.length > 1 ? 's' : ''} linked to the wrong EC row: ${bad.slice(0, 4).map(x => `${x.k} (${x.eng.Company})${x.suggest ? ` → EC ${x.suggest}` : ''}`).join(', ')}${bad.length > 4 ? ', …' : ''} — not synced until the EC Index is corrected`);
+      if (parts.length) setMsg(`EC sync: ${parts.join(' · ')}.`);
+      else if (!auto) setMsg('EC sync: everything already matches the Engagement Calendar.');
+      if (progs || filled) setOpsPrograms(programsFrom(data.stepRows, data.engagements.map(e => { const p = plan.programs.find(x => x.k === keyOf(e)); return p ? { ...e, ...p.patch } : e; }), tasksRef.current));
+    } catch (e) { setMsg(`EC sync failed: ${e.message || e}`); }
+    finally { if (!auto) setBusy(''); }
+  }
+  const ecSynced = useRef(false);
+  useEffect(() => {
+    if (!data || ecSynced.current || !canEdit) return;
+    ecSynced.current = true;
+    syncFromEc({ auto: true });
+  }, [data]);
 
   async function setChecklistStatus(eng, v) {
     const k = keyOf(eng);
@@ -598,6 +651,7 @@ export default function OpsChecklistV2({ onRefreshed }) {
         </div>
         <div className="ov2-head-act">
           <button className="btn btn-outline btn-sm" onClick={load} disabled={loading}>{loading ? '⟳' : '↺'}</button>
+          {canEdit && <button className="btn btn-outline btn-sm" onClick={() => syncFromEc()} disabled={!!busy || loading} title="Copy program details, status and answered steps from the Engagement Calendar">⇅ Sync from EC</button>}
           {canCreate('ops') && <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)}>+ New checklist</button>}
         </div>
       </div>
@@ -628,7 +682,7 @@ export default function OpsChecklistV2({ onRefreshed }) {
       ) : tab === 'my' ? (
         <OpsOverview timelines={timelines} engByKey={engByKey} phases={lists.phases} myEmail={myEmail} today={today}
           scopeAll={scopeAll} setScopeAll={setScopeAll} canEdit={canEdit} onStatus={setStatus}
-          onOpen={k => { setSel(k); setTab('programs'); setStatusF('All'); }} todoIds={todoIds} onTodo={addToTodo} busy={busy} />
+          onOpen={k => { setSel(k); setTab('programs'); setStatusF('All'); }} todoIds={todoIds} onTodo={addToTodo} busy={busy} ecIssues={ecIssues} />
       ) : (
         <div className="ov2-grid">
           <div className="card ov2-card ov2-list">
@@ -666,6 +720,8 @@ export default function OpsChecklistV2({ onRefreshed }) {
                 <div className="ov2-detail-act">
                   <span className={`ov2-pill ${progPill(sum).cls}`} title={sum?.tatMissed ? `${sum.overdue} step(s) past TAT` : ''}>{sum?.tatMissed ? `TAT missed · ${sum.overdue} late · ${sum.maxLate}d` : progPill(sum).text}</span>
                   <span className="ov2-chip">{sum?.done || 0}/{sum?.applicable || 0} · next due {fmtD(sum?.nextDue)}</span>
+                  {ecIssues[sel] && <span className="ov2-pill risk" title={`EC Index ${sel} ${ecIssues[sel].current ? `is ${ecIssues[sel].current.company} · ${fmtD(toISO(ecIssues[sel].current.startDate))}` : 'is not in the Engagement Calendar'}`}>
+                    EC link wrong{ecIssues[sel].suggest ? ` → EC ${ecIssues[sel].suggest}` : ''}</span>}
                   {canEdit ? <select className="form-input ov2-mini" value={s(eng['Checklist Status']) || 'Not Started'} onChange={e => setChecklistStatus(eng, e.target.value)}>{CHECKLIST_STATUSES.map(x => <option key={x}>{x}</option>)}</select>
                     : <span className="badge badge-gray">{s(eng['Checklist Status'])}</span>}
                   {tl.some(t => todoEligible(t) && !todoIds.has(s(t.row.TaskID))) && (

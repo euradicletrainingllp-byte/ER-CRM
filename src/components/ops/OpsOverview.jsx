@@ -11,7 +11,7 @@ const fmtD = iso => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN
 const ACTIVE = e => !['Closed', 'Delivered'].includes(s(e?.['Checklist Status']));
 const STATUS_CLS = { 'Not Started': 'gray', 'In Progress': 'info', Waiting: 'yellow', Blocked: 'red', Done: 'green', NA: 'gray' };
 
-export default function OpsOverview({ timelines, engByKey, phases = [], myEmail, today, scopeAll, setScopeAll, canEdit, onStatus, onOpen, todoIds, onTodo, busy }) {
+export default function OpsOverview({ timelines, engByKey, phases = [], myEmail, today, scopeAll, setScopeAll, canEdit, onStatus, onOpen, todoIds, onTodo, busy, ecIssues = {} }) {
   const [pick, setPick] = useState(null);            // { k, phase }
   const week = addDays(today, 7);
 
@@ -59,7 +59,7 @@ export default function OpsOverview({ timelines, engByKey, phases = [], myEmail,
     return (
       <button key={p.k} type="button" className={`ov2-sec-row${missed ? ' miss' : ''}${on ? ' on' : ''}`} onClick={() => setPick(on ? null : { k: p.k, phase: x.ph })}>
         <span className="ov2-sec-prog">
-          <b>{p.eng.Company}</b>
+          <b>{p.eng.Company}{ecIssues[p.k] && <span className="ov2-eclink" title="Linked to the wrong Engagement Calendar row">⚠ EC</span>}</b>
           <small className="tp" title={s(p.eng.Topic)}>{s(p.eng.Topic) || '—'} · starts {fmtD(toISO(p.eng['Start Date']))}</small>
           {missed && p.worstStep ? <small className="st late">⚠ Late: <em>{p.worstStep}</em></small>
             : p.next ? <small className="st">→ Next: <em className="nx">{p.next.step}</em> · {fmtD(p.next.due)}</small> : null}
@@ -110,7 +110,14 @@ export default function OpsOverview({ timelines, engByKey, phases = [], myEmail,
       <div className="ov2-ovw-low">
         <div className="card ov2-card" id="ov2-ovw-steps">
           <div className="card-header">
-            <span className="card-title">{sel ? <>{sel.eng.Company} · {pick.phase} <button className="ov2-link" onClick={() => onOpen(sel.k)}>open program →</button></> : 'Steps'}</span>
+            <span className="card-title">{sel ? <span className="ov2-drill-title">
+              <b>{sel.eng.Company}</b> · {s(sel.eng.Topic) || '—'}
+              <small>Starts {fmtD(toISO(sel.eng['Start Date']))}{toISO(sel.eng['End Date']) && toISO(sel.eng['End Date']) !== toISO(sel.eng['Start Date']) ? ` – ${fmtD(toISO(sel.eng['End Date']))}` : ''}
+                {s(sel.eng['EG.ID']) ? ` · ${s(sel.eng['EG.ID'])}` : ''} · EC {sel.k} · {s(sel.eng.Location) || '—'} · {pick.phase}</small>
+              {ecIssues[sel.k] && <span className="ov2-pill risk" title={ecIssues[sel.k].current ? `EC ${sel.k} is ${ecIssues[sel.k].current.company} · ${fmtD(toISO(ecIssues[sel.k].current.startDate))} · ${s(ecIssues[sel.k].current.topic)}` : 'Not in the Engagement Calendar'}>
+                ⚠ EC link wrong — EC {sel.k} is {ecIssues[sel.k].current ? `${ecIssues[sel.k].current.company} · ${fmtD(toISO(ecIssues[sel.k].current.startDate))}` : 'missing'}{ecIssues[sel.k].suggest ? ` · correct EC ${ecIssues[sel.k].suggest}` : ''}</span>}
+              <button className="ov2-link" onClick={() => onOpen(sel.k)}>open program →</button>
+            </span> : 'Steps'}</span>
             {sel && !!selItems.filter(t => eligible(t) && !todoIds.has(s(t.row.TaskID))).length && (
               <button className="btn btn-outline btn-sm" disabled={busy === 'todo'} onClick={() => onTodo(selItems.filter(t => eligible(t) && !todoIds.has(s(t.row.TaskID))))}>+ Add due-this-week to To-Do</button>
             )}
