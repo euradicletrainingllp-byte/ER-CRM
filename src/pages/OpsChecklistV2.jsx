@@ -11,7 +11,7 @@ import { getAuditUser } from '../services/auditLogger.js';
 import { getAllEngagementsCached } from '../services/api.js';
 import { engMode } from '../services/opsV2Engine.js';
 import { fetchDepartments } from '../services/departmentsApi.js';
-import { opsList, opsCreate, opsUpdate, opsDelete, isOpsV2Ready, opsListOptional } from '../services/opsV2Api.js';
+import { opsList, opsCreate, opsUpdate, opsDelete, isOpsV2Ready, opsListOptional, duplicateKeys } from '../services/opsV2Api.js';
 import {
   STATUSES, CHECKLIST_STATUSES, WAITING_ON, normStep, buildTimeline, datePatches, summarise, engagementFromEC,
   generateTasks, nextOpenAfter, ownersForDept, nextNumberId, seqBetween, splitEmails, joinEmails, todayISO, toISO, addDays, daysBetween,
@@ -25,12 +25,23 @@ import { updateECFinanceAmounts } from '../services/syncWithEC.js';
 import { programsFrom, setOpsPrograms } from '../services/opsV2Data.js';
 import OwnerChips, { DeptChips } from '../components/ops/OwnerChips.jsx';
 import StepLibrary from '../components/ops/StepLibrary.jsx';
+import OpsOverview from '../components/ops/OpsOverview.jsx';
+import { useLocation } from 'react-router-dom';
+import { getTasks, peekTasks, cacheTasks, addTask, nextTaskId, nextProjectId, tasksConfigured } from '../services/tasksApi.js';
+import { useTaskUser, groupProjects, norm } from '../components/tasksShared.jsx';
 import '../styles/opsV2.css';
 
 const s = v => String(v ?? '').trim();
 const fmtD = iso => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—');
 const keyOf = e => s(e['EC Index']);
 const loadLists = ({ force = false } = {}) => opsListOptional('lists', { force });   // null until ListTable exists
+// Ops steps already sent to the Task Tracker carry "[OPS:<TaskID>]" in Remarks
+const todoIdsFrom = rows => new Set((rows || []).flatMap(r => [...String(r.remarks || '').matchAll(/\[OPS:([^\]]+)\]/g)].map(m => m[1])));
+const initialsOf = n => String(n || '').split(/[\s.]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+const ownerList = r => s(r['Owner Names']).split(/[,;]/).map(x => x.trim()).filter(Boolean);
+/** One pill per program: TAT missed (red) › At risk (amber) › On track (green). */
+const progPill = m => (m?.tatMissed ? { cls: 'late', text: `TAT missed · ${m.maxLate}d` }
+  : m?.atRisk ? { cls: 'risk', text: 'At risk' } : { cls: 'ok', text: m?.open ? 'On track' : 'Done' });
 const STATUS_CLS = { 'Not Started': 'gray', 'In Progress': 'info', Waiting: 'yellow', Blocked: 'red', Done: 'green', NA: 'gray' };
 
 async function pool(items, fn, n = 4) {
@@ -48,7 +59,7 @@ function DueCell({ t, today }) {
   return (
     <span className={t.overdue ? 'ov2-due late' : d <= 2 ? 'ov2-due soon' : 'ov2-due'}>
       {fmtD(t.due)}<small>{t.overdue ? ` · ${-d}d late` : d === 0 ? ' · today' : ` · in ${d}d`}</small>
-      {t.shortLead && <span className="ov2-flag" title="Was already due when the checklist was opened">short lead</span>}
+      {t.shortLead && <span className="ov2-flag" title="Was already due when the checklist was opened">!</span>}
     </span>
   );
 }
@@ -64,7 +75,7 @@ function AddStepRow({ after, departments, onCancel, onAdd, saving }) {
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   return (
     <tr className="ov2-addform">
-      <td colSpan={9}>
+      <td colSpan={7}>
         <div className="ov2-addform-in">
           <input className="form-input wide" autoFocus placeholder={`New step after “${after.row.Step}”`} value={f.step} onChange={e => set('step', e.target.value)} />
           <DeptChips value={f.dept} departments={departments} onChange={v => set('dept', v)} />
@@ -122,6 +133,11 @@ export default function OpsChecklistV2({ onRefreshed }) {
   const [showNew, setShowNew] = useState(false);
   const [msg, setMsg] = useState('');
   const [propagate, setPropagate] = useState(false);
+  const [scopeAll, setScopeAll] = useState(false);
+  const [phaseOpen, setPhaseOpen] = useState({});      // `${EC Index}|${phase}` → open/closed (user toggled)       // My tasks overview: my steps / all programs
+  const [todoIds, setTodoIds] = useState(() => todoIdsFrom(peekTasks() || []));
+  const taskUser = useTaskUser();
+  const { search } = useLocation();
   const tasksRef = useRef([]);
   const tripsRef = useRef([]);
   const today = todayISO();
@@ -132,7 +148,9 @@ export default function OpsChecklistV2({ onRefreshed }) {
     try {
       const [steps, engagements, tasks, dm] = await Promise.all([opsList('steps'), opsList('engagements'), opsList('tasks'), fetchDepartments()]);
       tasksRef.current = tasks;
-      const [listRows, travel] = await Promise.all([loadLists(), opsListOptional('travel')]);   // null until the tables exist
+      taskDupNotice(tasks);
+      const [listRows, travel] = await Promise.all([loadLists().catch(() => null), opsListOptional('travel').catch(e => { setMsg(`Travel Desk not loaded: ${e.message || e}`); return []; })]);   // null until the tables exist
+      travelNotice(travel);
       tripsRef.current = travel || [];
       setOpsPrograms(programsFrom(steps, engagements, tasks));   // Dashboard / Founder's Desk / 360 copy
       setData({ stepRows: steps, steps: steps.map(normStep).filter(x => x.id), engagements: engagements.filter(keyOf), tasks,
@@ -141,6 +159,8 @@ export default function OpsChecklistV2({ onRefreshed }) {
     } catch (e) { setError(e); } finally { setLoading(false); }
   }
   useEffect(() => { if (isOpsV2Ready()) load(); else setLoading(false); }, []);
+  useEffect(() => { if (tasksConfigured()) getTasks().then(r => setTodoIds(todoIdsFrom(r))).catch(() => {}); }, []);
+  useEffect(() => { if (search.includes('alert=tat')) { setTab('programs'); setStatusF('TAT missed'); } }, [search]);
 
   const stepsById = useMemo(() => Object.fromEntries((data?.steps || []).map(x => [x.id, x])), [data?.steps]);
   const lists = useMemo(() => {
@@ -162,9 +182,10 @@ export default function OpsChecklistV2({ onRefreshed }) {
   const sums = useMemo(() => Object.fromEntries(Object.entries(timelines).map(([k, tl]) => [k, summarise(tl, engByKey[k], today)])), [timelines, engByKey, today]);
 
   const programs = useMemo(() => (data?.engagements || [])
-    .filter(e => statusF === 'All' || (statusF === 'Active' ? !['Closed', 'Delivered'].includes(s(e['Checklist Status'])) : s(e['Checklist Status']) === statusF))
+    .filter(e => statusF === 'All' || (statusF === 'TAT missed' ? !['Closed', 'Delivered'].includes(s(e['Checklist Status'])) && sums[keyOf(e)]?.tatMissed
+      : statusF === 'Active' ? !['Closed', 'Delivered'].includes(s(e['Checklist Status'])) : s(e['Checklist Status']) === statusF))
     .filter(e => !q || `${e.Company} ${e.Topic} ${e['EG.ID']}`.toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => toISO(a['Start Date']).localeCompare(toISO(b['Start Date']))), [data?.engagements, statusF, q]);
+    .sort((a, b) => toISO(a['Start Date']).localeCompare(toISO(b['Start Date']))), [data?.engagements, statusF, q, sums]);
   useEffect(() => { if (programs.length && !programs.some(p => keyOf(p) === sel)) setSel(keyOf(programs[0])); }, [programs, sel]);
 
   const mine = useMemo(() => Object.entries(timelines).flatMap(([k, tl]) => tl
@@ -173,14 +194,15 @@ export default function OpsChecklistV2({ onRefreshed }) {
     .sort((a, b) => (b.overdue - a.overdue) || a.due.localeCompare(b.due)), [timelines, engByKey, myEmail]);
 
   const kpi = useMemo(() => {
-    const scope = tab === 'my' ? mine : Object.values(timelines).flat().filter(t => t.applicable && !t.done);
+    const scope = tab === 'my' && !scopeAll ? mine : Object.values(timelines).flat().filter(t => t.applicable && !t.done);
     const active = (data?.engagements || []).filter(e => !['Closed', 'Delivered'].includes(s(e['Checklist Status'])));
     return {
       programs: active.length, open: scope.length, overdue: scope.filter(t => t.overdue).length,
       week: scope.filter(t => t.due >= today && t.due <= addDays(today, 7)).length,
       atRisk: active.filter(e => sums[keyOf(e)]?.atRisk),
+      tat: active.filter(e => sums[keyOf(e)]?.tatMissed).sort((a, b) => (sums[keyOf(b)]?.maxLate || 0) - (sums[keyOf(a)]?.maxLate || 0)),
     };
-  }, [tab, mine, timelines, data?.engagements, sums, today]);
+  }, [tab, scopeAll, mine, timelines, data?.engagements, sums, today]);
 
   // ── Writes ──────────────────────────────────────────────────────────────────
   const commitTasks = next => { tasksRef.current = next; setData(d => ({ ...d, tasks: next })); };
@@ -214,6 +236,40 @@ export default function OpsChecklistV2({ onRefreshed }) {
     } catch (e) { commitTasks(before); setMsg(`Not saved: ${e.message || e}`); }
   }
 
+  /** Open steps → Task Tracker: one project per program (reused), one task per step, never twice. */
+  async function addToTodo(list) {
+    if (!tasksConfigured()) { setMsg('Task Tracker is not set up (TASKS_CRUD flow missing).'); return; }
+    setBusy('todo');
+    try {
+      const rows = [...await getTasks()];
+      const have = todoIdsFrom(rows);
+      let added = 0; let projName = '';
+      for (const t of list) {
+        const id = s(t.row.TaskID);
+        if (have.has(id)) continue;
+        const eng = engByKey[s(t.row['EC Index'])] || {};
+        const name = [s(eng.Company), s(eng.Topic)].filter(Boolean).join(' · ');
+        const proj = groupProjects(rows).find(p => norm(p.projectName) === norm(name) && norm(p.client) === norm(eng.Company));
+        const owner = s(t.row['Owner Names']).split(/[,;]/).map(x => x.trim()).filter(Boolean)[0] || taskUser.pickName;
+        const row = {
+          taskId: nextTaskId(rows),
+          projectId: proj?.projectId || nextProjectId(rows), projectName: proj?.projectName || name, projectType: proj?.projectType || 'Client Engagement',
+          client: proj?.client || s(eng.Company), projectOwner: proj?.projectOwner || s(eng['Internal POC']) || taskUser.pickName,
+          projectDue: proj?.projectDue || toISO(eng['Start Date']), team: 'Operations',
+          title: s(t.row.Step), description: `Ops Checklist step (${s(t.row.Phase) || '—'}) · ${s(eng['EG.ID'])}`,
+          assignedTo: owner, assignedBy: taskUser.pickName, assignedDate: today, dueDate: t.due,
+          priority: t.overdue ? 'High' : 'Medium', status: 'To do', waitingOn: '', completedDate: '', outputLink: '', updates: [],
+          remarks: `[OPS:${id}]`, createdBy: taskUser.pickName,
+        };
+        await addTask(row);
+        rows.push(row); have.add(id); added++; projName = row.projectName;
+      }
+      cacheTasks(rows); setTodoIds(new Set(have));
+      setMsg(added ? `✓ ${added} step${added > 1 ? 's' : ''} added to To-Do · project “${projName}”` : 'Already in To-Do.');
+    } catch (e) { setMsg(`Not added to To-Do: ${e.message || e}`); } finally { setBusy(''); }
+  }
+  const todoEligible = t => t.applicable && !t.done && t.due && t.due <= addDays(today, 7);
+
   function setStatus(row, status) {
     const patch = { Status: status };
     if (status === 'Done') patch['Completed On'] = toISO(row['Completed On']) || today;
@@ -230,8 +286,10 @@ export default function OpsChecklistV2({ onRefreshed }) {
     const eng = engByKey[s(after.row['EC Index'])];
     const owners = ownersForDept(f.dept, data.departments, data.members);
     const all = tasksRef.current;
+    let ids;
+    try { ids = await liveTaskIds(); } catch (e) { setMsg(`Step not added — OpsTaskTable could not be read: ${e.message || e}`); return; }
     const row = {
-      TaskID: nextNumberId('T', all.map(t => t.TaskID)), 'EG.ID': s(eng['EG.ID']), 'EC Index': keyOf(eng), Company: s(eng.Company),
+      TaskID: nextNumberId('T', ids), 'EG.ID': s(eng['EG.ID']), 'EC Index': keyOf(eng), Company: s(eng.Company),
       'Program Start': toISO(eng['Start Date']), StepID: nextNumberId('CUS', all.map(t => t.StepID), 3),
       Seq: seqBetween(after.row.Seq, nextT?.row.Seq), Phase: s(after.row.Phase), Step: f.step.trim(), 'Owner Dept': f.dept,
       'Owner Emails': joinEmails(owners.map(o => o.email)), 'Owner Names': owners.map(o => o.name).join('; '),
@@ -259,7 +317,9 @@ export default function OpsChecklistV2({ onRefreshed }) {
   async function createChecklist(ec) {
     const a = actor();
     const eng = engagementFromEC(ec, { actorEmail: a.email, today });
-    const rows = generateTasks({ steps: data.steps, eng, departments: data.departments, members: data.members, existingTaskIds: tasksRef.current.map(t => t.TaskID), actorEmail: a.email, today });
+    let ids;
+    try { ids = await liveTaskIds(); } catch (e) { setMsg(`Checklist not created — OpsTaskTable could not be read: ${e.message || e}`); return; }
+    const rows = generateTasks({ steps: data.steps, eng, departments: data.departments, members: data.members, existingTaskIds: ids, actorEmail: a.email, today });
     try {
       setBusy('Saving program…');
       await opsCreate('engagements', eng);
@@ -296,6 +356,34 @@ export default function OpsChecklistV2({ onRefreshed }) {
   }, [data]);
 
   // ── Vendor requests + Travel Desk ───────────────────────────────────────────
+  /** Warn when the trips shown are a saved copy (flow failed) or Excel has duplicate TripIDs. */
+  function travelNotice(rows) {
+    if (!rows) return;
+    const dup = duplicateKeys('travel', rows);
+    if (rows.stale) setMsg(`Travel Desk: the flow did not answer (${rows.stale.slice(0, 120)}) — showing the last saved copy. Adding trips is paused until it loads.`);
+    else if (dup.length) setMsg(`Travel Desk: TripID used more than once in Excel (${dup.join(', ')}) — rename the duplicates in TravelTable, otherwise delete/edit of those trips fails.`);
+  }
+  /** Fresh TravelTable read before creating trips → IDs never collide. Throws when the read fails. */
+  async function freshTrips() {
+    const rows = await opsListOptional('travel', { force: true });
+    if (!rows || rows.stale) throw new Error('TravelTable could not be read just now — try again in a minute');
+    tripsRef.current = rows; setData(d => ({ ...d, travel: rows }));
+    return rows;
+  }
+  /** TaskIDs from a fresh OpsTaskTable read (+ this session's) → new IDs never repeat another user's. */
+  async function liveTaskIds() {
+    const rows = await opsList('tasks');
+    return [...new Set([...rows.map(r => s(r.TaskID)), ...tasksRef.current.map(r => s(r.TaskID))].filter(Boolean))];
+  }
+  /** Warn when Excel holds the same TaskID twice and suggest free IDs for the extra rows. */
+  function taskDupNotice(rows) {
+    const dup = duplicateKeys('tasks', rows);
+    if (!dup.length) return;
+    const ids = rows.map(r => s(r.TaskID)); const fix = [];
+    for (const d of dup) for (let n = ids.filter(x => x === d).length - 1; n > 0; n--) { const nid = nextNumberId('T', ids); ids.push(nid); fix.push(`${d} → ${nid}`); }
+    console.warn('[Ops] Duplicate TaskIDs in OpsTaskTable — rename the later row of each to:'); console.table(fix.map(f => { const [from, to] = f.split(' → '); return { duplicate: from, renameTo: to }; }));
+    setMsg(`Ops tasks: ${dup.length} TaskIDs are used on more than one row in OpsTaskTable (${dup.slice(0, 4).join(', ')}${dup.length > 4 ? ', …' : ''}). Edits to those steps may hit the wrong row — the rename list is in the browser console (F12).`);
+  }
   const commitTrips = next => { tripsRef.current = next; setData(d => ({ ...d, travel: next })); };
   const idsOf = v => s(v).split(/[;,]/).map(x => x.trim()).filter(Boolean);
   /** Next Vendor Service IDs from a fresh read, so two people never get the same ID. */
@@ -327,7 +415,9 @@ export default function OpsChecklistV2({ onRefreshed }) {
   }
   async function addTripsFromConsultants(k) {
     const eng = engByKey[k];
-    const rows = tripsForProgram(eng, { existing: tripsRef.current, existingIds: tripsRef.current.map(t => t.TripID), actorEmail: actor().email, today });
+    let have;
+    try { have = await freshTrips(); } catch (e) { return setMsg(`Trips not added: ${e.message}`); }
+    const rows = tripsForProgram(eng, { existing: have, existingIds: have.map(t => t.TripID), actorEmail: actor().email, today });
     if (!rows.length) return setMsg(engMode(eng) !== 'In-person' ? `${eng.Company} is virtual — no travel needed.` : 'Every consultant already has a trip (or the program has no consultants in the Engagement Calendar). Use “+ Blank trip”.');
     setBusy('Adding trips…');
     const res = await pool(rows, r => opsCreate('travel', r));
@@ -337,6 +427,7 @@ export default function OpsChecklistV2({ onRefreshed }) {
   }
   async function addBlankTrip(k) {
     const eng = engByKey[k];
+    try { await freshTrips(); } catch (e) { return setMsg(`Trip not added: ${e.message}`); }
     const row = {
       TripID: nextNumberId('TR', tripsRef.current.map(t => t.TripID), 4), 'EC Index': k, 'EG.ID': s(eng['EG.ID']), Company: s(eng.Company), Program: s(eng.Topic),
       'Program Start': toISO(eng['Start Date']), 'Program End': toISO(eng['End Date']) || toISO(eng['Start Date']), Location: s(eng.Location),
@@ -418,7 +509,9 @@ export default function OpsChecklistV2({ onRefreshed }) {
   /** Add a new library step to every active program it fits. */
   async function addStepToOpen(st, byId) {
     const a = actor(); const targets = data.engagements.filter(e => openKeys().has(keyOf(e)) && stepFits(st, e));
-    const ids = tasksRef.current.map(t => t.TaskID); const made = [];
+    let ids;
+    try { ids = await liveTaskIds(); } catch (e) { setMsg(`Step not added to open programs — OpsTaskTable could not be read: ${e.message || e}`); return; }
+    const made = [];
     for (const eng of targets) {
       const TaskID = nextNumberId('T', ids); ids.push(TaskID);
       const row = taskFromStep(st, eng, { departments: data.departments, members: data.members, taskId: TaskID, actorEmail: a.email, today });
@@ -480,6 +573,15 @@ export default function OpsChecklistV2({ onRefreshed }) {
   const eng = engByKey[sel];
   const tl = timelines[sel] || [];
   const sum = sums[sel];
+  // Phase bands: late phases + the phase holding the next due step open by default
+  const phaseStats = {};
+  for (const t of tl) {
+    const ph = s(t.row.Phase) || '—'; const p = (phaseStats[ph] ||= { total: 0, done: 0, late: 0, open: 0 });
+    if (!t.applicable) continue;
+    p.total++; if (t.done) p.done++; else { p.open++; if (t.overdue) p.late++; }
+  }
+  const nextPh = s(tl.find(t => t.applicable && !t.done && t.due === sum?.nextDue)?.row.Phase) || '—';
+  for (const [ph, p] of Object.entries(phaseStats)) p.defaultOpen = !!p.late || ph === nextPh || !Object.values(phaseStats).some(x => x.open);
 
   return (
     <div className="tracker-page ov2">
@@ -507,6 +609,8 @@ export default function OpsChecklistV2({ onRefreshed }) {
         <KPICard label="Due in 7 days" value={kpi.week} icon="📆" />
         <KPICard label="At-risk programs" value={kpi.atRisk.length} icon="⚠️" sub="Prep step overdue before start"
           list={kpi.atRisk.map(e => ({ name: e.Company, sub: `${s(e.Topic)} · starts ${fmtD(toISO(e['Start Date']))} · ${sums[keyOf(e)]?.overdue || 0} overdue` }))} />
+        <KPICard label="TAT missed" value={kpi.tat.length} icon="🔴" sub="Programs with a late step" variant={kpi.tat.length ? 'ov2-kpi-alert' : ''}
+          list={kpi.tat.map(e => ({ name: e.Company, sub: `${s(e.Topic)} · ${sums[keyOf(e)]?.overdue || 0} late · worst ${sums[keyOf(e)]?.maxLate || 0}d` }))} />
       </div>
 
       {msg && <div className="ov2-msg" onClick={() => setMsg('')}>{msg} <span>×</span></div>}
@@ -515,40 +619,23 @@ export default function OpsChecklistV2({ onRefreshed }) {
         <TravelDesk trips={data.travel} engagements={data.engagements} canEdit={canEdit} canDelete={canDelete('ops')} busy={busy}
           onSave={saveTrip} onStatus={setTripStatus} onAddFromConsultants={addTripsFromConsultants} onAddBlank={addBlankTrip}
           onDelete={deleteTrip} onRaiseVendors={raiseTripVendors} onPushEC={pushTravelToEC}
-          onCheck={async () => { const rows = await opsListOptional('travel', { force: true }); tripsRef.current = rows || []; setData(d => ({ ...d, travel: rows })); setMsg(rows ? `TravelTable found · ${rows.length} trip(s).` : 'TravelTable still not found in Operations Checklist.xlsx.'); }} />
+          onCheck={async () => { const rows = await opsListOptional('travel', { force: true }).catch(e => { setMsg(`Travel Desk not loaded: ${e.message || e}`); return tripsRef.current; }); tripsRef.current = rows || []; setData(d => ({ ...d, travel: rows })); setMsg(rows ? `TravelTable found · ${rows.length} trip(s).` : 'TravelTable still not found in Operations Checklist.xlsx.'); travelNotice(rows); }} />
       ) : tab === 'library' ? (
         <StepLibrary steps={data.steps} departments={data.departments} members={data.members} lists={lists} listRows={data.listRows}
           canEdit={canEdit} propagate={propagate} setPropagate={setPropagate} busy={busy}
           onSaveStep={saveLibraryStep} onAddStep={addLibraryStep} onSaveList={saveListValue} onAddList={addListValue}
           onCheckLists={async () => { const rows = await loadLists({ force: true }); setData(d => ({ ...d, listRows: rows })); setMsg(rows ? `ListTable found · ${rows.length} values.` : 'ListTable still not found in Operations Checklist.xlsx.'); }} />
       ) : tab === 'my' ? (
-        <div className="card ov2-card">
-          <div className="card-header"><span className="card-title">My tasks</span><span className="ov2-muted">{mine.length} open · {myEmail}</span></div>
-          <div className="table-wrap">
-            <table className="ov2-table">
-              <thead><tr><th>Program</th><th>Step</th><th>Phase</th><th>Due</th><th>Status</th><th /></tr></thead>
-              <tbody>
-                {!mine.length && <tr><td colSpan={6} className="ov2-empty">No open steps assigned to you.</td></tr>}
-                {mine.map(t => (
-                  <tr key={t.row.TaskID} className={t.overdue ? 'late' : ''}>
-                    <td><button className="ov2-link" onClick={() => { setSel(keyOf(t.eng)); setTab('programs'); setStatusF('All'); }}>{t.eng.Company}</button><div className="ov2-muted">starts {fmtD(toISO(t.eng['Start Date']))}</div></td>
-                    <td>{t.row.Step}</td><td className="ov2-muted">{t.row.Phase}</td>
-                    <td><DueCell t={t} today={today} /></td>
-                    <td>{canEdit ? <select className={`form-input ov2-status ${STATUS_CLS[s(t.row.Status)] || ''}`} value={s(t.row.Status)} onChange={e => setStatus(t.row, e.target.value)}>{STATUSES.map(x => <option key={x}>{x}</option>)}</select> : s(t.row.Status)}</td>
-                    <td>{canEdit && <button className="btn btn-cta btn-sm" onClick={() => setStatus(t.row, 'Done')}>Mark done</button>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <OpsOverview timelines={timelines} engByKey={engByKey} phases={lists.phases} myEmail={myEmail} today={today}
+          scopeAll={scopeAll} setScopeAll={setScopeAll} canEdit={canEdit} onStatus={setStatus}
+          onOpen={k => { setSel(k); setTab('programs'); setStatusF('All'); }} todoIds={todoIds} onTodo={addToTodo} busy={busy} />
       ) : (
         <div className="ov2-grid">
           <div className="card ov2-card ov2-list">
             <div className="ov2-list-filters">
               <input className="form-input wide" placeholder="🔍 Company, topic, EG.ID" value={q} onChange={e => setQ(e.target.value)} />
               <select className="form-input" value={statusF} onChange={e => setStatusF(e.target.value)}>
-                {['Active', 'All', ...CHECKLIST_STATUSES].map(x => <option key={x} value={x}>{x === 'Active' ? 'Active checklists' : x === 'All' ? 'All checklists' : x}</option>)}
+                {['Active', 'TAT missed', 'All', ...CHECKLIST_STATUSES].map(x => <option key={x} value={x}>{x === 'Active' ? 'Active checklists' : x === 'All' ? 'All checklists' : x}</option>)}
               </select>
             </div>
             <div className="ov2-list-body">
@@ -558,13 +645,11 @@ export default function OpsChecklistV2({ onRefreshed }) {
                 return (
                   <button key={k} type="button" className={`ov2-prog${k === sel ? ' sel' : ''}`} onClick={() => { setSel(k); setExpanded(''); setAdding(''); }}>
                     <div className="ov2-prog-top"><b>{p.Company}</b><span>{fmtD(toISO(p['Start Date']))}</span></div>
-                    <div className="ov2-prog-sub">{s(p.Topic) || '—'}</div>
-                    <div className="ov2-bar"><i style={{ width: `${m.progress || 0}%` }} /></div>
-                    <div className="ov2-prog-meta">
-                      <span>{m.done || 0}/{m.applicable || 0} done</span>
-                      {!!m.overdue && <span className="badge badge-red">{m.overdue} overdue</span>}
-                      {m.atRisk && <span className="badge badge-orange">At risk</span>}
+                    <div className="ov2-prog-mid">
+                      <span className="ov2-prog-sub" title={s(p.Topic)}>{s(p.Topic) || '—'}</span>
+                      <span className={`ov2-pill ${progPill(m).cls}`}>{progPill(m).text}</span>
                     </div>
+                    <div className="ov2-bar" title={`${m.done || 0}/${m.applicable || 0} done`}><i style={{ width: `${m.progress || 0}%` }} /></div>
                   </button>
                 );
               })}
@@ -579,23 +664,32 @@ export default function OpsChecklistV2({ onRefreshed }) {
                   <div className="ov2-muted">{s(eng.Topic)} · {fmtD(toISO(eng['Start Date']))}{toISO(eng['End Date']) && toISO(eng['End Date']) !== toISO(eng['Start Date']) ? ` – ${fmtD(toISO(eng['End Date']))}` : ''} · {s(eng.Mode) || s(eng.Location)} · {s(eng.Offering) || '—'}</div>
                 </div>
                 <div className="ov2-detail-act">
-                  {sum?.atRisk && <span className="badge badge-orange" title="A pre-program step is overdue">At risk · {sum.overdue} overdue</span>}
-                  <span className="ov2-muted">{sum?.progress || 0}% · next due {fmtD(sum?.nextDue)}</span>
+                  <span className={`ov2-pill ${progPill(sum).cls}`} title={sum?.tatMissed ? `${sum.overdue} step(s) past TAT` : ''}>{sum?.tatMissed ? `TAT missed · ${sum.overdue} late · ${sum.maxLate}d` : progPill(sum).text}</span>
+                  <span className="ov2-chip">{sum?.done || 0}/{sum?.applicable || 0} · next due {fmtD(sum?.nextDue)}</span>
                   {canEdit ? <select className="form-input ov2-mini" value={s(eng['Checklist Status']) || 'Not Started'} onChange={e => setChecklistStatus(eng, e.target.value)}>{CHECKLIST_STATUSES.map(x => <option key={x}>{x}</option>)}</select>
                     : <span className="badge badge-gray">{s(eng['Checklist Status'])}</span>}
+                  {tl.some(t => todoEligible(t) && !todoIds.has(s(t.row.TaskID))) && (
+                    <button className="btn btn-outline btn-sm" disabled={busy === 'todo'} title="Add open steps due within 7 days (and late ones) to To-Do"
+                      onClick={() => addToTodo(tl.filter(t => todoEligible(t) && !todoIds.has(s(t.row.TaskID))))}>+ This week → To-Do</button>
+                  )}
                 </div>
               </div>
               <div className="table-wrap ov2-tl">
                 <table className="ov2-table">
-                  <thead><tr><th title="Applies to this program">Applies</th><th>#</th><th>Step</th><th>Owners</th><th>TAT</th><th>Start</th><th>Due</th><th>Status</th><th>Done on</th></tr></thead>
+                  <thead><tr><th title="Applies to this program" /><th>#</th><th>Step</th><th>Owners</th><th>Due</th><th>Status</th><th>Done on</th></tr></thead>
                   <tbody>
-                    {!tl.length && <tr><td colSpan={9} className="ov2-empty">No steps for this program.</td></tr>}
+                    {!tl.length && <tr><td colSpan={7} className="ov2-empty">No steps for this program.</td></tr>}
                     {tl.map((t, i) => {
                       const r = t.row; const id = s(r.TaskID); const newPhase = i === 0 || s(tl[i - 1].row.Phase) !== s(r.Phase);
                       const nextT = tl[i + 1];
+                      const ph = s(r.Phase) || '—'; const pk = `${sel}|${ph}`; const ps = phaseStats[ph] || {};
+                      const isOpen = pk in phaseOpen ? phaseOpen[pk] : ps.defaultOpen;
                       return (
-                        <Fragment key={id}>
-                          {newPhase && <tr className="ov2-phase"><td colSpan={9}>{s(r.Phase) || '—'}</td></tr>}
+                        <Fragment key={`${id}-${i}`}>
+                          {newPhase && <tr className={`ov2-phase${ps.late ? ' late' : ''}`} onClick={() => setPhaseOpen(o => ({ ...o, [pk]: !isOpen }))}>
+                            <td colSpan={7}><span className="ov2-caret">{isOpen ? '▾' : '▸'}</span>{ph}
+                              <span className="ov2-phase-meta">{ps.late ? <b>{ps.late} late</b> : null}{ps.late ? ' · ' : ''}{ps.done}/{ps.total} done</span></td></tr>}
+                          {isOpen && <>
                           <tr className={`ov2-row${t.applicable ? '' : ' na'}${t.overdue ? ' late' : ''}${expanded === id ? ' open' : ''}`}>
                             <td><label className="ov2-switch" title={t.applicable ? 'Mark NA (removes its TAT)' : 'Make applicable'}>
                               <input type="checkbox" checked={t.applicable} disabled={!canEdit} onChange={() => toggleNA(r)} /><span /></label></td>
@@ -604,14 +698,14 @@ export default function OpsChecklistV2({ onRefreshed }) {
                               {r.Step}{s(r['Custom Step']) === 'Yes' && <span className="ov2-tag">custom</span>}
                               <div className="ov2-muted">{s(r['Owner Dept'])}{s(r['Waiting On']) && ` · waiting on ${s(r['Waiting On'])}`}</div>
                             </td>
-                            <td className="ov2-own">{s(r['Owner Names']) || <span className="ov2-muted">—</span>}</td>
-                            <td title={tatLabel(t.tat, t.anchor)}>{t.applicable ? t.tat : <s className="ov2-muted">{t.tat}</s>}</td>
-                            <td className="ov2-muted">{fmtD(t.plannedStart)}</td>
-                            <td><DueCell t={t} today={today} /></td>
-                            <td>{canEdit && t.applicable
+                            <td className="ov2-own">{ownerList(r).length ? <span className="ov2-inits">{ownerList(r).map(n => <i key={n} title={n}>{initialsOf(n)}</i>)}</span> : <span className="ov2-muted">—</span>}</td>
+                            <td title={`TAT ${t.tat} · ${tatLabel(t.tat, t.anchor)} · planned start ${fmtD(t.plannedStart)}`}><DueCell t={t} today={today} /></td>
+                            <td className="ov2-st-cell">{canEdit && t.applicable
                               ? <select className={`form-input ov2-status ${STATUS_CLS[s(r.Status)] || ''}`} value={s(r.Status) || 'Not Started'} onChange={e => setStatus(r, e.target.value)}>{STATUSES.filter(x => x !== 'NA').map(x => <option key={x}>{x}</option>)}</select>
-                              : <span className={`badge badge-${STATUS_CLS[s(r.Status)] || 'gray'}`}>{s(r.Status) || '—'}</span>}</td>
-                            <td>{!t.done ? <span className="ov2-muted">—</span>
+                              : <span className={`badge badge-${STATUS_CLS[s(r.Status)] || 'gray'}`}>{s(r.Status) || '—'}</span>}
+                              {todoIds.has(id) ? <span className="ov2-todo-ic in" title="In To-Do">✓</span>
+                                : todoEligible(t) && <button className="ov2-todo-ic" disabled={busy === 'todo'} onClick={() => addToTodo([t])} title="Add to To-Do (Projects)">＋</button>}</td>
+                            <td>{!t.done ? null
                               : canEdit ? (
                                 <div className="ov2-doneon">
                                   <input key={t.completed} className="form-input ov2-cell" type="date" max={today} defaultValue={t.completed} title="Date this step was done"
@@ -621,7 +715,7 @@ export default function OpsChecklistV2({ onRefreshed }) {
                               ) : <span className={t.delay ? 'ov2-due late' : ''}>{fmtD(t.completed)}{t.delay ? <small> · +{t.delay}d</small> : ''}</span>}</td>
                           </tr>
                           {expanded === id && (
-                            <tr className="ov2-more"><td colSpan={9}>
+                            <tr className="ov2-more"><td colSpan={7}>
                               <div className="ov2-more-grid">
                                 <div>
                                   {t.step?.what && <p><b>What to do:</b> {t.step.what}</p>}
@@ -651,7 +745,8 @@ export default function OpsChecklistV2({ onRefreshed }) {
                           )}
                           {canCreate('ops') && (adding === id
                             ? <AddStepRow after={t} departments={data.departments} saving={!!busy} onCancel={() => setAdding('')} onAdd={f => addStep(t, nextT, f)} />
-                            : <tr className="ov2-insert"><td colSpan={9}><button type="button" onClick={() => setAdding(id)}>+ Add step here</button></td></tr>)}
+                            : <tr className="ov2-insert"><td colSpan={7}><button type="button" onClick={() => setAdding(id)}>+ Add step here</button></td></tr>)}
+                          </>}
                         </Fragment>
                       );
                     })}

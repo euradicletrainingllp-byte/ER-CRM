@@ -434,3 +434,41 @@
 
 ## 2026-11-22 19:14 — Ops v2: edit "Done on" in the timeline
 - Done steps show a date picker in the Done on column (people with Ops edit access); no future dates; saving recalculates the delay. Files: pages/OpsChecklistV2.jsx, styles/opsV2.css.
+
+## 2026-11-22 19:21 — Office Scripts for the workbook changes (Copilot limit reached)
+- docs/office-scripts/ops-v2-setup.ts (Operations Checklist: TAT as text + "+" on End steps, Owner Dept drop-downs removed, Vendor Category, Vendor Service IDs, ListTable, TravelTable) and docs/office-scripts/vendor-links-setup.ts (VendorServiceTable Source / Ops Task ID / Trip ID). Both re-runnable.
+- opsV2Api.opsListOptional skips rows with an empty key (Excel's empty first table row).
+
+## 2026-11-24 — Ops: TAT-missed high alert, My tasks overview, Add to To-Do
+- TAT missed = any open applicable step past its due (any phase). `summarise()` adds `tatMissed`, `maxLate`; opsV2Data rows carry both.
+- Global red HIGH ALERT strip under TopBar (Ops access), not dismissable, refresh every 15 min → `/ops?alert=tat` (filter "TAT missed").
+- Ops v2: "TAT missed" KPI card, pulsing badge on program card + detail header, "TAT missed" checklist filter.
+- My tasks tab → overview: program × phase heatmap (most lagging first, worst-lag column), lag-by-category bars, drill-down with status / Mark done / + To-Do; My steps ↔ All programs toggle.
+- + To-Do: open steps due ≤7 days (and late) → Task Tracker; one project per program ("Company · Topic", reused), owner = first step owner, High if late. Dedupe via Remarks tag `[OPS:<TaskID>]`. No assignment emails.
+- Files: services/opsV2Engine.js, services/opsV2Data.js, pages/OpsChecklistV2.jsx, components/ops/OpsTatAlert.jsx (new), components/ops/OpsOverview.jsx (new), App.jsx, styles/opsV2.css.
+- Manual setup: none.
+- (pm) My tasks overview redesigned: heatmap replaced by one card per phase (6 sections, 3×2 grid) listing programs pending in it, most-lagging first, red/amber/purple chip; click → step drill-down (status, Mark done, + To-Do). Files: components/ops/OpsOverview.jsx, styles/opsV2.css.
+
+## 2026-11-24 — Travel Desk: trips vanished after a flow 502; duplicate TripIDs
+- opsListOptional: only a "table not found" error marks a table missing (24 h). A 502/timeout returns the last rows read in this browser (rows.stale) or throws — trips no longer disappear for 24 h.
+- Add trip / Add from consultants re-read TravelTable first; blocked while the read fails → no re-used TR-#### IDs.
+- Page warns on stale copy and on duplicate TripIDs (duplicates make Excel Delete/Update a row fail → flow 502 NoResponse).
+- CRM Notify: a rejected email now logs status + flow message in the console.
+- Files: services/opsV2Api.js, pages/OpsChecklistV2.jsx, services/notifier.js. Backup: backups/pre-travel-fix-*.tgz.
+- Manual: OPS_V2_CRUD flow — add an error Response (run after "has failed"); rename duplicate TripIDs in TravelTable.
+
+## 2026-11-24 — Ops Checklist Programs view redesign
+- Alert strip solid #C0392B, slimmer, no pulse. KPI row 6 across.
+- Program cards: Company · date, Topic + one pill (TAT missed / At risk / On track), thin progress bar; no horizontal scroll.
+- Detail header: pill, "x/y · next due" chip, status, "+ This week → To-Do".
+- Steps: collapsible phase bands (late + next-due phase open), TAT/Start folded into Due tooltip, owner initials, To-Do icon beside Status, Done-on blank until done, "+ Add step here" only on hover.
+- Files: pages/OpsChecklistV2.jsx, styles/opsV2.css. Backup: backups/pre-ui-redesign-*.tgz.
+- My tasks (sections) — misses first: red total chip, 6-tile misses strip (late steps, programs, worst days; click jumps to section), "Misses only" toggle; each section lists TAT-missed programs first (red rows, worst late step named, big days-late) and folds on-track ones behind "+ N on track"; drill-down scrolls into view. Files: components/ops/OpsOverview.jsx, styles/opsV2.css.
+
+## 2026-11-24 — Duplicate Ops TaskIDs (React "same key T-00619")
+- Cause: OpsTaskTable has two rows with the same TaskID; new IDs were numbered from the list loaded at page open, so two users/tabs adding steps collided.
+- New checklist / custom step / library step → re-read OpsTaskTable for IDs first (blocked if the read fails).
+- On load the page names duplicate TaskIDs and suggests free IDs to rename them to in Excel. Row keys made unique (warning gone).
+- Files: pages/OpsChecklistV2.jsx, components/ops/OpsOverview.jsx. Backup: backups/pre-dup-taskid-*.tgz. Manual: rename duplicates in OpsTaskTable.
+- Sections 4–6 fix: cards grow (no inner scroll), max 5 rows per group + "+ N more"; on-track rows show "Next: <step> · date" and a count (amber when due this week); KPI row forced to 6 across. Files: components/ops/OpsOverview.jsx, styles/opsV2.css.
+- Sections: all 6 categories in one row (3 below 1350px), misses strip removed (card headers carry it), each card always shows "⚠ TAT missed" + "Open tasks" boxes (no fold). Duplicate-TaskID notice shortened; rename list → console.table. Files: components/ops/OpsOverview.jsx, pages/OpsChecklistV2.jsx, styles/opsV2.css.

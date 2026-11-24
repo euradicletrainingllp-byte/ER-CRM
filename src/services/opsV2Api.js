@@ -54,15 +54,39 @@ export const opsDelete = (t, keyValue) => {
 };
 
 // ── Optional tables (ListTable, TravelTable) ────────────────────────────────
-// Until a table exists in Excel the flow answers 502. The "missing" result is remembered in this
-// browser for 24 h (no call, no console error on every load); force: true checks again.
+// null = the table does not exist in Excel (remembered 24 h; force: true checks again).
+// A flow failure (502 NoResponse, timeout) is NOT "missing": the last rows read in this browser are
+// returned with rows.stale = true (or the error is thrown when none), so saved rows never vanish and
+// new IDs are never re-used.  (2026-11-24: a 502 used to hide the Travel Desk for 24 h.)
 const MISSING_KEY = t => `ercrm:ops-v2:missing:${t}`;
+const LAST_KEY = t => `ercrm:ops-v2:last:${t}`;
+const NOT_FOUND = /table.*(not (be )?found|does ?n[o']t exist)|ItemNotFound|InvalidTable|No table/i;
 const _probe = {};
+const readLast = t => { try { const v = JSON.parse(localStorage.getItem(LAST_KEY(t)) || 'null'); return Array.isArray(v) ? v : null; } catch { return null; } };
 export function opsListOptional(t, { force = false } = {}) {
   const k = MISSING_KEY(t);
   if (force) { delete _probe[t]; try { localStorage.removeItem(k); } catch { /* ignore */ } }
   if (!force) { try { if (Date.now() - Number(localStorage.getItem(k) || 0) < 864e5) return Promise.resolve(null); } catch { /* ignore */ } }
-  return (_probe[t] ||= opsList(t, { retries: 0 })
-    .then(rows => { try { localStorage.removeItem(k); } catch { /* ignore */ } return rows; })
-    .catch(() => { try { localStorage.setItem(k, String(Date.now())); } catch { /* ignore */ } delete _probe[t]; return null; }));
+  const key = OPS_V2_TABLES[t]?.key;
+  return (_probe[t] ||= opsList(t, { retries: 1 })
+    .then(rows => {
+      const out = key ? rows.filter(r => String(r[key] ?? '').trim()) : rows;   // skip Excel's empty first row
+      try { localStorage.removeItem(k); localStorage.setItem(LAST_KEY(t), JSON.stringify(out)); } catch { /* ignore */ }
+      delete _probe[t];
+      return out;
+    })
+    .catch(e => {
+      delete _probe[t];
+      if (NOT_FOUND.test(String(e?.message || e))) { try { localStorage.setItem(k, String(Date.now())); } catch { /* ignore */ } return null; }
+      const last = readLast(t);
+      if (!last) throw e;
+      const out = [...last]; out.stale = String(e?.message || e); return out;
+    }));
 }
+
+/** Rows whose key value appears more than once (Excel "Delete/Update a row" fails on these). */
+export const duplicateKeys = (t, rows) => {
+  const key = OPS_V2_TABLES[t]?.key; const seen = new Map();
+  for (const r of rows || []) { const v = String(r?.[key] ?? '').trim(); if (v) seen.set(v, (seen.get(v) || 0) + 1); }
+  return [...seen].filter(([, n]) => n > 1).map(([v]) => v);
+};

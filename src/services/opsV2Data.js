@@ -36,7 +36,7 @@ export function programsFrom(stepRows = [], engRows = [], taskRows = [], today =
       status: s(e['EC Status']), checklistStatus: s(e['Checklist Status']),
       consultant1: s(e['Consultant 1']), consultant2: s(e['Consultant 2']), consultant3: s(e['Consultant 3']),
       internalPoc: s(e['Internal POC']), clientSpoc: s(e['Client SPOC']), location: s(e.Location), offering: s(e.Offering),
-      ready: m.progress, openItems: m.open, lateItems: m.overdue, atRisk: m.atRisk, nextDue: m.nextDue,
+      ready: m.progress, openItems: m.open, lateItems: m.overdue, atRisk: m.atRisk, tatMissed: m.tatMissed, maxLate: m.maxLate, nextDue: m.nextDue,
       invoicePoc: s(inv?.row['Owner Names']), invoiceComment: s(inv?.row.Comments),
       tasks: tl.filter(t => t.applicable).map(t => ({
         taskId: s(t.row.TaskID), stepId: s(t.row.StepID), step: s(t.row.Step), phase: s(t.row.Phase), due: t.due,

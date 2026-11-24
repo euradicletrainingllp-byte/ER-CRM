@@ -301,7 +301,8 @@ export function emailPerson({ to, subject, html, tracker = 'tasks', trackerName 
         to: email, subject: String(subject || '').slice(0, 250), html, tracker, trackerName,
         actorEmail: actor.email || '', actorName: actor.name || '', recordCount: 1,
       }),
-    }).catch(() => { /* an email must never break the CRM */ });
+    }).then(r => { if (!r.ok) r.text().then(x => console.warn(`[CRM Notify] ${r.status} for ${email}: ${x.slice(0, 300)}`)).catch(() => {}); })
+      .catch(() => { /* an email must never break the CRM */ });
     return true;
   } catch { return false; }
 }

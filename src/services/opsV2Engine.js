@@ -218,6 +218,9 @@ export function summarise(timeline, eng, today = todayISO()) {
     applicable: app.length, done: doneN, open: open.length,
     progress: app.length ? Math.round((doneN / app.length) * 100) : 0,
     overdue: open.filter(t => t.overdue).length,
+    // TAT missed = any open applicable step is past its due date (any phase) → high alert
+    tatMissed: open.some(t => t.overdue),
+    maxLate: open.reduce((m, t) => Math.max(m, t.overdue ? t.delay : 0), 0),
     dueThisWeek: open.filter(t => t.due >= today && t.due <= addDays(today, 7)).length,
     // At risk = a pre-program step is overdue and the program has not started yet
     atRisk: !!start && start >= today && open.some(t => t.preProgram && t.overdue),
