@@ -481,3 +481,6 @@
 - Files: services/opsEcSync.js (new), pages/OpsChecklistV2.jsx, services/addToTrackers.js, services/opsV2Notify.js, test/opsEcSync.test.js. Backups: backups/pre-ec-sync*.tgz.
 - Revoked auto-fill for OPS-004 Facilitator calendar block and OPS-026 Feedback report shared (manual only).
 - My tasks drill-down title: Company · Topic, start–end, EG.ID, EC Index, location, phase; wrong EC link shown there and as "⚠ EC" tag on section rows.
+
+## 2026-11-24
+- Removed HIGH ALERT TAT banner (OpsTatAlert) from App layout. Component file kept, unused. Files: src/App.jsx

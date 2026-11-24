@@ -16,7 +16,6 @@ import ConsultantDirectory from './pages/ConsultantDirectory.jsx';
 import POTracker from './pages/POTracker.jsx';
 import ClientDirectory from './pages/ClientDirectory.jsx';
 import TaskFloat          from './components/TaskFloat.jsx';
-import OpsTatAlert        from './components/ops/OpsTatAlert.jsx';
 import { TourProvider }   from './components/tour/TourProvider.jsx';
 import EngagementPage     from './pages/EngagementPage.jsx';
 import OpsChecklistV2        from './pages/OpsChecklistV2.jsx';
@@ -107,7 +106,6 @@ function Shell() {
       <Sidebar />
       <div className="main-area">
         <TopBar path={location.pathname} lastRefreshed={lastRefreshed} loading={loading} />
-        <OpsTatAlert />
         <main className={`page-content${['/', '/founder'].includes(location.pathname) ? ' is-dash' : ''}`}>
           <MobilePanelBar path={location.pathname} />
           <Routes>
