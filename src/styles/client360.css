@@ -149,3 +149,14 @@
 .c360-rev .trk { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; } .c360-rev .trk i { display: block; height: 100%; background: var(--purple); border-radius: 4px; }
 .c360-cons-pane { display: flex; flex-direction: column; gap: 14px; padding-bottom: 80px; }
 @media (max-width: 1100px) { .c360-j-grid { grid-template-columns: 1fr; } .c360-fy-row { grid-template-columns: 70px minmax(120px, 1fr) 44px 50px 70px 80px; gap: 8px; } }
+
+/* Engagements tab — Year / Status filters, year-wise summary */
+.c360-filters { background: var(--white); border: 1px solid var(--border); border-radius: 12px; padding: 10px 16px; box-shadow: var(--shadow-card); display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.c360-fbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.c360-fbar > span { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); min-width: 52px; }
+.c360-fbtn { border: 1px solid var(--border); background: var(--white); color: var(--navy); border-radius: 14px; padding: 3px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.c360-fbtn b { color: var(--mauve); margin-left: 5px; }
+.c360-fbtn:hover { background: #F3EAF2; }
+.c360-fbtn.on { background: var(--purple); border-color: var(--purple); color: #fff; } .c360-fbtn.on b { color: #fff; }
+.c360-facts p.c360-chips-all { max-height: 150px; overflow-y: auto; scrollbar-width: thin; }
+.c360-table tr.c360-click { cursor: pointer; } .c360-table tr.c360-click:hover td, .c360-table tr.c360-click.on td { background: #F3EAF2; }

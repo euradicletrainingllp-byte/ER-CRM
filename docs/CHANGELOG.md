@@ -484,3 +484,12 @@
 
 ## 2026-11-24
 - Removed HIGH ALERT TAT banner (OpsTatAlert) from App layout. Component file kept, unused. Files: src/App.jsx
+
+## 2026-11-27 — Client Directory · Engagements tab: all years + Year/Status filters
+- Engagements tab now lists every Engagement Calendar row for the client: all years, all statuses (Delivered, Upcoming, Tentative, Postponed / On hold, Date passed – not updated, Cancelled).
+- New Year filter (All years + each year, with counts) and Status filter (counts follow the selected year).
+- New Year-wise summary table (sessions by status per year, value excl. cancelled when money access); click a year row to filter.
+- Programs and Consultants chips follow the filters, include cancelled/postponed/tentative, no 12-item cap (scrolls).
+- Status pill shows the raw EC status text (e.g. "Postponed", "Tentative"); past-date rows add "· date passed".
+- Files: src/components/Client360.jsx (new EcTab), src/styles/client360.css.
+- Manual setup: none.

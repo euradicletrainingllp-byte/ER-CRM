@@ -174,6 +174,77 @@ export function AlertList({ sm, showMoney, onTab }) {
   );
 }
 
+/* ─── Engagements tab: every EC row (all years, all statuses) with Year + Status filters ─── */
+const EC_STATUS = ['Delivered', 'Upcoming', 'Tentative', 'On hold', 'Ended – status not updated', 'Cancelled'];
+const EC_STATUS_LBL = { 'On hold': 'Postponed / On hold', 'Ended – status not updated': 'Date passed – not updated' };
+const NO_DATE = 'No date';
+const yearOf = e => (txt(e.startDate).match(/^\d{4}/) || [NO_DATE])[0];
+const tally = list => { const m = new Map(); for (const v of list) if (v) m.set(v, (m.get(v) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])); };
+
+function EcTab({ all, showMoney: m, today }) {
+  const [year, setYear] = useState('All');
+  const [status, setStatus] = useState('All');
+  const tagged = useMemo(() => all.map(e => ({ e, st: ecState(e, today), y: yearOf(e) }))
+    .sort((a, b) => txt(b.e.startDate).localeCompare(txt(a.e.startDate))), [all, today]);
+  const years = useMemo(() => [...new Set(tagged.map(x => x.y))].sort((a, b) => (a === NO_DATE) - (b === NO_DATE) || b.localeCompare(a)), [tagged]);
+  const byYear = useMemo(() => years.map(y => {
+    const l = tagged.filter(x => x.y === y), c = st => l.filter(x => x.st === st).length;
+    return { y, n: l.length, c, value: l.filter(x => x.st !== 'Cancelled').reduce((t, x) => t + (money(x.e.price) || 0), 0) };
+  }), [years, tagged]);
+  const inYear = tagged.filter(x => year === 'All' || x.y === year);
+  const rows = inYear.filter(x => status === 'All' || x.st === status);
+  const topics = tally(rows.map(x => txt(x.e.topic)));
+  const cons = tally(rows.flatMap(x => consultantsOf(x.e)));
+  const Btn = ({ on, onClick, label, n }) => <button type="button" className={`c360-fbtn${on ? ' on' : ''}`} onClick={onClick}>{label}<b>{n}</b></button>;
+  const scope = [year !== 'All' && year, status !== 'All' && (EC_STATUS_LBL[status] || status)].filter(Boolean).join(' · ');
+
+  return (<>
+    <div className="c360-filters">
+      <div className="c360-fbar"><span>Year</span>
+        <Btn on={year === 'All'} onClick={() => setYear('All')} label="All years" n={tagged.length} />
+        {byYear.map(r => <Btn key={r.y} on={year === r.y} onClick={() => setYear(r.y)} label={r.y} n={r.n} />)}
+      </div>
+      <div className="c360-fbar"><span>Status</span>
+        <Btn on={status === 'All'} onClick={() => setStatus('All')} label="All" n={inYear.length} />
+        {EC_STATUS.map(st => { const n = inYear.filter(x => x.st === st).length; return n ? <Btn key={st} on={status === st} onClick={() => setStatus(st)} label={EC_STATUS_LBL[st] || st} n={n} /> : null; })}
+      </div>
+    </div>
+
+    {(!!topics.length || !!cons.length) && <div className="c360-facts">
+      {!!topics.length && <div><span>Programs{scope ? ` · ${scope}` : ' · all years, all statuses'} ({topics.length})</span><p className="c360-chips-all">{topics.map(([t, n]) => <span key={t} className="c360-chip">{t}<b>{n}</b></span>)}</p></div>}
+      {!!cons.length && <div><span>Consultants{scope ? ` · ${scope}` : ''} ({cons.length})</span><p className="c360-chips-all">{cons.map(([t, n]) => <span key={t} className="c360-chip">{t}<b>{n}</b></span>)}</p></div>}
+    </div>}
+
+    {byYear.length > 1 && (
+      <Section icon={CalendarDays} title="Year-wise summary" count={byYear.length} source="ec">
+        <Table head={['Year', 'Sessions', 'Delivered', 'Upcoming', 'Tentative', 'Postponed / On hold', 'Date passed', 'Cancelled', ...(m ? ['Value excl. cancelled (₹)'] : [])]}>
+          {byYear.map(r => (
+            <tr key={r.y} className={`c360-click${year === r.y ? ' on' : ''}`} onClick={() => setYear(year === r.y ? 'All' : r.y)}>
+              <td><b>{r.y}</b></td><td className="num">{r.n}</td>
+              {EC_STATUS.map(st => <td key={st} className="num">{r.c(st) || '—'}</td>)}
+              {m && <td className="num">{inr(r.value)}</td>}
+            </tr>))}
+        </Table>
+      </Section>)}
+
+    <Section icon={CalendarDays} title="Engagement Calendar" count={rows.length} source="ec" note={scope ? `${rows.length} of ${tagged.length} · ${scope}` : `all ${tagged.length} sessions`}>
+      {!rows.length ? <Empty>{tagged.length ? 'No sessions match these filters.' : 'No engagements on the calendar for this client.'}</Empty> : (
+        <Table head={['S No', 'Dates', 'Program', 'Service', 'Days', 'Consultant', 'Location', 'Pax', 'Status', 'Feedback', ...(m ? ['Price (₹)'] : [])]}>
+          {rows.map(({ e, st }, i) => { const fb = feedbackOf(e); return (
+            <tr key={e.engagementKey || i} className={st === 'Cancelled' ? 'dim' : ''}>
+              <td><span className="lv-id">{e.sno}</span></td>
+              <td className="nowrap">{fmtD(e.startDate) || '—'}{e.endDate && e.endDate !== e.startDate ? ` → ${fmtD(e.endDate)}` : ''}</td>
+              <td><b>{e.topic || '—'}</b></td><td>{[e.serviceType, e.offering].map(txt).filter(Boolean).join(' · ') || '—'}</td>
+              <td className="num">{e.day || '—'}</td><td>{consultantsOf(e).join(', ') || '—'}</td><td>{txt(e.location) || '—'}</td><td className="num">{e.pax || '—'}</td>
+              <td><Pill cls={STATE_CLS[st]}>{txt(e.status) || st}</Pill>{st === 'Ended – status not updated' && <span className="lv-muted" title="End date has passed but status is not Delivered / Cancelled"> · date passed</span>}</td>
+              <td>{fb != null ? <span className="c360-fb"><Star size={11} />{fb.toFixed(1)}</span> : '—'}</td>
+              {m && <td className="num">{inr(money(e.price))}</td>}
+            </tr>); })}
+        </Table>)}
+    </Section>
+  </>);
+}
+
 /* ─── One tab's content ─── */
 export function TrackerTab({ tab, bucket, sm, showMoney, canSee, loading }) {
   if (!bucket || !sm) return <Empty>{loading ? 'Reading the trackers…' : 'Tracker data could not be loaded. Use ↺ to try again.'}</Empty>;
@@ -181,30 +252,7 @@ export function TrackerTab({ tab, bucket, sm, showMoney, canSee, loading }) {
   const moneyFor = page => showMoney || canSee(page);
   const byDateDesc = f => (a, b) => txt(f(b)).localeCompare(txt(f(a)));
 
-  if (tab === 'ec') {
-    const rows = [...bucket.ec].sort(byDateDesc(e => e.startDate)), m = showMoney;
-    return (<>
-      {(!!sm.topics.length || !!sm.consultants.length) && <div className="c360-facts">
-        {!!sm.topics.length && <div><span>Programs delivered / booked</span><p>{sm.topics.slice(0, 12).map(([t, n]) => <span key={t} className="c360-chip">{t}<b>{n}</b></span>)}{sm.topics.length > 12 && <em>+{sm.topics.length - 12} more</em>}</p></div>}
-        {!!sm.consultants.length && <div><span>Consultants who worked with this client</span><p>{sm.consultants.slice(0, 12).map(([t, n]) => <span key={t} className="c360-chip">{t}<b>{n}</b></span>)}</p></div>}
-      </div>}
-      <Section icon={CalendarDays} title="Engagement Calendar" count={rows.length} source="ec" note={sm.firstSession ? `since ${fmtD(sm.firstSession)}` : ''}>
-        {!rows.length ? <Empty>No engagements on the calendar for this client.</Empty> : (
-          <Table head={['S No', 'Dates', 'Program', 'Service', 'Days', 'Consultant', 'Location', 'Pax', 'Status', 'Feedback', ...(m ? ['Price (₹)'] : [])]}>
-            {rows.map((e, i) => { const st = ecState(e, today), fb = feedbackOf(e); return (
-              <tr key={e.engagementKey || i} className={st === 'Cancelled' ? 'dim' : ''}>
-                <td><span className="lv-id">{e.sno}</span></td>
-                <td className="nowrap">{fmtD(e.startDate) || '—'}{e.endDate && e.endDate !== e.startDate ? ` → ${fmtD(e.endDate)}` : ''}</td>
-                <td><b>{e.topic || '—'}</b></td><td>{[e.serviceType, e.offering].map(txt).filter(Boolean).join(' · ') || '—'}</td>
-                <td className="num">{e.day || '—'}</td><td>{consultantsOf(e).join(', ') || '—'}</td><td>{txt(e.location) || '—'}</td><td className="num">{e.pax || '—'}</td>
-                <td><Pill cls={STATE_CLS[st]}>{['Upcoming', 'Tentative', 'On hold'].includes(st) ? txt(e.status) || st : st}</Pill></td>
-                <td>{fb != null ? <span className="c360-fb"><Star size={11} />{fb.toFixed(1)}</span> : '—'}</td>
-                {m && <td className="num">{inr(money(e.price))}</td>}
-              </tr>); })}
-          </Table>)}
-      </Section>
-    </>);
-  }
+  if (tab === 'ec') return <EcTab all={bucket.ec} showMoney={showMoney} today={today} />;
 
   if (tab === 'bd') {
     const m = moneyFor('bd'), lines = [...sm.lines].sort(byDateDesc(l => l.date));
