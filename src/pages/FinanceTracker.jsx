@@ -15,7 +15,7 @@ import ExportButton from '../components/ExportButton.jsx';
 import PendingFieldsBar, { revealField } from '../components/PendingFieldsBar.jsx';
 import { pendingItems, FIN_RULES } from '../config/pendingFields.js';
 import { GST_LOCKED_ZERO, gstForExcel } from '../services/gstRule.js';
-import { money, gstOf, tdsOf, receivableOf, expectedOf, applyCreditShares, GST_RATE, TDS_RATE, creditNotesOf, creditTotalOf, collectedOf, invoiceTotal } from '../services/money.js';
+import { money, gstOf, tdsOf, receivableOf, expectedOf, applyCreditShares, GST_RATE, TDS_RATE, creditNotesOf, creditTotalOf, collectedOf, invoiceTotal, invoiceExTravel, invoiceNoOf } from '../services/money.js';
 import { getPOs, peekPOs, poConfigured, poUsage, poStatus, splitIdx } from '../services/poApi.js';
 
 /**
@@ -138,6 +138,54 @@ export function travelOverdueDays(e) {
   if (!d) return 0;
   const days = Math.floor((new Date(todayIso()) - new Date(addDays(d, 30))) / 86400000);
   return days > 0 ? days : 0;
+}
+/* ─── KPI amounts — Finance Dashboard formulas (27 Nov 2026: the Dashboard is the reference) ───
+ * Mirrors FinanceLiveDashboard.jsx (pk · dues · toInvoice). Change both together.
+ *  Revenue    Price of rows whose revenue date is in the period: Delivery = Start Date (status not cancel/lost/drop/postpone/hold),
+ *             Invoice = Invoice date (not cancelled). Basis = the Dashboard's "Revenue by" toggle.
+ *  To raise   all years: not raised, not closed, ended / delivered / To Invoice — Price + GST − TDS + travel
+ *  Yet / Overdue  all years: raised, not closed, Price + GST (+ travel on the same invoice) − received — TDS NOT deducted;
+ *             travel on its own invoice is a separate due. Overdue = invoice date + 30 days crossed.
+ *  Collected  Amount Received (not cancelled) with Received Date in the period (no Received Date → Invoice date)
+ *  % collected = Collected ÷ Price + GST of rows invoiced in the period */
+const FIN_CLOSED = ['Received', 'Cancelled', 'Not Applicable', 'Pro Bono'];
+const FIN_NOT_REVENUE = /cancel|lost|drop|postpon|hold/i;
+const FIN_BASIS_KEY = 'ercrm.dash.finance.basis.v1';   // shared with the Dashboard toggle
+export const readFinBasis = () => { try { return localStorage.getItem(FIN_BASIS_KEY) === 'invoice' ? 'invoice' : 'delivery'; } catch { return 'delivery'; } };
+export const writeFinBasis = b => { try { localStorage.setItem(FIN_BASIS_KEY, b); } catch { /* storage blocked */ } };
+const cleanTxt = v => String(v ?? '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+export function dashboardKpis(list, range, basis = 'delivery', today = todayIso()) {
+  const inR = d => !!d && d >= range.from && d <= range.to;
+  const rows = list.map(e => {
+    const stage = financeStage(e), inv = toIso(e.invoice), start = toIso(e.startDate);
+    return { e, stage, inv, start, end: toIso(e.endDate) || start, p: normPayment(e.payment), invNo: invoiceNoOf(e), cancelled: stage === 'Cancelled',
+      price: num(e.price), net: invoiceExTravel(e), due: invoiceExTravel(e) + num(e.travelExpenses), amount: expectedOf(e),
+      got: collectedOf(e).gross, rec: toIso(e.receivedDate), notRevenue: FIN_NOT_REVENUE.test(cleanTxt(e.status)) };
+  });
+  const isRaised = r => !!(r.inv || r.invNo || ['Invoice Raised', 'Partly Received'].includes(r.p));
+  const revDate = r => (basis === 'invoice' ? (r.inv && !r.cancelled ? r.inv : '') : (r.start && !r.notRevenue ? r.start : ''));
+  const revRows = rows.filter(r => inR(revDate(r)));
+  const invRows = rows.filter(r => r.inv && !r.cancelled && inR(r.inv));
+  const paid = rows.filter(r => !r.cancelled && r.got > 0 && (r.rec ? inR(r.rec) : inR(r.inv)));
+  const dues = rows.flatMap(r => {
+    const out = [], sep = travelBilled(r.e), prog = sep ? r.net : r.due;
+    if (isRaised(r) && !FIN_CLOSED.includes(r.stage) && prog - r.got > 0) { const past = r.inv ? overdueDays(r.e) : 0; out.push({ open: prog - r.got, past }); }
+    const t = sep ? travelDue(r.e) : 0;
+    if (t > 0) out.push({ open: t, past: travelOverdueDays(r.e) });
+    return out;
+  });
+  const raise = rows.filter(r => r.amount > 0 && !isRaised(r) && !FIN_CLOSED.includes(r.stage)
+    && (['Invoice Overdue', 'To Invoice'].includes(r.stage) || /^delivered$/i.test(cleanTxt(r.e.status)) || (r.end && r.end < today)));
+  const sum = (l, f) => l.reduce((t, x) => t + f(x), 0);
+  const yet = dues.filter(d => !(d.past > 0)), od = dues.filter(d => d.past > 0);
+  const collected = sum(paid, r => r.got), invoiced = sum(invRows, r => r.net);
+  return {
+    revenue: sum(revRows, r => r.price), gst: sum(revRows, r => gstOf(r.e)), travel: sum(revRows, r => num(r.e.travelExpenses)), tds: sum(revRows, r => tdsOf(r.e)), n: revRows.length,
+    raise: sum(raise, r => r.amount), raiseN: raise.length, raiseLate: raise.filter(r => r.stage === 'Invoice Overdue').length,
+    raiseProg: new Set(raise.map(r => `${cleanTxt(r.e.company).toLowerCase()}|${cleanTxt(r.e.topic).toLowerCase()}`)).size,
+    yet: sum(yet, d => d.open), yetN: yet.length, od: sum(od, d => d.open), odN: od.length, oldest: od.reduce((m, d) => Math.max(m, d.past), 0),
+    collected, paidN: paid.length, invoiced, collPct: invoiced > 0 ? Math.round((collected / invoiced) * 100) : null,
+  };
 }
 function TravelTag({ e, big }) {
   const bal = travelDue(e);
@@ -620,34 +668,18 @@ export default function FinanceTracker({ onRefreshed }) {
   const pendSub = v => overdueF && <div className="kpi-sub" style={{ color: 'var(--red)', fontWeight: 600 }}>Pending {inr(v)}</div>;
 
   // Amount cards (5 Nov 2026) — follow the FY / month filter and the search, like the counts
+  const [revBasis, setRevBasis] = useState(readFinBasis);   // same "Revenue by" choice as the Finance Dashboard
+  const pickBasis = b => { setRevBasis(b); writeFinBasis(b); };
   const fin = useMemo(() => {
-    const live = kpiRows.filter(r => r._stage !== 'Cancelled');
-    const revenue = live.reduce((t, r) => t + num(r.price), 0);
-    const gst = live.reduce((t, r) => t + gstOf(r), 0), travel = live.reduce((t, r) => t + num(r.travelExpenses), 0);
-    const raise = kpiRows.filter(r => ['To Invoice', 'Invoice Overdue'].includes(r._stage));
-    const billed = kpiRows.filter(r => ['Awaiting Payment', 'Payment Overdue', 'Partly Received'].includes(r._stage))
-      .map(r => ({ r, bal: Math.max(0, expectedOf(r) - collectedOf(r).gross), od: overdueDays(r) }));
-    const yet = billed.filter(b => !(b.od > 0)), od = billed.filter(b => b.od > 0);
-    // Collected: Amount Received with a Received Date in the period (no Received Date → Invoice date)
     const q = search.toLowerCase();
-    const inP = d => !!d && (fyF === 'all' || fyOf(d) === +fyF) && (monthF === 'all' || d.startsWith(monthF));
-    const paid = data.filter(e => {
-      if (q && ![e.company, e.topic, e.egId, e.sno, e.consultant1, e.invoiceNo].some(v => String(v ?? '').toLowerCase().includes(q))) return false;
-      if (!(collectedOf(e).gross > 0)) return false;
-      const d = toIso(e.receivedDate) || toIso(e.invoice);
-      return fyF === 'all' && monthF === 'all' ? true : inP(d);
-    });
-    const collected = paid.reduce((t, e) => t + collectedOf(e).gross, 0);
-    const billedTotal = kpiRows.filter(r => toIso(r.invoice) && r._stage !== 'Cancelled').reduce((t, r) => t + invoiceTotal(r), 0);
-    const sum = l => l.reduce((t, b) => t + b.bal, 0);
+    const base = !q ? shared : shared.filter(e => [e.company, e.topic, e.egId, e.sno, e.consultant1, e.invoiceNo].some(v => String(v ?? '').toLowerCase().includes(q)));
+    const range = monthF !== 'all' ? { from: `${monthF}-01`, to: `${monthF}-31` }
+      : fyF !== 'all' ? { from: `${fyF}-04-01`, to: `${+fyF + 1}-03-31` } : { from: '0000-01-01', to: '9999-12-31' };
     return {
-      revenue, gst, travel, n: live.length,
-      raise: raise.reduce((t, r) => t + invoiceTotal(r), 0), raiseN: raise.length, raiseLate: raise.filter(r => r._stage === 'Invoice Overdue').length,
-      yet: sum(yet), yetN: yet.length, od: sum(od), odN: od.length, oldest: od.reduce((m, b) => Math.max(m, b.od), 0),
-      collected, paidN: paid.length, collPct: billedTotal > 0 ? Math.round((collected / billedTotal) * 100) : null,
+      ...dashboardKpis(base, range, revBasis),
       nb: kpiRows.filter(r => ['Pro Bono', 'Not Applicable'].includes(r._stage)).reduce((t, r) => t + num(r.price), 0),
     };
-  }, [kpiRows, data, search, fyF, monthF]);
+  }, [shared, kpiRows, search, fyF, monthF, revBasis]);
   const L = v => { const n = Number(v) || 0; return n >= 1e7 ? `₹${(n / 1e7).toFixed(2)} Cr` : n >= 1e5 ? `₹${(n / 1e5).toFixed(2)} L` : `₹${Math.round(n).toLocaleString('en-IN')}`; };
   const share = v => (fin.revenue > 0 ? Math.max(0, (v / fin.revenue) * 100) : 0);
 
@@ -763,31 +795,32 @@ export default function FinanceTracker({ onRefreshed }) {
 
       {/* KPIs — amounts first, counts as tag lines; click a card to filter the list */}
       <div className="fin-kpis">
-        <div className={`fin-kpi hero${stageF === 'All' ? ' on' : ''}`} onClick={() => tapCard('All')} title="Price (INR) of the engagements in this period, cancelled excluded">
+        <div className={`fin-kpi hero${stageF === 'All' ? ' on' : ''}`} onClick={() => tapCard('All')} title={revBasis === 'invoice' ? 'Price (INR, excl. GST & travel) of rows whose Invoice date is in this period, cancelled excluded' : 'Price (INR, excl. GST & travel) of sessions starting in this period — cancelled / lost / dropped / postponed / on hold excluded'}>
           <div className="fk-lb">Total Revenue · {rangeLabel}</div>
           <div className="fk-vl">{L(fin.revenue)}</div>
           <div className="fk-sb">{fin.n} engagement{fin.n === 1 ? '' : 's'} · + GST {L(fin.gst)} · Travel {L(fin.travel)}</div>
+          <div className="fk-basis" onClick={ev => ev.stopPropagation()}>By <button type="button" className={revBasis === 'delivery' ? 'on' : ''} onClick={() => pickBasis('delivery')}>Delivery</button><button type="button" className={revBasis === 'invoice' ? 'on' : ''} onClick={() => pickBasis('invoice')}>Invoice</button> month</div>
           {(kpiRows.length !== rows.length || filtered.length !== kpiRows.length) && <div className="fk-sb dim">{filtered.length !== kpiRows.length ? `${filtered.length} in list · ` : ''}of {rows.length} in period</div>}
         </div>
-        <div className={`fin-kpi gold${['All To Invoice', 'Invoice Overdue', 'To Invoice'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard(overdueF ? 'Invoice Overdue' : 'All To Invoice')} title="Price + GST + travel of sessions ended / delivered with no invoice raised">
+        <div className={`fin-kpi gold${['All To Invoice', 'Invoice Overdue', 'To Invoice'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard(overdueF ? 'Invoice Overdue' : 'All To Invoice')} title="All years: Price + GST − TDS + travel of sessions ended / delivered with no invoice raised (same as the Finance Dashboard)">
           <div className="fk-lb">To be Raised</div>
           <div className="fk-vl">{L(fin.raise)}</div>
-          <div className="fk-sb">{fin.raiseN} session{fin.raiseN === 1 ? '' : 's'}{fin.raiseLate > 0 && <b className="fk-red"> · {fin.raiseLate} past invoice date</b>}</div>
+          <div className="fk-sb">{fin.raiseProg} program{fin.raiseProg === 1 ? '' : 's'} · {fin.raiseN} session{fin.raiseN === 1 ? '' : 's'}{fin.raiseLate > 0 && <b className="fk-red"> · {fin.raiseLate} past invoice date</b>}</div>
         </div>
-        <div className={`fin-kpi blue${['All Awaiting Payment', 'Awaiting Payment', 'Partly Received'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard('All Awaiting Payment')} title="Unpaid balance (Price + GST − TDS + travel − received) on invoices within the 30-day credit period">
+        <div className={`fin-kpi blue${['All Awaiting Payment', 'Awaiting Payment', 'Partly Received'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard('All Awaiting Payment')} title="All years: unpaid balance (Price + GST + travel − received; TDS not deducted) on invoices within the 30-day credit period. Travel on its own invoice counts as a separate due.">
           <div className="fk-lb">Billed · Yet to Receive</div>
           <div className="fk-vl">{L(fin.yet)}</div>
-          <div className="fk-sb">{fin.yetN} invoice{fin.yetN === 1 ? '' : 's'} within 30 days</div>
+          <div className="fk-sb">{fin.yetN} invoice{fin.yetN === 1 ? '' : 's'} within 30 days · all years</div>
         </div>
-        <div className={`fin-kpi coral${['Overdue (30+ days)', 'Payment Overdue'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard('Overdue (30+ days)')} title="Unpaid balance where invoice date + 30 days has passed">
+        <div className={`fin-kpi coral${['Overdue (30+ days)', 'Payment Overdue'].includes(stageF) ? ' on' : ''}`} onClick={() => tapCard('Overdue (30+ days)')} title="All years: unpaid balance (TDS not deducted) where invoice date + 30 days has passed">
           <div className="fk-lb">Billed · Overdue</div>
           <div className="fk-vl">{L(fin.od)}</div>
           <div className="fk-sb">{fin.odN} invoice{fin.odN === 1 ? '' : 's'}{fin.oldest > 0 && <b className="fk-red"> · oldest {fin.oldest}d late</b>}</div>
         </div>
-        <div className={`fin-kpi green${stageF === 'Received' ? ' on' : ''}`} onClick={() => tapCard('Received')} title="Amount Received with a Received Date in this period (Invoice date when no Received Date)">
+        <div className={`fin-kpi green${stageF === 'Received' ? ' on' : ''}`} onClick={() => tapCard('Received')} title="Amount Received (cancelled excluded) with a Received Date in this period (Invoice date when no Received Date) · % = of Price + GST invoiced in this period">
           <div className="fk-lb">Collected · {rangeLabel}</div>
           <div className="fk-vl">{L(fin.collected)}</div>
-          <div className="fk-sb">{fin.paidN} payment{fin.paidN === 1 ? '' : 's'}{fin.collPct != null && ` · ${fin.collPct}% of billed`}</div>
+          <div className="fk-sb">{fin.paidN} payment{fin.paidN === 1 ? '' : 's'}{fin.collPct != null && ` · ${fin.collPct}% of ${L(fin.invoiced)} invoiced`}</div>
         </div>
         <div className={`fin-kpi grey sm${stageF === 'Not Billed' ? ' on' : ''}`} onClick={() => tapCard('Not Billed')} title="Payment Status NA or Pro Bono — not billed">
           <div className="fk-lb">Not Billed</div>

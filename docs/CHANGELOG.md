@@ -493,3 +493,12 @@
 - Status pill shows the raw EC status text (e.g. "Postponed", "Tentative"); past-date rows add "· date passed".
 - Files: src/components/Client360.jsx (new EcTab), src/styles/client360.css.
 - Manual setup: none.
+
+## 2026-11-27 — Finance Tracker KPI cards now use the Finance Dashboard formulas
+- New `dashboardKpis()` in src/pages/FinanceTracker.jsx mirrors FinanceLiveDashboard.jsx (pk / dues / toInvoice) — change both together.
+- Total Revenue: Price by revenue date in the period; "By Delivery / Invoice month" toggle on the card, shared with the Dashboard toggle (localStorage ercrm.dash.finance.basis.v1).
+- To be Raised: all years, Price + GST − TDS + travel; shows programs · sessions.
+- Yet to Receive / Overdue: all years, TDS not deducted, travel on its own invoice = separate due.
+- Collected: cancelled excluded; % = of Price + GST invoiced in the period.
+- Unchanged: list filters (FY/month by start date), card click filters, Not Billed card.
+- Files: src/pages/FinanceTracker.jsx, src/styles/index.css. Manual setup: none.
